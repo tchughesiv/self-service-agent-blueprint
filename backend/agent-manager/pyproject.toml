@@ -1,0 +1,17 @@
+[project]
+name = "agent-manager"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Fabio Massimo Ercoli", email = "fabiomassimo.ercoli@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = []
+
+[project.scripts]
+agent-manager = "agent_manager:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

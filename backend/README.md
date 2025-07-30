@@ -25,3 +25,9 @@ uv run uvicorn main:app --port 8000
 On Cursor / VSCode go to the `Python` extension.
 
 Select the `Venv` environment `.venv` under the `backend`.  
+
+## Run unit tests
+
+```shell
+uv run pytest
+```
