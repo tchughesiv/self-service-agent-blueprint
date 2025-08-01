@@ -1,4 +1,3 @@
-llama_stack_url: http://localhost:8321
 timeout: 120.0
 agents:
   - name: "agent-1"

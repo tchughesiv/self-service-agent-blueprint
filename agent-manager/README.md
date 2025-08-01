@@ -27,7 +27,16 @@ is opened as root project.
 
 To run it locally see [local_llamastack_server](local_llamastack_server/README.md)
 
-2. Run the play app
+2. Set `LLAMASTACK_SERVICE_HOST` environment variable:
+
+For instance:
+```shell
+export LLAMASTACK_SERVICE_HOST=http://localhost:8321
+```
+
+For convenience I set it on my `~/.bashrc` on my Fedora machine.
+
+3. Run the play app
 
 ```shell
 uv run script/play.py

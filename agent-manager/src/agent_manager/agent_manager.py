@@ -1,4 +1,5 @@
 import logging
+import os
 
 from llama_stack_client import LlamaStackClient
 from llama_stack_client.types.shared_params.agent_config import AgentConfig
@@ -14,7 +15,7 @@ class AgentManager:
         if self._client is None:
             logging.debug("Connecting to LlamaStack")
             self._client = LlamaStackClient(
-                base_url=self._config['llama_stack_url'],
+                base_url=os.environ["LLAMASTACK_SERVICE_HOST"],
                 timeout=self._config['timeout'],
             )
         else:

@@ -9,7 +9,6 @@ def test_subject():
 def test_agent_manager(test_subject: AgentManager):
     config = test_subject.config()
     assert config is not None
-    assert config['llama_stack_url'] =='http://localhost:8321'
     assert config['timeout'] == 120.0
     assert len(config['agents']) == 1
     assert config['agents'][0]['name'] == "agent-1"
