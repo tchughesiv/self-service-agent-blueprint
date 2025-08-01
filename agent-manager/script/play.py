@@ -1,8 +1,10 @@
 from agent_manager.agent_manager import AgentManager
-from agent_manager.util import load_yaml
+from agent_manager.util import load_config_from_path
+from pathlib import Path
 
 def main():
-    agent_manager = AgentManager(load_yaml("local_testing/config/agents/config.yaml"))
+    config = load_config_from_path(Path("local_testing/config"))
+    agent_manager = AgentManager(config)
     print('config:', agent_manager.config())
     print('is_connected:', agent_manager.is_connected())
 

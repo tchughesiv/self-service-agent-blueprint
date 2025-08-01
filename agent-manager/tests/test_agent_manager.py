@@ -1,10 +1,12 @@
 import pytest
 from agent_manager.agent_manager import AgentManager
-from agent_manager.util import load_yaml
+from agent_manager.util import load_config_from_path
+from pathlib import Path
 
 @pytest.fixture
 def test_subject():
-    return AgentManager(load_yaml("local_testing/config/agents/config.yaml"))
+    config = load_config_from_path(Path("local_testing/config"))
+    return AgentManager(config)
 
 def test_agent_manager(test_subject: AgentManager):
     config = test_subject.config()
