@@ -4,7 +4,7 @@ from agent_manager.util import load_yaml
 
 @pytest.fixture
 def test_subject():
-    return AgentManager(load_yaml("config/agents/config.yaml"))
+    return AgentManager(load_yaml("local_testing/config/agents/config.yaml"))
 
 def test_agent_manager(test_subject: AgentManager):
     config = test_subject.config()

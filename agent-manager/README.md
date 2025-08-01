@@ -25,7 +25,7 @@ is opened as root project.
 
 1. Run Llama Stack
 
-To run it locally see [local_llamastack_server](local_llamastack_server/README.md)
+To run it locally see [local_testing](local_testing/README.md)
 
 2. Set `LLAMASTACK_SERVICE_HOST` environment variable:
 
