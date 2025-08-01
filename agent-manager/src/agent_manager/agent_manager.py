@@ -3,7 +3,6 @@ import os
 
 from llama_stack_client import LlamaStackClient
 from llama_stack_client.types.shared_params.agent_config import AgentConfig
-from agent_manager.agent import Agent
 
 class AgentManager:
     def __init__(self, config):
@@ -24,12 +23,9 @@ class AgentManager:
     def create_agents(self):
         if self._client is None:
             self.connect_to_llama_stack()
-        if self._agents == []:
-            logging.debug("Creating agents")
-            for agent in self._config["agents"]:
-                self.create_agent(agent)
-        else:
-            logging.debug("Agents already created")
+        logging.debug("Creating agents")
+        for agent in self._config["agents"]:
+            self.create_agent(agent)
 
     def create_agent(self, agent: dict):
         agent_config:AgentConfig={
@@ -43,8 +39,15 @@ class AgentManager:
         agentic_system_create_response = self._client.agents.create(
             agent_config=agent_config
         )
-        agent_id = agentic_system_create_response.agent_id
-        self._agents.append(Agent(agent_id, agent['name'], agent['description'], agent_config))
+        return agentic_system_create_response.agent_id
+    
+    def delete_agents(self):
+        if self._client is None:
+            self.connect_to_llama_stack()
+        logging.debug("Deleting agents")
+        agents = self.agents().data
+        for agent in agents:
+            self._client.agents.delete(agent['agent_id'])
 
     def config(self):
         return self._config
@@ -53,6 +56,8 @@ class AgentManager:
         return self._client is not None
 
     def agents(self):
-        return self._agents
+        if self._client is None:
+            self.connect_to_llama_stack()
+        return self._client.agents.list()
 
     
