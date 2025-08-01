@@ -1,7 +1,8 @@
 from agent_manager.agent_manager import AgentManager
+from agent_manager.util import load_yaml
 
 def main():
-    agent_manager = AgentManager()
+    agent_manager = AgentManager(load_yaml("config/agents/config.yaml"))
     print('config:', agent_manager.config())
     print('is_connected:', agent_manager.is_connected())
     print('agents:', agent_manager.agents())

@@ -1,13 +1,12 @@
 import logging
-from pathlib import Path
+
 from llama_stack_client import LlamaStackClient
 from llama_stack_client.types.shared_params.agent_config import AgentConfig
-from agent_manager.util import load_yaml
 from agent_manager.agent import Agent
 
 class AgentManager:
-    def __init__(self):
-        self._config = load_yaml(Path(__file__).parent / "config.yaml")
+    def __init__(self, config):
+        self._config = config
         self._client = None
         self._agents = []
 

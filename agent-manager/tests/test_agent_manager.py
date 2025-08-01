@@ -1,9 +1,10 @@
 import pytest
 from agent_manager.agent_manager import AgentManager
+from agent_manager.util import load_yaml
 
 @pytest.fixture
 def test_subject():
-    return AgentManager()
+    return AgentManager(load_yaml("config/agents/config.yaml"))
 
 def test_agent_manager(test_subject: AgentManager):
     config = test_subject.config()
