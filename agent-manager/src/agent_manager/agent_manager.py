@@ -4,6 +4,22 @@ import os
 from llama_stack_client import LlamaStackClient
 from llama_stack_client.types.shared_params.agent_config import AgentConfig
 
+
+def toolgroups(agent):
+    toolgroups = []
+    if 'mcp_servers' in agent:
+        for mcp_server in agent['mcp_servers']:
+            toolgroups.append('mcp::' + mcp_server)
+
+    if 'knowledge_bases' in agent:
+        toolgroups.append({
+            "name": "builtin::rag/knowledge_search",
+            "args": {"vector_db_ids": agent['knowledge_bases']},
+        })
+    
+    return toolgroups
+
+
 class AgentManager:
     def __init__(self, config):
         self._config = config
@@ -35,6 +51,7 @@ class AgentManager:
             "input_shields": agent['input_shields'],
             "output_shields": agent['output_shields'],
             "max_infer_iters": agent['max_infer_iters'],
+            "toolgroups": toolgroups(agent),
         }
         agentic_system_create_response = self._client.agents.create(
             agent_config=agent_config
