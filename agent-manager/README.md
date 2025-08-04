@@ -39,11 +39,21 @@ For convenience I set it on my `~/.bashrc` on my Fedora machine.
 3. Run the play app
 
 ```shell
-uv run script/play.py
+uv run script/register_agents.py
 ```
 
 ## Build the container
 
 ```shell
-podman build -t backend-app .
+podman build -t agent-manager .
+```
+
+Get the llamastack container podman network bridge IP {{LLAMA_STACK_IP}}: 
+
+```shell
+podman inspect llamastack | grep -i ipaddress
+```
+
+```shell
+podman run --rm -e LLAMASTACK_SERVICE_HOST="http://10.88.0.4:8321" --network bridge agent-manager
 ```

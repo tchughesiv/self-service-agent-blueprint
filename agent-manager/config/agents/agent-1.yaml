@@ -6,8 +6,5 @@ tool_choice: "auto"
 input_shields: []
 output_shields: []
 max_infer_iters: 10
-mcp_servers:
-  - "asset_database"
-  - "servicenow"
-knowledge_bases:
-  - "laptop-refresh-knowledge-base"
+mcp_servers: []
+knowledge_bases: []

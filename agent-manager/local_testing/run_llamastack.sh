@@ -7,5 +7,5 @@ podman run --platform linux/amd64 -it \
     --env OLLAMA_URL=http://host.containers.internal:11434 \
     --replace \
     --name llamastack \
-    llamastack/distribution-ollama:0.2.9 \
-    --port 8321
+    --network bridge \
+    llamastack/distribution-ollama:0.2.9

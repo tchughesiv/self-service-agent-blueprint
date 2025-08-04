@@ -3,7 +3,7 @@ name = "agent-manager"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 dependencies = [
     "llama-stack-client>=0.2.16",
     "logging>=0.4.9.6",

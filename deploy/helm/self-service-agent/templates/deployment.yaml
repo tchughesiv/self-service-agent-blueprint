@@ -48,6 +48,8 @@ spec:
                 sleep 10
               done
               echo "$url is ready."
+        - name: register-agents
+          image: "{{ .Values.image.repository }}:agent-manager"
       containers:
         - name: {{ .Chart.Name }}
           {{- with .Values.securityContext }}

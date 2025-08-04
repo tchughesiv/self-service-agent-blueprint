@@ -11,3 +11,7 @@ COPY . /app
 # Install the application dependencies.
 WORKDIR /app
 RUN uv sync --frozen --no-cache --all-packages
+
+USER 1001
+
+CMD ["uv", "run", "script/register_agents.py"]
