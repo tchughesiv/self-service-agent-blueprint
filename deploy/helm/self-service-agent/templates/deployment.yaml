@@ -49,7 +49,10 @@ spec:
               done
               echo "$url is ready."
         - name: register-agents
-          image: "{{ .Values.image.repository }}:agent-manager"
+          image: "{{ .Values.image.agentManager }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          env:
+            - name: LLAMASTACK_SERVICE_HOST
+              value: http://llamastack.{{ .Release.Namespace }}.svc.cluster.local:8321
       containers:
         - name: {{ .Chart.Name }}
           {{- with .Values.securityContext }}

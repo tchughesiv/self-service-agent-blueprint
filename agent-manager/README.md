@@ -34,7 +34,7 @@ For instance:
 export LLAMASTACK_SERVICE_HOST=http://localhost:8321
 ```
 
-For convenience I set it on my `~/.bashrc` on my Fedora machine.
+For convenience, I set it on my `~/.bashrc` on my Fedora machine.
 
 3. Run the play app
 
@@ -55,5 +55,5 @@ podman inspect llamastack | grep -i ipaddress
 ```
 
 ```shell
-podman run --rm -e LLAMASTACK_SERVICE_HOST="http://10.88.0.4:8321" --network bridge agent-manager
+podman run --rm -e LLAMASTACK_SERVICE_HOST="http://{{LLAMA_STACK_IP}}:8321" --network bridge agent-manager
 ```
