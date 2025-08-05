@@ -2,14 +2,15 @@
 
 import logging
 import os
-from pathlib import Path
+import httpx
+import json
 from llama_stack_client import LlamaStackClient
 
 # remove logging we otherwise get by default
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 # Configuration
-model_id = os.environ["LLAMA_STACK_MODELS"].split(',', 1)[0]
+model_id = os.environ["LLAMA_STACK_MODELS"].split(",", 1)[0]
 
 # Initialize client
 llama_stack_host = os.environ["LLAMASTACK_SERVICE_HOST"]
@@ -18,7 +19,17 @@ client = LlamaStackClient(
     timeout=120.0,
 )
 
+
 def main():
+    ########################
+    # Print out the already registered agents
+    response = client.get("v1/agents", cast_to=httpx.Response)
+
+    json_string = response.content.decode("utf-8")
+    data = json.loads(json_string)
+    for agent in data["data"]:
+        print(agent["agent_id"])
+
     ########################
     # Create the agent
     system_prompt = open("prompt.txt").read()

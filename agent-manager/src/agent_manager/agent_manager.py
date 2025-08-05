@@ -29,8 +29,9 @@ class AgentManager:
     def connect_to_llama_stack(self):
         if self._client is None:
             logging.debug("Connecting to LlamaStack")
+            llama_stack_host = os.environ["LLAMASTACK_SERVICE_HOST"]
             self._client = LlamaStackClient(
-                base_url=os.environ["LLAMASTACK_SERVICE_HOST"],
+                base_url=f"http://{llama_stack_host}:8321",
                 timeout=self._config['timeout'],
             )
         else:
@@ -77,4 +78,4 @@ class AgentManager:
             self.connect_to_llama_stack()
         return self._client.agents.list()
 
-    
+
