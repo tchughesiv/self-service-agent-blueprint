@@ -10,8 +10,8 @@ session management, and integrated tools.
 import logging
 import os
 import uuid
-from pathlib import Path
 from llama_stack_client import LlamaStackClient
+from agent_manager.agent_manager import AgentManager
 
 
 # remove logging we otherwise get by default
@@ -23,41 +23,6 @@ client = LlamaStackClient(
     base_url=f"http://{llama_stack_host}:8321",
     timeout=120.0,
 )
-
-# Configuration
-model_id = os.environ["LLAMA_STACK_MODELS"].split(",", 1)[0]
-
-########################
-# for now create agent, will not be needed later after
-# agent registration is done as part of the initialization
-# Once that is in place we'll need to look up the agent_id
-prompt_file = Path(__file__).resolve().parent / "prompt.txt"
-system_prompt = prompt_file.read_text()
-
-agentic_system_create_response = client.agents.create(
-    agent_config={
-        "model": model_id,
-        "instructions": system_prompt,
-        "tool_choice": "auto",
-        """
-        "toolgroups": [
-            {
-                "name": "builtin::rag/knowledge_search",
-                "args": {"vector_db_ids": ["laptop-refresh-knowledge-base"]},
-            },
-            "mcp::asset_database",
-            "mcp::servicenow",
-        ],
-        """
-        "input_shields": [],
-        "output_shields": [],
-        "max_infer_iters": 10,
-    }
-)
-
-agent_id = agentic_system_create_response.agent_id
-##########################
-
 
 """
 Helper to handle streaming response
@@ -102,6 +67,10 @@ def main():
     Sessions will need to be managed in co-ordination with channel the user is
     interacting with. For now just create a session when the chat starts.
     """
+    agent_manager = AgentManager({"timeout": 120})
+    agents = agent_manager.agents()
+    print(agents)
+    agent_id = agents["routing-agent"]
     session_create_response = client.agents.session.create(
         agent_id, session_name=str(uuid.uuid4())
     )
@@ -111,7 +80,10 @@ def main():
     print("CLI Chat - Type 'quit' to exit")
 
     kickoff_messages = [
-        {"role": "user", "content": "help me refresh my laptop my employee id is 1234"},
+        {
+            "role": "user",
+            "content": "please introduce yourself and tell me how you can help",
+        },
     ]
     agent_response = send_message_to_agent(agent_id, session_id, kickoff_messages)
     print(f"agent: {agent_response}")
@@ -125,6 +97,16 @@ def main():
                 messages = []
                 messages.append({"role": "user", "content": message})
                 agent_response = send_message_to_agent(agent_id, session_id, messages)
+                # check if we have figured out which agent to route the message to
+                if agent_response.strip() in agents:
+                    agent_id = agents[agent_response]
+                    session_create_response = client.agents.session.create(
+                        agent_id, session_name=str(uuid.uuid4())
+                    )
+                    session_id = session_create_response.session_id
+                    agent_response = send_message_to_agent(
+                        agent_id, session_id, messages
+                    )
                 print(f"agent: {agent_response}")
         except KeyboardInterrupt:
             break
