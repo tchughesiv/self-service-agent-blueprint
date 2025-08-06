@@ -32,7 +32,7 @@ model_id = os.environ["LLAMA_STACK_MODELS"].split(",", 1)[0]
 # agent registration is done as part of the initialization
 # Once that is in place we'll need to look up the agent_id
 prompt_file = Path(__file__).resolve().parent / "prompt.txt"
-system_prompt = open(prompt_file).read()
+system_prompt = prompt_file.read_text()
 
 agentic_system_create_response = client.agents.create(
     agent_config={
