@@ -1,0 +1,229 @@
+Corporate Laptop Offering List
+
+The list includes options for employees in **North America (NA), EMEA, APAC, and LATAM**, each with slight regional variations in availability, specs, or pricing. All options are selected to support **macOS**, **Windows**, or **Red Hat Enterprise Linux (RHEL)** as specified.
+
+---
+
+**NORTH AMERICA (NA)**
+
+Manufacturer: Apple
+Model: MacBook Air (M3)
+Cost: \$1,199
+Operating System: macOS Sonoma
+Display Sizes: 13.6"
+Display Resolutions: 2560x1664
+Minimum Memory: 8 GB
+Minimum Storage: 256 GB SSD
+Weight: 2.7 lbs
+Ports: 2x Thunderbolt / USB 4, MagSafe 3, 3.5mm audio jack
+Minimum Processor: Apple M3
+Dimensions: 11.97 x 8.46 x 0.44 in
+
+Manufacturer: Apple
+Model: MacBook Pro 14" (M3 Pro)
+Cost: \$1,999
+Operating System: macOS Sonoma
+Display Sizes: 14.2"
+Display Resolutions: 3024x1964
+Minimum Memory: 18 GB
+Minimum Storage: 512 GB SSD
+Weight: 3.5 lbs
+Ports: 3x Thunderbolt 4, HDMI, SDXC card slot, MagSafe 3, 3.5mm audio jack
+Minimum Processor: Apple M3 Pro
+Dimensions: 12.31 x 8.71 x 0.61 in
+
+Manufacturer: Lenovo
+Model: ThinkPad T14 Gen 5 (Intel)
+Cost: \$1,450
+Operating System: Windows 11 Pro
+Display Sizes: 14"
+Display Resolutions: 1920x1200
+Minimum Memory: 16 GB
+Minimum Storage: 512 GB SSD
+Weight: 3.2 lbs
+Ports: 2x USB-A, 2x USB-C (1x Thunderbolt 4), HDMI 2.1, RJ45 Ethernet, 3.5mm audio jack
+Minimum Processor: Intel Core i5-1335U
+Dimensions: 12.44 x 8.74 x 0.70 in
+
+Manufacturer: Lenovo
+Model: ThinkPad P14s Gen 5 (AMD)
+Cost: \$1,650
+Operating System: Red Hat Enterprise Linux 9
+Display Sizes: 14"
+Display Resolutions: 2240x1400
+Minimum Memory: 16 GB
+Minimum Storage: 512 GB SSD
+Weight: 3.2 lbs
+Ports: 2x USB-A, 2x USB-C, HDMI 2.1, RJ45 Ethernet, 3.5mm audio jack
+Minimum Processor: AMD Ryzen 7 Pro 7840U
+Dimensions: 12.53 x 8.93 x 0.70 in
+
+---
+
+**EMEA (Europe, Middle East, Africa)**
+
+Manufacturer: Apple
+Model: MacBook Air (M2)
+Cost: €1,349
+Operating System: macOS Sonoma
+Display Sizes: 13.6"
+Display Resolutions: 2560x1664
+Minimum Memory: 8 GB
+Minimum Storage: 256 GB SSD
+Weight: 2.7 lbs
+Ports: 2x Thunderbolt / USB 4, MagSafe 3, 3.5mm audio jack
+Minimum Processor: Apple M2
+Dimensions: 11.97 x 8.46 x 0.44 in
+
+Manufacturer: Apple
+Model: MacBook Pro 16" (M3 Max)
+Cost: €3,299
+Operating System: macOS Sonoma
+Display Sizes: 16.2"
+Display Resolutions: 3456x2234
+Minimum Memory: 36 GB
+Minimum Storage: 1 TB SSD
+Weight: 4.8 lbs
+Ports: 3x Thunderbolt 4, HDMI, SDXC card slot, MagSafe 3, 3.5mm audio jack
+Minimum Processor: Apple M3 Max
+Dimensions: 14.01 x 9.77 x 0.66 in
+
+Manufacturer: Lenovo
+Model: ThinkPad T16 Gen 2 (AMD)
+Cost: €1,600
+Operating System: Windows 11 Pro
+Display Sizes: 16"
+Display Resolutions: 1920x1200
+Minimum Memory: 16 GB
+Minimum Storage: 512 GB SSD
+Weight: 3.9 lbs
+Ports: 2x USB-A, 2x USB-C, HDMI 2.1, RJ45 Ethernet, 3.5mm audio jack
+Minimum Processor: AMD Ryzen 7 Pro 7840U
+Dimensions: 14.25 x 10.04 x 0.84 in
+
+Manufacturer: Lenovo
+Model: ThinkPad P16s Gen 2 (Intel)
+Cost: €1,850
+Operating System: Red Hat Enterprise Linux 9
+Display Sizes: 16"
+Display Resolutions: 2560x1600
+Minimum Memory: 32 GB
+Minimum Storage: 1 TB SSD
+Weight: 4.2 lbs
+Ports: 2x USB-A, 2x USB-C, HDMI 2.1, RJ45 Ethernet, SD card reader, 3.5mm audio jack
+Minimum Processor: Intel Core i7-1370P
+Dimensions: 14.25 x 10.05 x 0.83 in
+
+---
+
+**APAC (Asia Pacific)**
+
+Manufacturer: Apple
+Model: MacBook Air (M2, 15")
+Cost: \$1,399 AUD
+Operating System: macOS Sonoma
+Display Sizes: 15.3"
+Display Resolutions: 2880x1864
+Minimum Memory: 8 GB
+Minimum Storage: 256 GB SSD
+Weight: 3.3 lbs
+Ports: 2x Thunderbolt / USB 4, MagSafe 3, 3.5mm audio jack
+Minimum Processor: Apple M2
+Dimensions: 13.4 x 9.35 x 0.45 in
+
+Manufacturer: Apple
+Model: MacBook Pro 14" (M3)
+Cost: \$2,399 AUD
+Operating System: macOS Sonoma
+Display Sizes: 14.2"
+Display Resolutions: 3024x1964
+Minimum Memory: 16 GB
+Minimum Storage: 512 GB SSD
+Weight: 3.5 lbs
+Ports: 3x Thunderbolt 4, HDMI, SDXC card slot, MagSafe 3, 3.5mm audio jack
+Minimum Processor: Apple M3
+Dimensions: 12.31 x 8.71 x 0.61 in
+
+Manufacturer: Lenovo
+Model: ThinkPad T14s Gen 4 (Intel)
+Cost: \$2,000 AUD
+Operating System: Windows 11 Pro
+Display Sizes: 14"
+Display Resolutions: 1920x1200
+Minimum Memory: 16 GB
+Minimum Storage: 512 GB SSD
+Weight: 2.7 lbs
+Ports: 2x USB-A, 2x USB-C, HDMI 2.1, RJ45 Ethernet, 3.5mm audio jack
+Minimum Processor: Intel Core i7-1365U
+Dimensions: 12.44 x 8.74 x 0.63 in
+
+Manufacturer: Lenovo
+Model: ThinkPad P14s Gen 5 (Intel)
+Cost: \$2,300 AUD
+Operating System: Red Hat Enterprise Linux 9
+Display Sizes: 14"
+Display Resolutions: 2240x1400
+Minimum Memory: 16 GB
+Minimum Storage: 512 GB SSD
+Weight: 3.2 lbs
+Ports: 2x USB-A, 2x USB-C, HDMI 2.1, RJ45 Ethernet, 3.5mm audio jack
+Minimum Processor: Intel Core i7-1355U
+Dimensions: 12.53 x 8.93 x 0.70 in
+
+---
+
+**LATAM (Latin America)**
+
+Manufacturer: Apple
+Model: MacBook Air (M2)
+Cost: \$1,299 USD
+Operating System: macOS Sonoma
+Display Sizes: 13.6"
+Display Resolutions: 2560x1664
+Minimum Memory: 8 GB
+Minimum Storage: 256 GB SSD
+Weight: 2.7 lbs
+Ports: 2x Thunderbolt / USB 4, MagSafe 3, 3.5mm audio jack
+Minimum Processor: Apple M2
+Dimensions: 11.97 x 8.46 x 0.44 in
+
+Manufacturer: Apple
+Model: MacBook Pro 14" (M3 Pro)
+Cost: \$2,099 USD
+Operating System: macOS Sonoma
+Display Sizes: 14.2"
+Display Resolutions: 3024x1964
+Minimum Memory: 18 GB
+Minimum Storage: 512 GB SSD
+Weight: 3.5 lbs
+Ports: 3x Thunderbolt 4, HDMI, SDXC card slot, MagSafe 3, 3.5mm audio jack
+Minimum Processor: Apple M3 Pro
+Dimensions: 12.31 x 8.71 x 0.61 in
+
+Manufacturer: Lenovo
+Model: ThinkPad T14 Gen 5 (Intel)
+Cost: \$1,400 USD
+Operating System: Windows 11 Pro
+Display Sizes: 14"
+Display Resolutions: 1920x1200
+Minimum Memory: 16 GB
+Minimum Storage: 512 GB SSD
+Weight: 3.2 lbs
+Ports: 2x USB-A, 2x USB-C, HDMI 2.1, RJ45 Ethernet, 3.5mm audio jack
+Minimum Processor: Intel Core i5-1335U
+Dimensions: 12.44 x 8.74 x 0.70 in
+
+Manufacturer: Lenovo
+Model: ThinkPad P16 Gen 2 (Intel)
+Cost: \$2,800 USD
+Operating System: Red Hat Enterprise Linux 9
+Display Sizes: 16"
+Display Resolutions: 2560x1600
+Minimum Memory: 32 GB
+Minimum Storage: 1 TB SSD
+Weight: 6.5 lbs
+Ports: 2x USB-C (1x Thunderbolt 4), 2x USB-A, HDMI 2.1, RJ45 Ethernet, SD card reader, 3.5mm audio jack
+Minimum Processor: Intel Core i9-13950HX
+Dimensions: 14.30 x 10.48 x 1.17 in
+
+---

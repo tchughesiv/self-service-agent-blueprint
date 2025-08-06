@@ -16,8 +16,8 @@ MAIN_CHART_NAME := self-service-agent
 TOLERATIONS_TEMPLATE=[{"key":"$(1)","effect":"NoSchedule","operator":"Exists"}]
 
 #ingestion pipeline configuration
-SOURCE ?= S3
-EMBEDDING_MODEL ?= all-MiniLM-L6-v2
+#SOURCE ?= S3
+#EMBEDDING_MODEL ?= all-MiniLM-L6-v2
 
 helm_pgvector_args = \
     --set pgvector.secret.user=$(POSTGRES_USER) \
@@ -41,9 +41,9 @@ helm_llama_stack_args = \
     $(if $(SAFETY_API_TOKEN),--set global.models.$(SAFETY).apiToken='$(SAFETY_API_TOKEN)',) \
     $(if $(LLAMA_STACK_ENV),--set-json llama-stack.secrets='$(LLAMA_STACK_ENV)',)
 
-helm_seed_admin_user_args = \
-    $(if $(ADMIN_USERNAME),--set seed.admin_user.username='$(ADMIN_USERNAME)',) \
-    $(if $(ADMIN_EMAIL),--set seed.admin_user.email='$(ADMIN_EMAIL)',)
+#helm_seed_admin_user_args = \
+#    $(if $(ADMIN_USERNAME),--set seed.admin_user.username='$(ADMIN_USERNAME)',) \
+#    $(if $(ADMIN_EMAIL),--set seed.admin_user.email='$(ADMIN_EMAIL)',)
 
 # Default target
 .PHONY: help
