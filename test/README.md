@@ -3,6 +3,12 @@
 Simple scripts that we can use to test out pieces as we build
 up the initial functionality
 
+Must be run using python in:
+
+```
+/app/.venv/bin/python
+```
+
 ## test.py
 
 Simple script that validates we can:

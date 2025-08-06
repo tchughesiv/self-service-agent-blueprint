@@ -1,5 +1,7 @@
 import logging
 import os
+import httpx
+import json
 
 from llama_stack_client import LlamaStackClient
 from llama_stack_client.types.shared_params.agent_config import AgentConfig
@@ -48,6 +50,7 @@ class AgentManager:
 
     def create_agent(self, agent: dict):
         agent_config: AgentConfig = {
+            "name": agent["name"],
             "model": agent["model"],
             "instructions": agent["instructions"],
             "tool_choice": agent["tool_choice"],
@@ -83,4 +86,23 @@ class AgentManager:
     def agents(self):
         if self._client is None:
             self.connect_to_llama_stack()
-        return self._client.agents.list()
+
+        # there does not seem to be a list method available do it manually
+        response = self._client.get("v1/agents", cast_to=httpx.Response)
+        json_string = response.content.decode("utf-8")
+        data = json.loads(json_string)
+
+        # create ditionay with agent name as key
+        agents = {}
+        for agent in data["data"]:
+            if isinstance(agent, dict):
+                agent_id = agent.get("agent_id")
+                agent_config = agent.get("agent_config", {})
+                agent_name = agent_config.get(
+                    "name", f"Agent_{agent_id[:8]}" if agent_id else "Unknown"
+                )
+
+                if agent_name and agent_id:
+                    agents[agent_name] = agent_id
+
+        return agents

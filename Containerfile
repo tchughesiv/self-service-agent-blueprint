@@ -2,13 +2,20 @@
 FROM registry.access.redhat.com/ubi9/python-312:latest
 
 USER root
-# Set working directory
+RUN dnf update -y && dnf clean all
+RUN pip3 install --no-cache-dir uv
 WORKDIR /app
 
 COPY test/ ./test
-RUN pip install --no-cache-dir -r ./test/requirements.txt
-
+COPY agent-manager/ ./agent-manager
 COPY scripts/containers/entrypoint.sh ./entrypoint.sh
+COPY pyproject.toml .
+COPY uv.lock .
+RUN uv sync --frozen --no-cache
+
+# Set up paths
+ENV PATH="/app/.venv/bin:$PATH"
+ENV PYTHONPATH="/app/agent-manager/src:$PYTHONPATH"
 
 USER 1001
 
