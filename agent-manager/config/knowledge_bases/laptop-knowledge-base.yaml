@@ -1,0 +1,9 @@
+vector_db_id: "laptop-refresh-knowledge-base"
+description: "Knowledge base containing laptop refresh policies and laptop offerings"
+embedding_model: "all-MiniLM-L6-v2"
+embedding_dimension: 384
+provider_id: "faiss"
+metadata:
+  purpose: "laptop refresh support"
+  created_by: "system"
+  domain: "IT hardware"
