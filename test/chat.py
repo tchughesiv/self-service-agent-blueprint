@@ -102,15 +102,11 @@ def main():
     Sessions will need to be managed in co-ordination with channel the user is
     interacting with. For now just create a session when the chat starts.
     """
-    active_session = False
-    session_id = ""
-    if active_session != True:
-        session_create_response = client.agents.session.create(
-            agent_id, session_name=str(uuid.uuid4())
-        )
-        session_id = session_create_response.session_id
-        print(f"Session started: {session_id}")
-        active_session = True
+    session_create_response = client.agents.session.create(
+        agent_id, session_name=str(uuid.uuid4())
+    )
+    session_id = session_create_response.session_id
+    print(f"Session started: {session_id}")
 
     print("CLI Chat - Type 'quit' to exit")
 
