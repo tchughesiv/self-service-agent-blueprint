@@ -92,7 +92,7 @@ class AgentManager:
         json_string = response.content.decode("utf-8")
         data = json.loads(json_string)
 
-        # create ditionay with agent name as key
+        # create dictionary with agent name as key
         agents = {}
         for agent in data["data"]:
             if isinstance(agent, dict):

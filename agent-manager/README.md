@@ -1,5 +1,9 @@
 # Self-service agent blueprint: Agent Manager Module
 
+This module provides two main components:
+- **AgentManager**: Manages agent creation and configuration
+- **KnowledgeBaseManager**: Manages knowledge bases (vector databases) for RAG functionality
+
 ## Project sync
 
 To alig `.venv` environment with any change applied to the project.
@@ -40,6 +44,37 @@ For convenience, I set it on my `~/.bashrc` on my Fedora machine.
 
 ```shell
 uv run script/register_agents.py
+```
+
+This will create both knowledge bases and agents. The knowledge bases are created from directories in `config/knowledge_bases/`, where each directory becomes a separate vector database with all `.txt` files in that directory inserted as documents.
+
+## Knowledge Base Management
+
+The `KnowledgeBaseManager` automatically processes knowledge base directories:
+
+1. **Directory Structure**: Each subdirectory in `config/knowledge_bases/` becomes a separate knowledge base
+2. **Document Processing**: All `.txt` files in each directory are inserted into the corresponding vector database
+3. **Vector DB Naming**: Knowledge bases are named as `{directory-name}-knowledge-base`
+
+### Example Directory Structure:
+```
+config/knowledge_bases/
+├── laptop-refresh/
+│   ├── laptop_offerings.txt
+│   └── refresh_policy.txt
+└── hr-policies/
+    ├── vacation_policy.txt
+    └── benefits_guide.txt
+```
+
+This creates two knowledge bases:
+- `laptop-refresh-knowledge-base`
+- `hr-policies-knowledge-base`
+
+### Testing Knowledge Base Manager:
+
+```shell
+uv run script/test_kb_manager.py
 ```
 
 ## Build the container
