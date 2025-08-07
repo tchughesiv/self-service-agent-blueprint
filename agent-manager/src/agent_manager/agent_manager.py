@@ -3,8 +3,8 @@ import os
 import httpx
 import json
 
-from llama_stack_client import LlamaStackClient
 from llama_stack_client.types.shared_params.agent_config import AgentConfig
+from .manager import Manager
 
 
 def toolgroups(agent):
@@ -24,22 +24,9 @@ def toolgroups(agent):
     return toolgroups
 
 
-class AgentManager:
-    def __init__(self, config):
-        self._config = config
-        self._client = None
+class AgentManager(Manager):
+    def __init__(self):
         self._agents = []
-
-    def connect_to_llama_stack(self):
-        if self._client is None:
-            logging.debug("Connecting to LlamaStack")
-            llama_stack_host = os.environ["LLAMASTACK_SERVICE_HOST"]
-            self._client = LlamaStackClient(
-                base_url=f"http://{llama_stack_host}:8321",
-                timeout=self._config["timeout"],
-            )
-        else:
-            logging.debug("Already connected to LlamaStack")
 
     def create_agents(self):
         if self._client is None:
@@ -76,12 +63,6 @@ class AgentManager:
         agents = self.agents().data
         for agent in agents:
             self._client.agents.delete(agent["agent_id"])
-
-    def config(self):
-        return self._config
-
-    def is_connected(self):
-        return self._client is not None
 
     def agents(self):
         if self._client is None:
