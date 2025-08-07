@@ -18,15 +18,14 @@ def main():
     agent_manager.connect_to_llama_stack()
     kb_manager.connect_to_llama_stack()
 
-    print("agent_manager is_connected:", agent_manager.is_connected())
-    print("kb_manager is_connected:", kb_manager.is_connected())
-
     # Create knowledge bases first (agents may depend on them)
     print("creating knowledge bases...")
+    print("kb_manager is_connected:", kb_manager.is_connected())
     kb_manager.create_knowledge_bases()
 
     # Then create agents
     print("creating agents...")
+    print("agent_manager is_connected:", agent_manager.is_connected())
     agent_manager.create_agents()
 
 
