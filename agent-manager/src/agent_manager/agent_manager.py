@@ -3,7 +3,7 @@ import os
 import httpx
 import json
 
-from llama_stack_client.types.shared_params.agent_config import AgentConfig
+from llama_stack_client.types.shared.agent_config import AgentConfig
 from .manager import Manager
 
 
