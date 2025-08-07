@@ -11,8 +11,6 @@ def main():
     agent_manager = AgentManager(config)
     kb_manager = KnowledgeBaseManager(config)
 
-    print("config:", agent_manager.config())
-
     # Connect to llama stack
     print("connecting to llama stack...")
     agent_manager.connect_to_llama_stack()
@@ -26,6 +24,7 @@ def main():
     # Then create agents
     print("creating agents...")
     print("agent_manager is_connected:", agent_manager.is_connected())
+    print("config:", agent_manager.config())
     agent_manager.create_agents()
 
 
