@@ -125,11 +125,11 @@ class KnowledgeBaseManager(Manager):
 
             for vector_db in vector_dbs:
                 try:
-                    self._client.vector_dbs.delete(vector_db.vector_db_id)
-                    logging.info(f"Deleted vector database: {vector_db.vector_db_id}")
+                    self._client.vector_dbs.delete(vector_db.identifier)
+                    logging.info(f"Deleted vector database: {vector_db.identifier}")
                 except Exception as e:
                     logging.error(
-                        f"Failed to delete vector database {vector_db.vector_db_id}: {str(e)}"
+                        f"Failed to delete vector database {vector_db.identifier}: {str(e)}"
                     )
 
         except Exception as e:
@@ -157,37 +157,9 @@ class KnowledgeBaseManager(Manager):
             # Get list of all registered vector databases
             vector_dbs = self._client.vector_dbs.list()
 
-            # Debug: Print the structure of the first vector_db object
-            if vector_dbs:
-                first_db = vector_dbs[0]
-                logging.debug(f"Vector DB object type: {type(first_db)}")
-                logging.debug(f"Vector DB object attributes: {dir(first_db)}")
-                logging.debug(f"Vector DB object: {first_db}")
-
             # Find the vector database with the matching ID
             for vector_db in vector_dbs:
-                # Try different possible attribute names
-                db_id = None
-                if hasattr(vector_db, "vector_db_id"):
-                    db_id = vector_db.vector_db_id
-                elif hasattr(vector_db, "id"):
-                    db_id = vector_db.id
-                elif hasattr(vector_db, "identifier"):
-                    db_id = vector_db.identifier
-                elif hasattr(vector_db, "name"):
-                    db_id = vector_db.name
-                else:
-                    # If it's a dict-like object
-                    if hasattr(vector_db, "__getitem__"):
-                        try:
-                            db_id = vector_db["vector_db_id"]
-                        except (KeyError, TypeError):
-                            try:
-                                db_id = vector_db["id"]
-                            except (KeyError, TypeError):
-                                pass
-
-                if db_id == vector_db_id:
+                if vector_db.identifier == vector_db_id:
                     return vector_db
 
             logging.warning(f"No knowledge base found with vector ID: {vector_db_id}")
