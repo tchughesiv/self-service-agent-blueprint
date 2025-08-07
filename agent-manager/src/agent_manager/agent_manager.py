@@ -97,7 +97,7 @@ class AgentManager(Manager):
             self.connect_to_llama_stack()
 
         # Get all agents data
-        response = self._client.agents("v1/agents", cast_to=httpx.Response)
+        response = self._client.get("v1/agents", cast_to=httpx.Response)
         json_string = response.content.decode("utf-8")
         data = json.loads(json_string)
 
