@@ -9,7 +9,7 @@ class KnowledgeBaseManager(Manager):
     def __init__(self, config):
         self._client = None
         self._config = config
-        self._knowledge_bases_path = Path("agent-manager/config/knowledge_bases")
+        self._knowledge_bases_path = Path("config/knowledge_bases")
 
     def create_knowledge_bases(self):
         """Create all knowledge bases by processing directories in knowledge_bases path"""
