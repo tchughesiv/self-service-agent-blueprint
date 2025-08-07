@@ -148,6 +148,29 @@ class KnowledgeBaseManager(Manager):
 
         return knowledge_bases
 
+    def get_knowledge_base_by_vector_db_id(self, vector_db_id: str):
+        """Get a knowledge base by its vector database ID"""
+        if self._client is None:
+            self.connect_to_llama_stack()
+
+        try:
+            # Get list of all registered vector databases
+            vector_dbs = self._client.vector_dbs.list()
+
+            # Find the vector database with the matching ID
+            for vector_db in vector_dbs:
+                if vector_db.vector_db_id == vector_db_id:
+                    return vector_db
+
+            logging.warning(f"No knowledge base found with vector ID: {vector_db_id}")
+            return None
+
+        except Exception as e:
+            logging.error(
+                f"Failed to get knowledge base by vector ID {vector_db_id}: {str(e)}"
+            )
+            return None
+
     def get_vector_db_ids(self) -> List[str]:
         """Get vector database IDs for all knowledge bases"""
         kb_names = self.list_knowledge_bases()
