@@ -11,7 +11,12 @@ MAKFLAGS += --no-print-directory
 POSTGRES_USER ?= postgres
 POSTGRES_PASSWORD ?= rag_password
 POSTGRES_DBNAME ?= rag_blueprint
+# HF_TOKEN is only required if LLM_URL is not set
+ifeq ($(LLM_URL),)
 HF_TOKEN ?= $(shell bash -c 'read -r -p "Enter Hugging Face Token: " HF_TOKEN; echo $$HF_TOKEN')
+else
+HF_TOKEN ?=
+endif
 MAIN_CHART_NAME := self-service-agent 
 TOLERATIONS_TEMPLATE=[{"key":"$(1)","effect":"NoSchedule","operator":"Exists"}]
 
@@ -25,7 +30,7 @@ helm_pgvector_args = \
     --set pgvector.secret.dbname=$(POSTGRES_DBNAME)
 
 helm_llm_service_args = \
-    --set llm-service.secret.hf_token=$(HF_TOKEN) \
+    $(if $(HF_TOKEN),--set llm-service.secret.hf_token=$(HF_TOKEN),) \
     $(if $(LLM),--set global.models.$(LLM).enabled=true,) \
     $(if $(SAFETY),--set global.models.$(SAFETY).enabled=true,) \
     $(if $(LLM_TOLERATION),--set-json global.models.$(LLM).tolerations='$(call TOLERATIONS_TEMPLATE,$(LLM_TOLERATION))',) \
