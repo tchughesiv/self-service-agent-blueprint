@@ -27,6 +27,8 @@ def main():
     print("config:", agent_manager.config())
     agent_manager.create_agents()
 
+    print(str(agent_manager.get_agent_by_name("laptop-refresh-agent")))
+
 
 if __name__ == "__main__":
     main()
