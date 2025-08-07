@@ -27,6 +27,7 @@ def main():
     print("config:", agent_manager.config())
     agent_manager.create_agents()
 
+    print(kb_manager.get_vector_db_ids())
     print(str(kb_manager.get_knowledge_base_by_vector_db_id("laptop-refresh")))
     print(str(agent_manager.get_agent_by_name("laptop-refresh-agent")))
 
