@@ -25,7 +25,9 @@ def toolgroups(agent):
 
 
 class AgentManager(Manager):
-    def __init__(self):
+    def __init__(self, config):
+        self._client = None
+        self._config = config
         self._agents = []
 
     def create_agents(self):

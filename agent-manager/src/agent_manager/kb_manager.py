@@ -6,7 +6,9 @@ from .manager import Manager
 
 
 class KnowledgeBaseManager(Manager):
-    def __init__(self):
+    def __init__(self, config):
+        self._client = None
+        self._config = config
         self._knowledge_bases_path = Path("agent-manager/config/knowledge_bases")
 
     def create_knowledge_bases(self):

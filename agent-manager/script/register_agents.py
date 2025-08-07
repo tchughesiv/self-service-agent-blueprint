@@ -19,6 +19,7 @@ def main():
     # Create knowledge bases first (agents may depend on them)
     print("creating knowledge bases...")
     print("kb_manager is_connected:", kb_manager.is_connected())
+    print("config:", kb_manager.config())
     kb_manager.create_knowledge_bases()
 
     # Then create agents
