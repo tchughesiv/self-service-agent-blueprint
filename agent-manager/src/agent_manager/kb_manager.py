@@ -94,6 +94,8 @@ class KnowledgeBaseManager(Manager):
                     continue
 
         if rag_documents:
+            for doc in rag_documents:
+                print(doc["document_id"])
             try:
                 logging.info(
                     f"Inserting {len(rag_documents)} documents into {vector_db_id}"
