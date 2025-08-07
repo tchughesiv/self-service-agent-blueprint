@@ -53,6 +53,8 @@ class AgentManager(Manager):
         if not agent_config["model"]:
             agent_config["model"] = os.environ["LLAMA_STACK_MODELS"].split(",", 1)[0]
 
+        print(str(agent_config))
+        
         agentic_system_create_response = self._client.agents.create(
             agent_config=agent_config
         )
