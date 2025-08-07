@@ -29,8 +29,7 @@ class KnowledgeBaseManager(Manager):
 
     def create_knowledge_base(self, kb_directory: Path):
         """Create a single knowledge base from a directory"""
-        kb_name = kb_directory.name
-        vector_db_id = f"{kb_name}-knowledge-base"
+        vector_db_id = kb_directory.name
 
         logging.info(f"Creating knowledge base: {vector_db_id}")
 
@@ -150,4 +149,4 @@ class KnowledgeBaseManager(Manager):
     def get_vector_db_ids(self) -> List[str]:
         """Get vector database IDs for all knowledge bases"""
         kb_names = self.list_knowledge_bases()
-        return [f"{kb_name}-knowledge-base" for kb_name in kb_names]
+        return [kb_name for kb_name in kb_names]

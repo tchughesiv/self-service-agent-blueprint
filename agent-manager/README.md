@@ -54,7 +54,7 @@ The `KnowledgeBaseManager` automatically processes knowledge base directories:
 
 1. **Directory Structure**: Each subdirectory in `config/knowledge_bases/` becomes a separate knowledge base
 2. **Document Processing**: All `.txt` files in each directory are inserted into the corresponding vector database
-3. **Vector DB Naming**: Knowledge bases are named as `{directory-name}-knowledge-base`
+3. **Vector DB Naming**: Knowledge bases are named as `{directory-name}`
 
 ### Example Directory Structure:
 ```
@@ -68,8 +68,8 @@ config/knowledge_bases/
 ```
 
 This creates two knowledge bases:
-- `laptop-refresh-knowledge-base`
-- `hr-policies-knowledge-base`
+- `laptop-refresh`
+- `hr-policies`
 
 ### Testing Knowledge Base Manager:
 
