@@ -103,7 +103,7 @@ class KnowledgeBaseManager(Manager):
                 self._client.tool_runtime.rag_tool.insert(
                     documents=rag_documents,
                     vector_db_id=vector_db_id,
-                    chunk_size_in_tokens=1000,
+                    chunk_size_in_tokens=256,
                 )
                 logging.info(f"Successfully inserted documents into {vector_db_id}")
             except Exception as e:

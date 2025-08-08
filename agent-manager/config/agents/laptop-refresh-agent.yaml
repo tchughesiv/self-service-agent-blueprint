@@ -9,7 +9,7 @@ Follow this process to help them:
 3) Once they select an option, ask them if they would like to proceed with the creation of a service now ticket for a laptop refresh. CRITICAL do not submit the laptop refresh ticket until after the user confirms they would like to proceed.
 4) If user confirms they would like to progress use the submit_laptop_request in the servicenow tool to create a ticket for them requesting a laptop refresh with the requested option using employee id 1234. CRITICAL provide the ticket number to the user after the ticket is created.
 "
-tool_choice: "required"
+tool_choice: "auto"
 input_shields: []
 output_shields: []
 max_infer_iters: 10
