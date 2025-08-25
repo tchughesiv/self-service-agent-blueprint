@@ -49,7 +49,7 @@ infinispan:
   
   # Persistent storage for session data
   persistence:
-    enabled: true
+    enabled: false    # Disabled due to file-store deprecation in Infinispan 15.x
     storageClass: ""  # Use default storage class
     size: "8Gi"
   
@@ -165,12 +165,26 @@ Sessions are configured with the following expiration policies:
 
 ### Persistence
 
-When persistence is enabled:
+**Note**: Persistence is currently disabled by default due to file-store deprecation in Infinispan 15.x.
 
-- Session data is stored in persistent volumes
-- Data survives pod restarts and rescheduling
-- File-based storage is used by default
-- Preloading ensures data is available immediately on startup
+**In-Memory Mode (Current Default)**:
+- Session data is stored in memory across cluster nodes
+- Sessions survive individual pod failures due to distributed caching (2 owners per entry)
+- Sessions are lost if the entire Infinispan cluster is restarted
+- Better performance due to no disk I/O
+
+**Persistence Options (Advanced)**:
+If you need persistence, you can enable experimental `soft-index-file-store`:
+```yaml
+infinispan:
+  persistence:
+    enabled: true
+```
+
+When persistence is enabled:
+- Session data survives complete cluster restarts
+- Uses `soft-index-file-store` for file-based persistence
+- Requires persistent volumes for data storage
 
 ## Scaling Considerations
 
@@ -224,9 +238,10 @@ For production deployments, consider:
    - **Fix**: Ensure `mode: "SYNC"` is set in values.yaml, not `mode: "distributed"`
 
 2. **File store configuration errors**
-   - **Error**: `ISPN000622: Element 'file-store' has been removed with no replacement`
-   - **Solution**: In Infinispan 15.x, `file-store` has been replaced with `single-file-store`
-   - **Fix**: The configuration now uses `<single-file-store>` element automatically
+   - **Error**: `ISPN000622: Element 'file-store'/'single-file-store' has been removed with no replacement`
+   - **Solution**: In Infinispan 15.x, traditional file stores have been deprecated/removed
+   - **Current Fix**: Persistence is disabled by default (`persistence.enabled: false`)
+   - **Alternative**: Use `soft-index-file-store` if persistence is required (experimental)
 
 3. **Sessions not persisting**
    - Check if Infinispan pods are running: `kubectl get pods -l app.kubernetes.io/component=infinispan`

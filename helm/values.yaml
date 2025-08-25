@@ -101,7 +101,7 @@ infinispan:
       cpu: "1000m"
   
   persistence:
-    enabled: true
+    enabled: false  # Disabled due to file-store deprecation in Infinispan 15.x
     storageClass: ""
     size: "8Gi"
   
@@ -122,7 +122,7 @@ infinispan:
         persistence:
           passivation: false
           stores:
-            - type: "single-file"  # Updated for Infinispan 15.x compatibility
+            - type: "soft-index-file"  # Only available store type in Infinispan 15.x
               shared: false
               preload: true
               purge: false

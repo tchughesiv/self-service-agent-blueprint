@@ -28,11 +28,10 @@ data:
           
           {{- if .Values.infinispan.persistence.enabled }}
           <persistence passivation="false">
-            <single-file-store shared="false"
-                              preload="true"
-                              purge="false"
-                              fetch-state="true"
-                              path="/opt/infinispan/server/data/sessions.dat"/>
+            <soft-index-file-store>
+              <data path="/opt/infinispan/server/data"/>
+              <index path="/opt/infinispan/server/data"/>
+            </soft-index-file-store>
           </persistence>
           {{- end }}
           
