@@ -1,0 +1,66 @@
+{{- if .Values.infinispan.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "self-service-agent.fullname" . }}-infinispan
+  labels:
+    {{- include "self-service-agent.labels" . | nindent 4 }}
+    app.kubernetes.io/component: infinispan
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "self-service-agent.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: infinispan
+  template:
+    metadata:
+      labels:
+        {{- include "self-service-agent.labels" . | nindent 8 }}
+        app.kubernetes.io/component: infinispan
+    spec:
+      containers:
+        - name: infinispan
+          image: "{{ .Values.infinispan.image.repository }}:{{ .Values.infinispan.image.tag }}"
+          imagePullPolicy: {{ .Values.infinispan.image.pullPolicy }}
+          ports:
+            - name: infinispan
+              containerPort: {{ .Values.infinispan.service.port }}
+              protocol: TCP
+          env:
+            - name: USER
+              value: "admin"
+            - name: PASS
+              value: "password"
+          volumeMounts:
+            - name: config
+              mountPath: /opt/infinispan/server/conf/infinispan.xml
+              subPath: infinispan.xml
+            {{- if .Values.infinispan.persistence.enabled }}
+            - name: data
+              mountPath: /opt/infinispan/server/data
+            {{- end }}
+          resources:
+            {{- toYaml .Values.infinispan.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /rest/v2/cache-managers/default/health/status
+              port: {{ .Values.infinispan.service.port }}
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /rest/v2/cache-managers/default/health/status
+              port: {{ .Values.infinispan.service.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 5
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "self-service-agent.fullname" . }}-infinispan-config
+        {{- if .Values.infinispan.persistence.enabled }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "self-service-agent.fullname" . }}-infinispan-data
+        {{- end }}
+{{- end }}

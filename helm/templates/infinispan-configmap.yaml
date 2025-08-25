@@ -1,0 +1,43 @@
+{{- if .Values.infinispan.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "self-service-agent.fullname" . }}-infinispan-config
+  labels:
+    {{- include "self-service-agent.labels" . | nindent 4 }}
+data:
+  infinispan.xml: |
+    <?xml version="1.0" encoding="UTF-8"?>
+    <infinispan
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="urn:infinispan:config:15.0 https://infinispan.org/schemas/infinispan-config-15.0.xsd"
+        xmlns="urn:infinispan:config:15.0">
+      
+      <cache-container name="default" statistics="true">
+        <transport cluster="{{ include "self-service-agent.fullname" . }}-cluster" stack="tcp"/>
+        
+        <!-- Session cache configuration -->
+        <distributed-cache name="{{ .Values.infinispan.config.caches.sessions.cacheName | default "sessions" }}" 
+                          mode="{{ .Values.infinispan.config.caches.sessions.mode | default "SYNC" }}"
+                          owners="{{ .Values.infinispan.config.caches.sessions.owners | default 2 }}"
+                          segments="{{ .Values.infinispan.config.caches.sessions.segments | default 256 }}">
+          
+          <expiration lifespan="{{ .Values.infinispan.config.caches.sessions.expiration.lifespan | default 3600000 }}"
+                     max-idle="{{ .Values.infinispan.config.caches.sessions.expiration.maxIdle | default 1800000 }}"/>
+          
+          {{- if .Values.infinispan.persistence.enabled }}
+          <persistence passivation="{{ .Values.infinispan.config.caches.sessions.persistence.passivation | default false }}">
+            <file-store shared="{{ .Values.infinispan.config.caches.sessions.persistence.stores.0.shared | default false }}"
+                       preload="{{ .Values.infinispan.config.caches.sessions.persistence.stores.0.preload | default true }}"
+                       purge="{{ .Values.infinispan.config.caches.sessions.persistence.stores.0.purge | default false }}"
+                       fetch-state="{{ .Values.infinispan.config.caches.sessions.persistence.stores.0.fetchState | default true }}"
+                       path="/opt/infinispan/server/data"/>
+          </persistence>
+          {{- end }}
+          
+          <memory max-count="10000" when-full="REMOVE"/>
+        </distributed-cache>
+      </cache-container>
+    </infinispan>
+{{- end }}

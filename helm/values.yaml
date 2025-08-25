@@ -80,6 +80,84 @@ llama_stack_url: http://llamastack:8321
 sessionSecret: {}
  # value: "my-session-secret"
 
+# Infinispan configuration for session persistence
+infinispan:
+  enabled: true
+  image:
+    repository: quay.io/infinispan/server
+    tag: "15.0"
+    pullPolicy: IfNotPresent
+  
+  service:
+    type: ClusterIP
+    port: 11222
+  
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "500m"
+    limits:
+      memory: "1Gi" 
+      cpu: "1000m"
+  
+  persistence:
+    enabled: true
+    storageClass: ""
+    size: "8Gi"
+  
+  config:
+    # Infinispan server configuration
+    clustering:
+      transport: tcp
+    
+    # Cache configuration for session storage
+    caches:
+      sessions:
+        mode: "distributed"
+        owners: 2
+        segments: 256
+        expiration:
+          lifespan: 3600000  # 1 hour in milliseconds
+          maxIdle: 1800000   # 30 minutes in milliseconds
+        persistence:
+          passivation: false
+          stores:
+            - type: "file"
+              shared: false
+              preload: true
+              purge: false
+              fetchState: true
+
+# Llama-stack configuration for session persistence
+llama-stack:
+  # Pass environment variables to configure session persistence
+  extraEnvVars:
+    - name: SESSION_PERSISTENCE_ENABLED
+      value: "true"
+    - name: SESSION_PERSISTENCE_TYPE
+      value: "infinispan"
+    - name: INFINISPAN_HOST
+      value: "{{ .Release.Name }}-infinispan"
+    - name: INFINISPAN_PORT
+      value: "11222"
+    - name: INFINISPAN_CACHE_NAME
+      value: "sessions"
+    - name: INFINISPAN_USERNAME
+      value: "admin"
+    - name: INFINISPAN_PASSWORD
+      value: "password"
+  
+  # Additional configuration for llama-stack
+  config:
+    sessionStore:
+      type: "infinispan"
+      infinispan:
+        servers: "{{ .Release.Name }}-infinispan:11222"
+        cacheName: "sessions"
+        auth:
+          username: "admin"
+          password: "password"
+
 mcp-servers:
   mcp-servers:
     self-service-agent-employee-info:

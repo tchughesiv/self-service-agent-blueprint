@@ -55,6 +55,8 @@ spec:
           env:
             - name: LLAMA_STACK_MODELS
               value: {{ include "self-service-agent.getModelList" . }}
+            - name: LLAMASTACK_SERVICE_HOST
+              value: "llamastack.{{ .Release.Namespace }}.svc.cluster.local"
       containers:
         - name: {{ .Chart.Name }}
           {{- with .Values.securityContext }}
@@ -66,6 +68,22 @@ spec:
           env:
             - name: LLAMA_STACK_MODELS
               value: {{ include "self-service-agent.getModelList" . }}
+            - name: LLAMASTACK_SERVICE_HOST
+              value: "llamastack.{{ .Release.Namespace }}.svc.cluster.local"
+            {{- if .Values.infinispan.enabled }}
+            - name: INFINISPAN_ENABLED
+              value: "true"
+            - name: INFINISPAN_HOST
+              value: "{{ include "self-service-agent.fullname" . }}-infinispan"
+            - name: INFINISPAN_PORT
+              value: "{{ .Values.infinispan.service.port }}"
+            - name: INFINISPAN_CACHE_NAME
+              value: "sessions"
+            - name: INFINISPAN_USERNAME
+              value: "admin"
+            - name: INFINISPAN_PASSWORD
+              value: "password"
+            {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.service.port }}

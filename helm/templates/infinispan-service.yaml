@@ -1,0 +1,20 @@
+{{- if .Values.infinispan.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "self-service-agent.fullname" . }}-infinispan
+  labels:
+    {{- include "self-service-agent.labels" . | nindent 4 }}
+    app.kubernetes.io/component: infinispan
+spec:
+  type: {{ .Values.infinispan.service.type }}
+  ports:
+    - port: {{ .Values.infinispan.service.port }}
+      targetPort: infinispan
+      protocol: TCP
+      name: infinispan
+  selector:
+    {{- include "self-service-agent.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: infinispan
+{{- end }}

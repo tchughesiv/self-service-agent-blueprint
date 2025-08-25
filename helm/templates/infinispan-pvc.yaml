@@ -1,0 +1,23 @@
+{{- if and .Values.infinispan.enabled .Values.infinispan.persistence.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "self-service-agent.fullname" . }}-infinispan-data
+  labels:
+    {{- include "self-service-agent.labels" . | nindent 4 }}
+    app.kubernetes.io/component: infinispan
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- if .Values.infinispan.persistence.storageClass }}
+  {{- if (eq "-" .Values.infinispan.persistence.storageClass) }}
+  storageClassName: ""
+  {{- else }}
+  storageClassName: {{ .Values.infinispan.persistence.storageClass }}
+  {{- end }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.infinispan.persistence.size }}
+{{- end }}

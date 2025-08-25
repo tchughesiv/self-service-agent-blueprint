@@ -21,3 +21,7 @@ dependencies:
   - name: mcp-servers
     version: 0.1.0
     repository: https://rh-ai-kickstart.github.io/ai-architecture-charts
+  - name: infinispan
+    version: 0.3.2
+    repository: https://infinispan.github.io/infinispan-helm-charts
+    condition: infinispan.enabled

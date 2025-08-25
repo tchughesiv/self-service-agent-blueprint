@@ -9,6 +9,15 @@ A comprehensive blueprint for building self-service AI agents with modular compo
 - **`helm/`** - Helm charts for Kubernetes deployment
 - **`test/`** - Root project tests
 
+## Features
+
+- **Agent Management**: Create and manage AI agents with different configurations
+- **Knowledge Base Integration**: RAG (Retrieval-Augmented Generation) support with vector databases
+- **Tool Integration**: Support for external tools via MCP (Model Context Protocol) servers
+- **Scalable Deployment**: Kubernetes-native with Helm charts
+- **Multi-Model Support**: Works with various LLM providers through Llama Stack
+- **Session Persistence**: Infinispan integration for persistent agent sessions across pod restarts
+
 ## Quick Start
 
 ### Prerequisites
@@ -124,3 +133,4 @@ Run `make help` to see all available commands with descriptions.
 
 - [Asset Manager](asset-manager/README.md) - Detailed asset manager documentation
 - [Employee Info MCP](mcp-servers/employee-info/README.md) - Employee information service documentation
+- [Infinispan Session Persistence](helm/INFINISPAN_SESSION_PERSISTENCE.md) - Session persistence configuration and usage
