@@ -243,17 +243,22 @@ For production deployments, consider:
    - **Current Fix**: Persistence is disabled by default (`persistence.enabled: false`)
    - **Alternative**: Use `soft-index-file-store` if persistence is required (experimental)
 
-3. **Sessions not persisting**
+3. **Server configuration errors**
+   - **Error**: `Cannot invoke "ServerConfigurationBuilder.transport()" because "serverBuilder" is null`
+   - **Solution**: Infinispan 15.x requires proper server XML configuration structure
+   - **Fix**: Updated to use proper `<server>` root element with required sections
+
+4. **Sessions not persisting**
    - Check if Infinispan pods are running: `kubectl get pods -l app.kubernetes.io/component=infinispan`
    - Verify cache configuration in ConfigMap
    - Check llama-stack environment variables
 
-4. **Storage issues**
+5. **Storage issues**
    - Verify PVC is bound: `kubectl get pvc`
    - Check available storage in cluster
    - Review storage class configuration
 
-5. **Connection issues**
+6. **Connection issues**
    - Verify service endpoints: `kubectl get endpoints`
    - Check network connectivity between pods
    - Review DNS resolution

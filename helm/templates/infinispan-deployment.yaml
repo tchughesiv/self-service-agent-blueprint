@@ -36,6 +36,12 @@ spec:
             - name: config
               mountPath: /opt/infinispan/server/conf/infinispan.xml
               subPath: infinispan.xml
+            - name: config
+              mountPath: /opt/infinispan/server/conf/users.properties
+              subPath: users.properties
+            - name: config
+              mountPath: /opt/infinispan/server/conf/groups.properties
+              subPath: groups.properties
             {{- if .Values.infinispan.persistence.enabled }}
             - name: data
               mountPath: /opt/infinispan/server/data
