@@ -82,21 +82,40 @@ The llama-stack is automatically configured to use Infinispan when enabled:
 
 ```yaml
 llama-stack:
-  extraEnvVars:
-    - name: SESSION_PERSISTENCE_ENABLED
+  # Environment variables to configure Infinispan session persistence
+  env:
+    - name: INFINISPAN_ENABLED
       value: "true"
-    - name: SESSION_PERSISTENCE_TYPE
+    - name: SESSION_STORE_TYPE
       value: "infinispan"
-    - name: INFINISPAN_HOST
-      value: "{{ .Release.Name }}-infinispan"
-    - name: INFINISPAN_PORT
-      value: "11222"
-    - name: INFINISPAN_CACHE_NAME
+    - name: SESSION_CACHE_NAME
       value: "sessions"
-    - name: INFINISPAN_USERNAME
-      value: "admin"
-    - name: INFINISPAN_PASSWORD
-      value: "password"
+    - name: RESPONSES_CACHE_NAME  
+      value: "responses"
+```
+
+A configuration override ConfigMap is also created with the complete Infinispan provider configuration:
+
+```yaml
+providers:
+  agents:
+  - provider_id: meta-reference
+    provider_type: inline::meta-reference
+    config:
+      persistence_store:
+        type: infinispan
+        host: "RELEASE-NAME-self-service-agent-infinispan"
+        port: 11222
+        cache_name: "sessions"
+        username: "admin"
+        password: "password"
+      responses_store:
+        type: infinispan
+        host: "RELEASE-NAME-self-service-agent-infinispan"
+        port: 11222
+        cache_name: "responses"
+        username: "admin"
+        password: "password"
 ```
 
 ## Deployment

@@ -1,0 +1,31 @@
+{{- if .Values.infinispan.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "self-service-agent.fullname" . }}-llama-stack-config
+  labels:
+    {{- include "self-service-agent.labels" . | nindent 4 }}
+data:
+  config-override.yaml: |
+    # Infinispan session persistence configuration for llama-stack
+    providers:
+      agents:
+      - provider_id: meta-reference
+        provider_type: inline::meta-reference
+        config:
+          persistence_store:
+            type: infinispan
+            host: "{{ include "self-service-agent.fullname" . }}-infinispan"
+            port: 11222
+            cache_name: "sessions"
+            username: "admin"
+            password: "password"
+          responses_store:
+            type: infinispan
+            host: "{{ include "self-service-agent.fullname" . }}-infinispan"
+            port: 11222
+            cache_name: "responses"
+            username: "admin"
+            password: "password"
+{{- end }}

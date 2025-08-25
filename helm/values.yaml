@@ -128,35 +128,18 @@ infinispan:
               purge: false
               fetchState: true
 
-# Llama-stack configuration for session persistence
+# Llama-stack configuration for session persistence  
 llama-stack:
-  # Pass environment variables to configure session persistence
-  extraEnvVars:
-    - name: SESSION_PERSISTENCE_ENABLED
+  # Environment variables to configure Infinispan session persistence
+  env:
+    - name: INFINISPAN_ENABLED
       value: "true"
-    - name: SESSION_PERSISTENCE_TYPE
+    - name: SESSION_STORE_TYPE
       value: "infinispan"
-    - name: INFINISPAN_HOST
-      value: "{{ .Release.Name }}-infinispan"
-    - name: INFINISPAN_PORT
-      value: "11222"
-    - name: INFINISPAN_CACHE_NAME
+    - name: SESSION_CACHE_NAME
       value: "sessions"
-    - name: INFINISPAN_USERNAME
-      value: "admin"
-    - name: INFINISPAN_PASSWORD
-      value: "password"
-  
-  # Additional configuration for llama-stack
-  config:
-    sessionStore:
-      type: "infinispan"
-      infinispan:
-        servers: "{{ .Release.Name }}-infinispan:11222"
-        cacheName: "sessions"
-        auth:
-          username: "admin"
-          password: "password"
+    - name: RESPONSES_CACHE_NAME  
+      value: "responses"
 
 mcp-servers:
   mcp-servers:
