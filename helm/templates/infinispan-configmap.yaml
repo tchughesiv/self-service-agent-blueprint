@@ -27,11 +27,11 @@ data:
                      max-idle="{{ .Values.infinispan.config.caches.sessions.expiration.maxIdle | default 1800000 }}"/>
           
           {{- if .Values.infinispan.persistence.enabled }}
-          <persistence passivation="{{ .Values.infinispan.config.caches.sessions.persistence.passivation | default false }}">
-            <file-store shared="{{ .Values.infinispan.config.caches.sessions.persistence.stores.0.shared | default false }}"
-                       preload="{{ .Values.infinispan.config.caches.sessions.persistence.stores.0.preload | default true }}"
-                       purge="{{ .Values.infinispan.config.caches.sessions.persistence.stores.0.purge | default false }}"
-                       fetch-state="{{ .Values.infinispan.config.caches.sessions.persistence.stores.0.fetchState | default true }}"
+          <persistence passivation="false">
+            <file-store shared="false"
+                       preload="true"
+                       purge="false"
+                       fetch-state="true"
                        path="/opt/infinispan/server/data"/>
           </persistence>
           {{- end }}

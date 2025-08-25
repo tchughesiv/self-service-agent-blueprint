@@ -6,6 +6,8 @@ This document describes how to configure and use Infinispan for session persiste
 
 The self-service-agent blueprint now supports persistent session storage using Infinispan, a distributed in-memory data grid. This ensures that agent sessions persist across pod restarts and can be shared across multiple replicas.
 
+The Infinispan deployment is managed through native Kubernetes templates included in this Helm chart, providing full control over the configuration without external dependencies.
+
 ## Configuration
 
 ### Enabling Infinispan
@@ -103,15 +105,8 @@ llama-stack:
 
 1. Kubernetes cluster with persistent volume support (if persistence is enabled)
 2. Helm 3.x
-3. Updated chart dependencies
 
-### Install/Update Dependencies
-
-Before deploying, update the Helm dependencies:
-
-```bash
-helm dependency update ./helm
-```
+Note: Infinispan is deployed using built-in Kubernetes templates, so no external chart dependencies are required.
 
 ### Deploy with Infinispan
 
