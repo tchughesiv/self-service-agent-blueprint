@@ -122,7 +122,7 @@ infinispan:
         persistence:
           passivation: false
           stores:
-            - type: "file"
+            - type: "single-file"  # Updated for Infinispan 15.x compatibility
               shared: false
               preload: true
               purge: false

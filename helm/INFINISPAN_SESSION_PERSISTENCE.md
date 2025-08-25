@@ -223,17 +223,22 @@ For production deployments, consider:
    - **Solution**: The `mode` attribute expects synchronization values (`SYNC` or `ASYNC`), not cache types
    - **Fix**: Ensure `mode: "SYNC"` is set in values.yaml, not `mode: "distributed"`
 
-2. **Sessions not persisting**
+2. **File store configuration errors**
+   - **Error**: `ISPN000622: Element 'file-store' has been removed with no replacement`
+   - **Solution**: In Infinispan 15.x, `file-store` has been replaced with `single-file-store`
+   - **Fix**: The configuration now uses `<single-file-store>` element automatically
+
+3. **Sessions not persisting**
    - Check if Infinispan pods are running: `kubectl get pods -l app.kubernetes.io/component=infinispan`
    - Verify cache configuration in ConfigMap
    - Check llama-stack environment variables
 
-3. **Storage issues**
+4. **Storage issues**
    - Verify PVC is bound: `kubectl get pvc`
    - Check available storage in cluster
    - Review storage class configuration
 
-4. **Connection issues**
+5. **Connection issues**
    - Verify service endpoints: `kubectl get endpoints`
    - Check network connectivity between pods
    - Review DNS resolution
