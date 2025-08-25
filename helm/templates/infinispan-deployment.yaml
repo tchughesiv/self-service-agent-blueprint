@@ -35,9 +35,6 @@ spec:
             - name: JAVA_OPTIONS
               value: "-Djava.net.preferIPv4Stack=true -Dinfinispan.bind.address=0.0.0.0"
           volumeMounts:
-            - name: config
-              mountPath: /opt/infinispan/server/conf/infinispan.xml
-              subPath: infinispan.xml
             {{- if .Values.infinispan.persistence.enabled }}
             - name: data
               mountPath: /opt/infinispan/server/data
@@ -57,9 +54,6 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 5
       volumes:
-        - name: config
-          configMap:
-            name: {{ include "self-service-agent.fullname" . }}-infinispan-config
         {{- if .Values.infinispan.persistence.enabled }}
         - name: data
           persistentVolumeClaim:

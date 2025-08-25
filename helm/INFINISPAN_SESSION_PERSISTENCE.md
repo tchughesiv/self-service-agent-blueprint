@@ -6,7 +6,7 @@ This document describes how to configure and use Infinispan for session persiste
 
 The self-service-agent blueprint now supports persistent session storage using Infinispan, a distributed in-memory data grid. This ensures that agent sessions persist across pod restarts and can be shared across multiple replicas.
 
-The Infinispan deployment is managed through native Kubernetes templates included in this Helm chart, providing full control over the configuration without external dependencies.
+The Infinispan deployment uses the default server configuration for maximum compatibility with Infinispan 15.x. Session caches are created dynamically by the application, avoiding complex XML configuration issues.
 
 ## Configuration
 
@@ -145,6 +145,32 @@ Default credentials:
 - Username: `admin`
 - Password: `password`
 
+### Creating Session Cache Dynamically
+
+Since we use the default configuration, you can create the session cache via REST API:
+
+```bash
+# Create a distributed cache for sessions
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -d '{
+    "distributed-cache": {
+      "mode": "SYNC",
+      "owners": 2,
+      "segments": 256,
+      "expiration": {
+        "lifespan": 3600000,
+        "max-idle": 1800000
+      },
+      "memory": {
+        "max-count": 10000,
+        "when-full": "REMOVE"
+      }
+    }
+  }' \
+  http://admin:password@localhost:11222/rest/v2/caches/sessions
+```
+
 ### Cache Statistics
 
 You can view cache statistics via the REST API:
@@ -217,7 +243,7 @@ Basic authentication is configured via environment variables:
 - Username: `admin`
 - Password: `password`
 
-**Note**: The current configuration uses a simplified cache-container format for better compatibility with Infinispan 15.x. For production deployments, consider:
+**Note**: The current configuration uses the default Infinispan server setup for maximum compatibility with Infinispan 15.x. Session caches are created dynamically. For production deployments, consider:
 1. Using Kubernetes secrets for credentials
 2. Enabling TLS/SSL encryption
 3. Implementing network policies for additional security
@@ -250,8 +276,8 @@ Basic authentication is configured via environment variables:
 
 4. **XML parsing errors**
    - **Error**: `Unexpected element 'null' encountered` or `ConfigurationReaderException`
-   - **Solution**: Complex server configurations can cause parsing issues in Infinispan 15.x
-   - **Fix**: Use simplified cache-container configuration instead of full server configuration
+   - **Solution**: Custom XML configurations can be problematic with Infinispan 15.x
+   - **Fix**: Use default Infinispan configuration and create caches dynamically via REST API
 
 5. **Sessions not persisting**
    - Check if Infinispan pods are running: `kubectl get pods -l app.kubernetes.io/component=infinispan`

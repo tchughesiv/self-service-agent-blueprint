@@ -1,30 +1,5 @@
 {{- if .Values.infinispan.enabled }}
 ---
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: {{ include "self-service-agent.fullname" . }}-infinispan-config
-  labels:
-    {{- include "self-service-agent.labels" . | nindent 4 }}
-data:
-  infinispan.xml: |
-    <?xml version="1.0" encoding="UTF-8"?>
-    <infinispan xmlns="urn:infinispan:config:15.0">
-      <cache-container name="default" statistics="true">
-        <transport cluster="{{ include "self-service-agent.fullname" . }}-cluster" stack="tcp"/>
-        
-        <distributed-cache name="sessions" mode="SYNC" owners="2" segments="256">
-          <expiration lifespan="3600000" max-idle="1800000"/>
-          {{- if .Values.infinispan.persistence.enabled }}
-          <persistence passivation="false">
-            <soft-index-file-store>
-              <data path="/opt/infinispan/server/data"/>
-              <index path="/opt/infinispan/server/data"/>
-            </soft-index-file-store>
-          </persistence>
-          {{- end }}
-          <memory max-count="10000" when-full="REMOVE"/>
-        </distributed-cache>
-      </cache-container>
-    </infinispan>
+# Using default Infinispan configuration - no custom ConfigMap needed
+# Sessions will be created dynamically via REST API or client configuration
 {{- end }}
