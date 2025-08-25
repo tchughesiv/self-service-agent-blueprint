@@ -213,14 +213,14 @@ infinispan:
 
 ### Authentication
 
-Default authentication is configured with:
+Basic authentication is configured via environment variables:
 - Username: `admin`
 - Password: `password`
 
-For production deployments, consider:
+**Note**: The current configuration uses a simplified cache-container format for better compatibility with Infinispan 15.x. For production deployments, consider:
 1. Using Kubernetes secrets for credentials
 2. Enabling TLS/SSL encryption
-3. Configuring RBAC policies
+3. Implementing network policies for additional security
 
 ### Network Security
 
@@ -248,17 +248,22 @@ For production deployments, consider:
    - **Solution**: Infinispan 15.x requires proper server XML configuration structure
    - **Fix**: Updated to use proper `<server>` root element with required sections
 
-4. **Sessions not persisting**
+4. **XML parsing errors**
+   - **Error**: `Unexpected element 'null' encountered` or `ConfigurationReaderException`
+   - **Solution**: Complex server configurations can cause parsing issues in Infinispan 15.x
+   - **Fix**: Use simplified cache-container configuration instead of full server configuration
+
+5. **Sessions not persisting**
    - Check if Infinispan pods are running: `kubectl get pods -l app.kubernetes.io/component=infinispan`
    - Verify cache configuration in ConfigMap
    - Check llama-stack environment variables
 
-5. **Storage issues**
+6. **Storage issues**
    - Verify PVC is bound: `kubectl get pvc`
    - Check available storage in cluster
    - Review storage class configuration
 
-6. **Connection issues**
+7. **Connection issues**
    - Verify service endpoints: `kubectl get endpoints`
    - Check network connectivity between pods
    - Review DNS resolution

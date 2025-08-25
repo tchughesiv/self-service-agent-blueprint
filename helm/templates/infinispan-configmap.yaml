@@ -7,38 +7,12 @@ metadata:
   labels:
     {{- include "self-service-agent.labels" . | nindent 4 }}
 data:
-  users.properties: |
-    admin=password
-  groups.properties: |
-    admin=admin
   infinispan.xml: |
     <?xml version="1.0" encoding="UTF-8"?>
-    <server xmlns="urn:infinispan:server:15.0">
-      <interfaces>
-        <interface name="public">
-          <inet-address value="${infinispan.bind.address:0.0.0.0}"/>
-        </interface>
-      </interfaces>
-
-      <socket-bindings default-interface="public" port-offset="${infinispan.socket.binding.port-offset:0}">
-        <socket-binding name="default" port="${infinispan.bind.port:11222}"/>
-      </socket-bindings>
-
-      <security>
-        <security-realms>
-          <security-realm name="default">
-            <properties-realm groups-attribute="Roles">
-              <user-properties path="users.properties"/>
-              <group-properties path="groups.properties"/>
-            </properties-realm>
-          </security-realm>
-        </security-realms>
-      </security>
-      
+    <infinispan xmlns="urn:infinispan:config:15.0">
       <cache-container name="default" statistics="true">
         <transport cluster="{{ include "self-service-agent.fullname" . }}-cluster" stack="tcp"/>
         
-        <!-- Session cache configuration -->
         <distributed-cache name="sessions" mode="SYNC" owners="2" segments="256">
           <expiration lifespan="3600000" max-idle="1800000"/>
           {{- if .Values.infinispan.persistence.enabled }}
@@ -52,10 +26,5 @@ data:
           <memory max-count="10000" when-full="REMOVE"/>
         </distributed-cache>
       </cache-container>
-
-      <endpoints socket-binding="default" security-realm="default">
-        <hotrod-connector name="hotrod"/>
-        <rest-connector name="rest"/>
-      </endpoints>
-    </server>
+    </infinispan>
 {{- end }}
