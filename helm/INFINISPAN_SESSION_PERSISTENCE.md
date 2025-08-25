@@ -60,9 +60,9 @@ infinispan:
     
     caches:
       sessions:
-        mode: "distributed"
-        owners: 2
-        segments: 256
+        mode: "SYNC"      # Synchronization mode: SYNC or ASYNC
+        owners: 2         # Number of owners for distributed cache
+        segments: 256     # Number of segments for distribution
         expiration:
           lifespan: 3600000  # 1 hour in milliseconds
           maxIdle: 1800000   # 30 minutes in milliseconds
@@ -218,17 +218,22 @@ For production deployments, consider:
 
 ### Common Issues
 
-1. **Sessions not persisting**
+1. **Infinispan startup errors with "illegal value" for mode**
+   - **Error**: `ISPN000687: Attribute 'mode' of element 'distributed-cache' has an illegal value 'distributed'`
+   - **Solution**: The `mode` attribute expects synchronization values (`SYNC` or `ASYNC`), not cache types
+   - **Fix**: Ensure `mode: "SYNC"` is set in values.yaml, not `mode: "distributed"`
+
+2. **Sessions not persisting**
    - Check if Infinispan pods are running: `kubectl get pods -l app.kubernetes.io/component=infinispan`
    - Verify cache configuration in ConfigMap
    - Check llama-stack environment variables
 
-2. **Storage issues**
+3. **Storage issues**
    - Verify PVC is bound: `kubectl get pvc`
    - Check available storage in cluster
    - Review storage class configuration
 
-3. **Connection issues**
+4. **Connection issues**
    - Verify service endpoints: `kubectl get endpoints`
    - Check network connectivity between pods
    - Review DNS resolution

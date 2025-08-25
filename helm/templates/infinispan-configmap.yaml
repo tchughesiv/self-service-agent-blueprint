@@ -18,13 +18,13 @@ data:
         <transport cluster="{{ include "self-service-agent.fullname" . }}-cluster" stack="tcp"/>
         
         <!-- Session cache configuration -->
-        <distributed-cache name="{{ .Values.infinispan.config.caches.sessions.cacheName | default "sessions" }}" 
-                          mode="{{ .Values.infinispan.config.caches.sessions.mode | default "SYNC" }}"
-                          owners="{{ .Values.infinispan.config.caches.sessions.owners | default 2 }}"
-                          segments="{{ .Values.infinispan.config.caches.sessions.segments | default 256 }}">
+        <distributed-cache name="sessions"
+                          mode="SYNC"
+                          owners="2"
+                          segments="256">
           
-          <expiration lifespan="{{ .Values.infinispan.config.caches.sessions.expiration.lifespan | default 3600000 }}"
-                     max-idle="{{ .Values.infinispan.config.caches.sessions.expiration.maxIdle | default 1800000 }}"/>
+          <expiration lifespan="3600000"
+                     max-idle="1800000"/>
           
           {{- if .Values.infinispan.persistence.enabled }}
           <persistence passivation="false">

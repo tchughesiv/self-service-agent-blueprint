@@ -113,9 +113,9 @@ infinispan:
     # Cache configuration for session storage
     caches:
       sessions:
-        mode: "distributed"
-        owners: 2
-        segments: 256
+        mode: "SYNC"  # Synchronization mode: SYNC or ASYNC
+        owners: 2     # Number of owners for distributed cache
+        segments: 256 # Number of segments for distribution
         expiration:
           lifespan: 3600000  # 1 hour in milliseconds
           maxIdle: 1800000   # 30 minutes in milliseconds
