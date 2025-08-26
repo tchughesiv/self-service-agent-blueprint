@@ -7,21 +7,14 @@ on:
   workflow_dispatch:
 
 env:
- BRANCH_NAME: ${{ github.head_ref || github.ref_name }}    
+ VERSION: ${{ github.head_ref || github.ref_name }}.${{ github.sha }}
+ REGISTRY: quay.io/ecosystem-appeng
 
 jobs:
   build-and-push:
     if: github.repository_owner == 'RHEcosystemAppEng'
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - name: self-service-agent
-            context: .
-          - name: self-service-agent-asset-manager
-            context: ./asset-manager
-          - name: self-service-agent-employee-info
-            context: ./mcp-servers/employee-info
+    
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -36,16 +29,8 @@ jobs:
           username: ${{ secrets.QUAY_USERNAME }}
           password: ${{ secrets.QUAY_PASSWORD }}
 
-      - name: Extract version from the GitHub context
-        id: version
-        run: |
-          version=${{ env.BRANCH_NAME }}.${{ github.sha }}
-          echo "tag=$version" >> $GITHUB_OUTPUT
-
-      - name: Build and push ${{ matrix.name }}
-        uses: docker/build-push-action@v5
-        with:
-          context: ${{ matrix.context }}
-          file: ${{ matrix.context }}/Containerfile
-          push: true
-          tags: quay.io/ecosystem-appeng/${{ matrix.name }}:${{ steps.version.outputs.tag }}
+      - name: Build all Images
+        run: make build-all-images
+        
+      - name: Push all Images
+        run: make push-all-images
