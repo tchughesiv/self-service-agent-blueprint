@@ -52,6 +52,11 @@ helm_llama_stack_args = \
     $(if $(SAFETY_API_TOKEN),--set global.models.$(SAFETY).apiToken='$(SAFETY_API_TOKEN)',) \
     $(if $(LLAMA_STACK_ENV),--set-json llama-stack.secrets='$(LLAMA_STACK_ENV)',)
 
+# Version target
+.PHONY: version
+version:
+	@echo $(VERSION)
+
 # Default target
 .PHONY: help
 help:
@@ -84,6 +89,7 @@ help:
 	@echo "  test-mcp-emp-info           - Run tests for employee info MCP server"
 	@echo "  test-mcp-snow               - Run tests for snow MCP server"
 	@echo "  test-short-integration      - Run short integration tests"
+	@echo "  version                     - Print the current VERSION"
 	@echo ""
 	@echo "Configuration options (set via environment variables or make arguments):"
 	@echo "  CONTAINER_TOOL           - Container build tool (default: podman)"
