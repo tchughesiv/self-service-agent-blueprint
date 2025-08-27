@@ -217,7 +217,7 @@ The framework includes robust error handling:
 
 ### Adding New Metrics
 
-Extend `_create_laptop_refresh_metrics()` in `deep_eval.py`:
+Extend `get_metrics()` in `get_deepeval_metrics.py`:
 
 ```python
 ConversationalGEval(

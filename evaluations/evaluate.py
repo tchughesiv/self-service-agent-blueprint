@@ -28,6 +28,7 @@ Dependencies:
 """
 
 import argparse
+import json
 import logging
 import subprocess
 import sys
@@ -162,7 +163,277 @@ def _parse_arguments() -> argparse.Namespace:
         default=20,
         help="Maximum number of turns per conversation in generator.py (default: 20)",
     )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Check known bad conversations - run deepeval on results/known_bad_conversation_results and expect failures",
+    )
     return parser.parse_args()
+
+
+def run_check_known_bad_conversations(timeout: int = 600) -> int:
+    """
+    Check known bad conversations by running deepeval on them.
+
+    This function runs deepeval on the conversations in results/known_bad_conversation_results
+    and expects them to fail. It returns a non-zero exit code unless all conversations
+    report errors as expected.
+
+    Args:
+        timeout: Timeout in seconds for deepeval execution
+
+    Returns:
+        Exit code (0 if all known bad conversations failed as expected, 1 otherwise)
+    """
+    logger.info("🔍 Starting Check of Known Bad Conversations")
+    logger.info("=" * 80)
+
+    check_start_time = time.time()
+
+    # Check if the known bad conversations directory exists
+    known_bad_dir = Path("results/known_bad_conversation_results")
+    if not known_bad_dir.exists():
+        logger.error(f"❌ Directory {known_bad_dir} does not exist")
+        return 1
+
+    # Count the known bad conversation files
+    known_bad_files = list(known_bad_dir.glob("*.json"))
+    if not known_bad_files:
+        logger.error(f"❌ No JSON files found in {known_bad_dir}")
+        return 1
+
+    logger.info(
+        f"📁 Found {len(known_bad_files)} known bad conversation files to check"
+    )
+    logger.info("-" * 60)
+
+    # Run deepeval on the known bad conversations
+    logger.info("📊 Running deepeval on known bad conversations...")
+    deep_eval_args = ["--results-dir", "results/known_bad_conversation_results"]
+    # For the check option, we want to run deep_eval and analyze the results
+    # even if it returns a non-zero exit code (which indicates it found issues)
+    run_script("deep_eval.py", args=deep_eval_args, timeout=timeout)
+    logger.info("📊 DeepEval completed, analyzing results...")
+
+    # Check the results to see if the conversations failed as expected
+    deep_eval_results_dir = Path("results/deep_eval_results")
+    if not deep_eval_results_dir.exists():
+        logger.error("❌ DeepEval results directory not found")
+        return 1
+
+    # Look for the combined results file
+    combined_results_file = deep_eval_results_dir / "deepeval_all_results.json"
+    if not combined_results_file.exists():
+        logger.error("❌ Combined DeepEval results file not found")
+        return 1
+
+    # Parse the results to check if known bad conversations failed
+    try:
+        with open(combined_results_file, "r") as f:
+            results_data = json.load(f)
+    except Exception as e:
+        logger.error(f"❌ Failed to parse DeepEval results: {e}")
+        return 1
+
+    # Analyze the results - the structure is different than expected
+    total_known_bad = len(known_bad_files)
+    successful_evaluations = 0
+    failed_evaluations = []
+    all_results = []
+
+    # The results file has a different structure with 'successful_evaluations' array
+    if "successful_evaluations" in results_data:
+        for result in results_data["successful_evaluations"]:
+            filename = result.get("filename", "")
+            # Check if this is one of our known bad conversations
+            if any(bad_file.stem in filename for bad_file in known_bad_files):
+                successful_evaluations += 1
+                all_results.append(result)
+
+    # Check for failed evaluations
+    if "failed_evaluations" in results_data:
+        for result in results_data["failed_evaluations"]:
+            filename = result.get("filename", "")
+            # Check if this is one of our known bad conversations
+            if any(bad_file.stem in filename for bad_file in known_bad_files):
+                failed_evaluations.append(result)
+
+    # Check results
+    check_duration = time.time() - check_start_time
+    logger.info("=" * 80)
+    logger.info(f"🏁 Check Complete (Duration: {check_duration:.2f}s)")
+
+    # Print summary similar to deep_eval_summary
+    print(f"\n{'=' * 80}")
+    print("🔍 KNOWN BAD CONVERSATIONS CHECK RESULTS")
+    print("=" * 80)
+
+    print("📊 OVERVIEW:")
+    print(f"   • Total known bad conversations: {total_known_bad}")
+    print(f"   • Successfully evaluated: {successful_evaluations}")
+    print(f"   • LLM evaluation failures: {len(failed_evaluations)}")
+
+    if successful_evaluations > 0:
+        # Calculate metric statistics for successfully evaluated conversations
+        total_metrics = 0
+        total_passed_metrics = 0
+        metric_stats = {}
+
+        for result in all_results:
+            metrics_results = result.get("metrics", [])
+            for metric in metrics_results:
+                metric_name = metric.get("metric", "Unknown")
+                if metric_name not in metric_stats:
+                    metric_stats[metric_name] = {"passed": 0, "total": 0}
+
+                metric_stats[metric_name]["total"] += 1
+                total_metrics += 1
+
+                if metric.get("success", False):
+                    metric_stats[metric_name]["passed"] += 1
+                    total_passed_metrics += 1
+
+        overall_metric_pass_rate = (
+            (total_passed_metrics / total_metrics * 100) if total_metrics > 0 else 0
+        )
+        print(
+            f"   • Overall metric pass rate: {total_passed_metrics}/{total_metrics} ({overall_metric_pass_rate:.1f}%)"
+        )
+
+        # Show individual metric pass rates
+        if metric_stats:
+            print("   • Individual metric performance:")
+            for metric_name, stats in metric_stats.items():
+                rate = (
+                    (stats["passed"] / stats["total"] * 100)
+                    if stats["total"] > 0
+                    else 0
+                )
+                status = "✅" if rate >= 80 else "⚠️" if rate >= 50 else "❌"
+                print(
+                    f"     {status} {metric_name}: {stats['passed']}/{stats['total']} ({rate:.1f}%)"
+                )
+
+    # Show conversation results
+    print(f"\n{'─' * 50}")
+    print("\n🏁 CONVERSATION RESULTS:")
+
+    passing_conversations = []
+    failing_conversations = []
+
+    if all_results:
+        for result in all_results:
+            filename = result.get("filename", "Unknown")
+            metrics_results = result.get("metrics", [])
+
+            if metrics_results:
+                # Check if all metrics failed for this conversation (as expected for known bad)
+                passed_metrics = [m for m in metrics_results if m.get("success", False)]
+                failed_metrics = [
+                    m for m in metrics_results if not m.get("success", False)
+                ]
+
+                # For known bad conversations, we expect most/all metrics to fail
+                conversation_failed_as_expected = len(failed_metrics) > len(
+                    passed_metrics
+                )
+
+                # Categorize conversations
+                # A conversation is "passing" only if ALL metrics passed (no failures)
+                # A conversation is "failing" if ANY metric failed
+                if len(failed_metrics) == 0:
+                    passing_conversations.append(
+                        (filename, passed_metrics, metrics_results)
+                    )
+                else:
+                    failing_conversations.append(
+                        (filename, failed_metrics, metrics_results)
+                    )
+
+                status_icon = "❌" if conversation_failed_as_expected else "⚠️"
+                print(
+                    f"   {status_icon} {filename}: {len(failed_metrics)}/{len(metrics_results)} metrics failed (as expected: {conversation_failed_as_expected})"
+                )
+
+                # Show failed metrics details
+                if failed_metrics:
+                    print("      Failed metrics:")
+                    for metric in failed_metrics:
+                        metric_name = metric.get("metric", "Unknown")
+                        score = metric.get("score", 0)
+                        reason = metric.get("reason", "No reason provided")
+                        print(
+                            f"        • {metric_name} (score: {score:.3f}) - {reason}"
+                        )
+            else:
+                print(f"   ⚠️  {filename}: No metric data available")
+
+    # Show summary of passing vs failing conversations
+    print(f"\n{'─' * 50}")
+    print("\n📊 CONVERSATION SUMMARY:")
+    print(f"   • Total conversations: {len(all_results)}")
+    print(f"   • Passing conversations: {len(passing_conversations)}")
+    print(f"   • Failing conversations: {len(failing_conversations)}")
+
+    if passing_conversations:
+        print("\n✅ PASSING CONVERSATIONS:")
+        for filename, passed_metrics, total_metrics in passing_conversations:
+            pass_rate = len(passed_metrics) / len(total_metrics) * 100
+            print(
+                f"   • {filename}: {len(passed_metrics)}/{len(total_metrics)} metrics passed ({pass_rate:.1f}%)"
+            )
+
+    if failing_conversations:
+        print("\n❌ FAILING CONVERSATIONS:")
+        for filename, failed_metrics, total_metrics in failing_conversations:
+            fail_rate = len(failed_metrics) / len(total_metrics) * 100
+            print(
+                f"   • {filename}: {len(failed_metrics)}/{len(total_metrics)} metrics failed ({fail_rate:.1f}%)"
+            )
+
+    # Show LLM evaluation failures
+    if failed_evaluations:
+        print("\n🔥 LLM EVALUATION FAILURES:")
+        print(f"   • Total LLM failures: {len(failed_evaluations)}")
+        for failure in failed_evaluations:
+            filename = failure.get("filename", "Unknown")
+            error_type = failure.get("error_type", "Unknown error")
+            print(f"   ❌ {filename}: {error_type}")
+
+    # Overall status
+    # For known bad conversations, we want them to fail the metrics (not pass)
+    # The check passes if:
+    # 1. All known bad conversations were evaluated successfully
+    # 2. At least some metrics in each conversation failed (as expected for bad conversations)
+    #
+    # A conversation is considered "failing as expected" if it has at least one failed metric
+    conversations_failing_as_expected = len(failing_conversations)
+
+    if (
+        successful_evaluations == total_known_bad
+        and conversations_failing_as_expected > 0
+    ):
+        print(
+            f"\n🎉 OVERALL RESULT: {conversations_failing_as_expected}/{total_known_bad} KNOWN BAD CONVERSATIONS FAILED AS EXPECTED"
+        )
+        exit_code = 0
+    else:
+        print("\n⚠️  OVERALL RESULT: NOT ALL KNOWN BAD CONVERSATIONS FAILED AS EXPECTED")
+        exit_code = 1
+
+    # Output files
+    print("=" * 80)
+    print("\n📁 OUTPUT FILES:")
+    if successful_evaluations > 0:
+        print(f"   • Individual results: {deep_eval_results_dir}/deepeval_*.json")
+        print(
+            f"   • Combined results: {deep_eval_results_dir}/deepeval_all_results.json"
+        )
+        print(f"   • Results directory: {deep_eval_results_dir}/")
+    else:
+        print("   • No output files generated due to evaluation failures")
+
+    return exit_code
 
 
 def run_evaluation_pipeline(
@@ -254,11 +525,19 @@ def main() -> int:
     """
     try:
         args = _parse_arguments()
-        return run_evaluation_pipeline(
-            num_conversations=args.num_conversations,
-            timeout=args.timeout,
-            max_turns=args.max_turns,
-        )
+
+        # Check if help was requested
+        if len(sys.argv) > 1 and any(arg in ["-h", "--help"] for arg in sys.argv):
+            return 0
+
+        if args.check:
+            return run_check_known_bad_conversations(timeout=args.timeout)
+        else:
+            return run_evaluation_pipeline(
+                num_conversations=args.num_conversations,
+                timeout=args.timeout,
+                max_turns=args.max_turns,
+            )
     except KeyboardInterrupt:
         logger.warning("⚠️  Pipeline interrupted by user")
         return 130

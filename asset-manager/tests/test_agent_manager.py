@@ -7,8 +7,11 @@ from asset_manager.util import load_config_from_path
 
 @pytest.fixture
 def test_subject():
-    config = load_config_from_path(Path("local_testing/config"))
-    return AgentManager(config)
+    config_path = Path("local_testing/config")
+    config = load_config_from_path(config_path)
+    agent_manager = AgentManager(config)
+    agent_manager.set_config_path(config_path)  # Set config path for prompt loading
+    return agent_manager
 
 
 def test_agent_manager(test_subject: AgentManager):

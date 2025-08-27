@@ -108,8 +108,9 @@ def main():
                 messages.append({"role": "user", "content": message})
                 agent_response = send_message_to_agent(agent_id, session_id, messages)
                 # check if we have figured out which agent to route the message to
-                if agent_response.strip() in agents:
-                    agent_id = agents[agent_response]
+                check_routing = agent_response.strip().rstrip("\n")
+                if check_routing in agents:
+                    agent_id = agents[check_routing]
                     session_create_response = client.agents.session.create(
                         agent_id, session_name=str(uuid.uuid4())
                     )
