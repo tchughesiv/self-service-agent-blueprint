@@ -58,6 +58,7 @@ class AgentManager(Manager):
             max_infer_iters=agent["max_infer_iters"],
             input_shields=agent["input_shields"],
             output_shields=agent["output_shields"],
+            enable_session_persistence=agent["enable_session_persistence"],
         )
         agent_config["name"] = agent["name"]
 

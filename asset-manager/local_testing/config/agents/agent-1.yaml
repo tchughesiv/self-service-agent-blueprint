@@ -6,3 +6,4 @@ tool_choice: "auto"
 input_shields: []
 output_shields: []
 max_infer_iters: 10
+enable_session_persistence: false
