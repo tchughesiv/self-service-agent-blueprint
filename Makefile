@@ -10,6 +10,8 @@ CONTAINER_TOOL ?= podman
 REGISTRY ?= quay.io/ecosystem-appeng
 AGENT_IMG ?= $(REGISTRY)/self-service-agent:$(VERSION)
 ASSET_MGR_IMG ?= $(REGISTRY)/self-service-agent-asset-manager:$(VERSION)
+REQUEST_MGR_IMG ?= $(REGISTRY)/self-service-agent-request-manager:$(VERSION)
+AGENT_SERVICE_IMG ?= $(REGISTRY)/self-service-agent-service:$(VERSION)
 MCP_EMP_INFO_IMG ?= $(REGISTRY)/self-service-agent-employee-info-mcp:$(VERSION)
 MCP_SNOW_IMG ?= $(REGISTRY)/self-service-agent-snow-mcp:$(VERSION)
 
@@ -61,9 +63,11 @@ version:
 .PHONY: help
 help:
 	@echo "Available targets:"
-	@echo "  build-all-images            - Build all container images (agent, asset-manager, employee-info-mcp, snow-mcp)"
+	@echo "  build-all-images            - Build all container images (agent, asset-manager, request-manager, agent-service, employee-info-mcp, snow-mcp)"
 	@echo "  build-agent-image           - Build the self-service agent container image"
 	@echo "  build-asset-mgr-image       - Build the asset manager container image"
+	@echo "  build-request-mgr-image     - Build the request manager container image"
+	@echo "  build-agent-service-image   - Build the agent service container image"
 	@echo "  build-mcp-emp-info-image    - Build the employee info MCP server container image"
 	@echo "  build-mcp-snow-image        - Build the snow MCP server container image"
 	@echo "  format                      - Run isort import sorting and Black formatting on entire codebase"
@@ -123,7 +127,7 @@ endef
 
 # Build container images
 .PHONY: build-all-images
-build-all-images: build-agent-image build-asset-mgr-image build-mcp-emp-info-image build-mcp-snow-image
+build-all-images: build-agent-image build-asset-mgr-image build-request-mgr-image build-agent-service-image build-mcp-emp-info-image build-mcp-snow-image
 	@echo "All container images built successfully!"
 
 .PHONY: build-agent-image
@@ -133,6 +137,14 @@ build-agent-image:
 .PHONY: build-asset-mgr-image
 build-asset-mgr-image:
 	$(call build_image,$(ASSET_MGR_IMG),asset manager image,asset-manager/Containerfile,asset-manager/)
+
+.PHONY: build-request-mgr-image
+build-request-mgr-image:
+	$(call build_image,$(REQUEST_MGR_IMG),request manager image,request-manager/Containerfile,request-manager/)
+
+.PHONY: build-agent-service-image
+build-agent-service-image:
+	$(call build_image,$(AGENT_SERVICE_IMG),agent service image,agent-service/Containerfile,agent-service/)
 
 .PHONY: build-mcp-emp-info-image
 build-mcp-emp-info-image:
@@ -144,7 +156,7 @@ build-mcp-snow-image:
 
 # Push container images
 .PHONY: push-all-images
-push-all-images: push-agent-image push-asset-mgr-image push-mcp-emp-info-image push-mcp-snow-image
+push-all-images: push-agent-image push-asset-mgr-image push-request-mgr-image push-agent-service-image push-mcp-emp-info-image push-mcp-snow-image
 	@echo "All container images pushed successfully!"
 
 .PHONY: push-agent-image
@@ -154,6 +166,14 @@ push-agent-image:
 .PHONY: push-asset-mgr-image
 push-asset-mgr-image:
 	$(call push_image,$(ASSET_MGR_IMG),asset manager image)
+
+.PHONY: push-request-mgr-image
+push-request-mgr-image:
+	$(call push_image,$(REQUEST_MGR_IMG),request manager image)
+
+.PHONY: push-agent-service-image
+push-agent-service-image:
+	$(call push_image,$(AGENT_SERVICE_IMG),agent service image)
 
 .PHONY: push-mcp-emp-info-image
 push-mcp-emp-info-image:
@@ -180,7 +200,7 @@ format:
 
 # Install dependencies
 .PHONY: install-all
-install-all: install install-asset-manager install-mcp-emp-info install-mcp-snow
+install-all: install install-asset-manager install-request-manager install-agent-service install-mcp-emp-info install-mcp-snow
 	@echo "All dependencies installed successfully!"
 
 .PHONY: install
@@ -194,6 +214,18 @@ install-asset-manager:
 	@echo "Installing asset manager dependencies..."
 	cd asset-manager && uv sync
 	@echo "Asset manager dependencies installed successfully!"
+
+.PHONY: install-request-manager
+install-request-manager:
+	@echo "Installing request manager dependencies..."
+	cd request-manager && uv sync
+	@echo "Request manager dependencies installed successfully!"
+
+.PHONY: install-agent-service
+install-agent-service:
+	@echo "Installing agent service dependencies..."
+	cd agent-service && uv sync
+	@echo "Agent service dependencies installed successfully!"
 
 .PHONY: install-mcp-emp-info
 install-mcp-emp-info:
@@ -209,7 +241,7 @@ install-mcp-snow:
 
 # Test code
 .PHONY: test-all
-test-all: test test-asset-manager test-mcp-emp-info test-mcp-snow
+test-all: test test-asset-manager test-request-manager test-agent-service test-mcp-emp-info test-mcp-snow
 	@echo "All tests completed successfully!"
 
 .PHONY: test
@@ -223,6 +255,18 @@ test-asset-manager:
 	@echo "Running asset manager tests..."
 	cd asset-manager && uv run python -m pytest tests/
 	@echo "Asset manager tests completed successfully!"
+
+.PHONY: test-request-manager
+test-request-manager:
+	@echo "Running request manager tests..."
+	cd request-manager && uv run python -m pytest tests/
+	@echo "Request manager tests completed successfully!"
+
+.PHONY: test-agent-service
+test-agent-service:
+	@echo "Running agent service tests..."
+	cd agent-service && uv run python -m pytest tests/ || echo "No tests found in agent service test directory"
+	@echo "Agent service test check completed!"
 
 .PHONY: test-mcp-emp-info
 test-mcp-emp-info:

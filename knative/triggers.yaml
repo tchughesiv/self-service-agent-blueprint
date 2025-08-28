@@ -1,0 +1,64 @@
+apiVersion: eventing.knative.dev/v1
+kind: Trigger
+metadata:
+  name: request-created-trigger
+  namespace: llama-stack-rag
+spec:
+  broker: self-service-agent-broker
+  filter:
+    attributes:
+      type: com.self-service-agent.request.created
+  subscriber:
+    ref:
+      apiVersion: serving.knative.dev/v1
+      kind: Service
+      name: self-service-agent
+---
+apiVersion: eventing.knative.dev/v1
+kind: Trigger
+metadata:
+  name: agent-response-trigger
+  namespace: llama-stack-rag
+spec:
+  broker: self-service-agent-broker
+  filter:
+    attributes:
+      type: com.self-service-agent.agent.response-ready
+  subscriber:
+    ref:
+      apiVersion: serving.knative.dev/v1
+      kind: Service
+      name: request-manager
+---
+apiVersion: eventing.knative.dev/v1
+kind: Trigger
+metadata:
+  name: session-events-trigger
+  namespace: llama-stack-rag
+spec:
+  broker: self-service-agent-broker
+  filter:
+    attributes:
+      type: com.self-service-agent.session.created
+  subscriber:
+    ref:
+      apiVersion: serving.knative.dev/v1
+      kind: Service
+      name: session-analytics
+---
+apiVersion: eventing.knative.dev/v1
+kind: Trigger
+metadata:
+  name: routing-trigger
+  namespace: llama-stack-rag
+spec:
+  broker: self-service-agent-broker
+  filter:
+    attributes:
+      type: com.self-service-agent.request.created
+      requires_routing: "true"
+  subscriber:
+    ref:
+      apiVersion: serving.knative.dev/v1
+      kind: Service
+      name: routing-agent

@@ -1,0 +1,70 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: request-manager
+  namespace: llama-stack-rag
+  annotations:
+    # Auto-scaling configuration
+    autoscaling.knative.dev/minScale: "1"
+    autoscaling.knative.dev/maxScale: "10"
+    autoscaling.knative.dev/target: "10"
+    # Networking
+    networking.knative.dev/visibility: cluster-local
+spec:
+  template:
+    metadata:
+      annotations:
+        # Resource limits
+        autoscaling.knative.dev/class: kpa.autoscaling.knative.dev
+        autoscaling.knative.dev/metric: concurrency
+    spec:
+      containerConcurrency: 100
+      timeoutSeconds: 300
+      containers:
+      - name: request-manager
+        image: quay.io/ecosystem-appeng/self-service-agent-request-manager:0.1.0
+        ports:
+        - containerPort: 8080
+          protocol: TCP
+        env:
+        - name: POSTGRES_HOST
+          value: "pgvector"
+        - name: POSTGRES_PORT
+          value: "5432"
+        - name: POSTGRES_DB
+          value: "llama_agents"
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: pgvector-secret
+              key: user
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: pgvector-secret
+              key: password
+        - name: BROKER_URL
+          value: "http://broker-ingress.knative-eventing.svc.cluster.local/llama-stack-rag/self-service-agent-broker"
+        - name: LOG_LEVEL
+          value: "INFO"
+        - name: SQL_DEBUG
+          value: "false"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
