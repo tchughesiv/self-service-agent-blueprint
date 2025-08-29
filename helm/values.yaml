@@ -87,6 +87,8 @@ pgvector:
       vectordb: false
     - name: llama_responses
       vectordb: false
+    - name: request_sessions
+      vectordb: false
 
 # Llama Stack agents configuration with PostgreSQL persistence
 llama-stack:
