@@ -268,7 +268,7 @@ test-short-integration:
 # Create namespace and deploy
 namespace:
 	@kubectl create namespace $(NAMESPACE) &> /dev/null && kubectl label namespace $(NAMESPACE) modelmesh-enabled=false ||:
-	@kubectl namespace $(NAMESPACE) &> /dev/null ||:
+	@kubectl get namespaces &> /dev/null ||:
 
 .PHONY: helm-depend
 helm-depend:
@@ -294,7 +294,7 @@ helm-install: namespace helm-depend
 		$(if $(filter true,$(SLACK_ENABLED)),--set slack.botToken=$(SLACK_BOT_TOKEN) --set slack.signingSecret=$(SLACK_SIGNING_SECRET),) \
 		$(EXTRA_HELM_ARGS)
 	@echo "Waiting for model services and llamastack to deploy. It may take around 10-15 minutes depending on the size of the model..."
-	@kubectl rollout status deploy/$(MAIN_CHART_NAME) -n $(NAMESPACE)
+	@kubectl rollout status deploy/$(MAIN_CHART_NAME) -n $(NAMESPACE) --timeout 20m
 	@echo "$(MAIN_CHART_NAME) installed successfully"
 	$(if $(filter true,$(SLACK_ENABLED)),$(PRINT_SLACK_URL))
 
@@ -328,4 +328,20 @@ helm-status:
 	kubectl get secrets -n $(NAMESPACE) | grep huggingface-secret || true
 
 	@echo "Listing pvcs..."
-	kubectl get pvc -n $(NAMESPACE) || true
+	kubectl get pvc -n $(NAMESPACE) || true	
+
+.PHONY: oc
+export OC = ./bin/oc
+oc: ## Download oc locally if necessary.
+ifeq (,$(wildcard $(OC)))
+ifeq (,$(shell which oc 2>/dev/null))
+	@{ \
+	set -e ;\
+	mkdir -p $(dir $(OC)) ;\
+	curl -sSLo oc.tar.gz https://mirror.openshift.com/pub/openshift-v4/x86_64/clients/ocp/4.11.6/openshift-client-linux.tar.gz ;\
+	tar -xf oc.tar.gz -C $(dir $(OC)) oc ;\
+	}
+else
+OC = $(shell which oc)
+endif
+endif

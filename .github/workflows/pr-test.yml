@@ -6,6 +6,11 @@ on:
 
 env:
   ASSET_MANAGER_DIR: asset-manager
+  # TODO: I tried to define LLM_API_TOKEN as a ${{ secret.LLM_API_TOKEN }}, 
+  # but it didn't work for the upstream repo.
+  # It only worked for the downstream repo.
+  # I spent a lot of time trying to figure out why it didn't work, but I couldn't :(
+  LLM_API_TOKEN: d81971fa4ad90db0134fd2a1ce3cd21e
 
 jobs:
   pull-request-tests:
@@ -34,4 +39,37 @@ jobs:
   
       - name: Run tests
         run: uv run pytest tests
+
+  e2e-tests:
+    name: Run e2e tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate LLM_API_TOKEN secret
+        shell: bash
+        env:
+          LLM_API_TOKEN: ${{ env.LLM_API_TOKEN }}
+        run: |
+          if [ -z "${LLM_API_TOKEN}" ]; then
+            echo "LLM_API_TOKEN secret is missing or empty. Set it in repository or organization secrets."
+            exit 1
+          fi
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Install Local Dependencies
+        shell: bash
+        run: |
+          make oc
+          echo "$GITHUB_WORKSPACE/bin" >> $GITHUB_PATH
+
+      - name: Initialize cluster and deploy application
+        uses: ./.github/actions/kind
+        env:
+          LLM_API_TOKEN: ${{ env.LLM_API_TOKEN }}
+
+      - name: Inspect Cluster - Self-Service Agent
+        if: failure()
+        uses: ./.github/actions/inspect
+        with:
+          artifactPrefix: self-service-agent
       
