@@ -1,0 +1,20 @@
+kubectl exec -n tommy pgvector-0 -- psql -U postgres -d rag_blueprint -c "
+INSERT INTO user_integration_configs (user_id, integration_type, enabled, config, priority, retry_count, retry_delay_seconds, created_at, updated_at)
+VALUES (
+  'U09EPAXGNLS', 
+  'SLACK', 
+  true, 
+  '{                                         
+    \"user_email\": \"tchughesiv@gmail.com\",
+    \"workspace_id\": \"T09EPAXES9G\",
+    \"thread_replies\": true,
+    \"mention_user\": true,     
+    \"include_agent_info\": true
+  }'::jsonb,
+  1,                    -- priority (1 = highest priority)
+  3,                    -- retry_count (retry up to 3 times)
+  60,                   -- retry_delay_seconds (wait 60 seconds between retries)
+  NOW(),                -- created_at
+  NOW()                 -- updated_at
+);
+"

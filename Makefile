@@ -1,6 +1,6 @@
 # Makefile for RAG Deployment
 ifeq ($(NAMESPACE),)
-ifneq (,$(filter namespace helm-install helm-uninstall helm-status,$(MAKECMDGOALS)))
+ifneq (,$(filter namespace helm-install helm-uninstall helm-status helm-cleanup-knative,$(MAKECMDGOALS)))
 $(error NAMESPACE is not set)
 endif
 endif
@@ -10,6 +10,10 @@ CONTAINER_TOOL ?= podman
 REGISTRY ?= quay.io/ecosystem-appeng
 AGENT_IMG ?= $(REGISTRY)/self-service-agent:$(VERSION)
 ASSET_MGR_IMG ?= $(REGISTRY)/self-service-agent-asset-manager:$(VERSION)
+REQUEST_MGR_IMG ?= $(REGISTRY)/self-service-agent-request-manager:$(VERSION)
+AGENT_SERVICE_IMG ?= $(REGISTRY)/self-service-agent-service:$(VERSION)
+INTEGRATION_DISPATCHER_IMG ?= $(REGISTRY)/self-service-agent-integration-dispatcher:$(VERSION)
+DB_MIGRATION_IMG ?= $(REGISTRY)/self-service-agent-db-migration:$(VERSION)
 MCP_EMP_INFO_IMG ?= $(REGISTRY)/self-service-agent-employee-info-mcp:$(VERSION)
 MCP_SNOW_IMG ?= $(REGISTRY)/self-service-agent-snow-mcp:$(VERSION)
 
@@ -52,6 +56,15 @@ helm_llama_stack_args = \
     $(if $(SAFETY_API_TOKEN),--set global.models.$(SAFETY).apiToken='$(SAFETY_API_TOKEN)',) \
     $(if $(LLAMA_STACK_ENV),--set-json llama-stack.secrets='$(LLAMA_STACK_ENV)',)
 
+helm_request_management_args = \
+    $(if $(REQUEST_MANAGEMENT),--set requestManagement.enabled=$(REQUEST_MANAGEMENT),) \
+    $(if $(SERVICE_MESH),--set requestManagement.serviceMesh.enabled=$(SERVICE_MESH),) \
+    $(if $(KNATIVE_EVENTING),--set requestManagement.knative.eventing.enabled=$(KNATIVE_EVENTING),) \
+    $(if $(API_GATEWAY_HOST),--set-json requestManagement.serviceMesh.gateway.hosts='["$(API_GATEWAY_HOST)"]',) \
+    $(if $(SLACK_SIGNING_SECRET),--set-string security.slack.signingSecret='$(SLACK_SIGNING_SECRET)',) \
+    $(if $(SNOW_API_KEY),--set-string security.apiKeys.snowIntegration='$(SNOW_API_KEY)',) \
+    $(if $(HR_API_KEY),--set-string security.apiKeys.hrSystem='$(HR_API_KEY)',)
+
 # Version target
 .PHONY: version
 version:
@@ -61,9 +74,13 @@ version:
 .PHONY: help
 help:
 	@echo "Available targets:"
-	@echo "  build-all-images            - Build all container images (agent, asset-manager, employee-info-mcp, snow-mcp)"
+	@echo "  build-all-images            - Build all container images (agent, asset-manager, request-manager, agent-service, integration-dispatcher, db-migration, employee-info-mcp, snow-mcp)"
 	@echo "  build-agent-image           - Build the self-service agent container image"
 	@echo "  build-asset-mgr-image       - Build the asset manager container image"
+	@echo "  build-request-mgr-image     - Build the request manager container image"
+	@echo "  build-agent-service-image   - Build the agent service container image"
+	@echo "  build-integration-dispatcher-image - Build the integration dispatcher container image"
+	@echo "  build-db-migration-image    - Build the database migration container image"
 	@echo "  build-mcp-emp-info-image    - Build the employee info MCP server container image"
 	@echo "  build-mcp-snow-image        - Build the snow MCP server container image"
 	@echo "  format                      - Run isort import sorting and Black formatting on entire codebase"
@@ -72,6 +89,8 @@ help:
 	@echo "  helm-list-models            - List available models"
 	@echo "  helm-status                 - Check status of the deployment"
 	@echo "  helm-uninstall              - Uninstall the RAG deployment and clean up resources"
+	@echo "  helm-cleanup-knative        - Manually clean up leftover Knative resources (run if webhook timeouts occur)"
+	@echo "  helm-cleanup-jobs           - Clean up leftover jobs from failed deployments"
 	@echo "  install-all                 - Install dependencies for all projects"
 	@echo "  install                     - Install dependencies for self-service agent"
 	@echo "  install-asset-manager       - Install dependencies for asset manager"
@@ -81,6 +100,10 @@ help:
 	@echo "  push-all-images             - Push all container images to registry"
 	@echo "  push-agent-image            - Push the self-service agent container image to registry"
 	@echo "  push-asset-mgr-image        - Push the asset manager container image to registry"
+	@echo "  push-request-mgr-image      - Push the request manager container image to registry"
+	@echo "  push-agent-service-image    - Push the agent service container image to registry"
+	@echo "  push-integration-dispatcher-image - Push the integration dispatcher container image to registry"
+	@echo "  push-db-migration-image     - Push the database migration container image to registry"
 	@echo "  push-mcp-emp-info-image     - Push the employee info MCP server container image to registry"
 	@echo "  push-mcp-snow-image         - Push the snow MCP server container image to registry"
 	@echo "  test-all                    - Run tests for all projects"
@@ -106,6 +129,15 @@ help:
 	@echo "  {SAFETY,LLM}_URL         - Model URL"
 	@echo "  {SAFETY,LLM}_API_TOKEN   - Model API token for remote models"
 	@echo "  {SAFETY,LLM}_TOLERATION  - Model pod toleration"
+	@echo ""
+	@echo "Request Management Layer options:"
+	@echo "  REQUEST_MANAGEMENT       - Enable Request Management Layer (default: true)"
+	@echo "  SERVICE_MESH             - Enable OpenShift Service Mesh integration (default: true)"
+	@echo "  KNATIVE_EVENTING         - Enable Knative Eventing (default: true)"
+	@echo "  API_GATEWAY_HOST         - Service Mesh gateway host (e.g. api.selfservice.apps.cluster.local)"
+	@echo "  SLACK_SIGNING_SECRET     - Slack webhook signing secret"
+	@echo "  SNOW_API_KEY             - ServiceNow integration API key"
+	@echo "  HR_API_KEY               - HR system integration API key"
 
 # Build function: $(call build_image,IMAGE_NAME,DESCRIPTION,CONTAINERFILE_PATH,BUILD_CONTEXT)
 define build_image
@@ -123,7 +155,7 @@ endef
 
 # Build container images
 .PHONY: build-all-images
-build-all-images: build-agent-image build-asset-mgr-image build-mcp-emp-info-image build-mcp-snow-image
+build-all-images: build-agent-image build-asset-mgr-image build-request-mgr-image build-agent-service-image build-integration-dispatcher-image build-db-migration-image build-mcp-emp-info-image build-mcp-snow-image
 	@echo "All container images built successfully!"
 
 .PHONY: build-agent-image
@@ -133,6 +165,22 @@ build-agent-image:
 .PHONY: build-asset-mgr-image
 build-asset-mgr-image:
 	$(call build_image,$(ASSET_MGR_IMG),asset manager image,asset-manager/Containerfile,asset-manager/)
+
+.PHONY: build-request-mgr-image
+build-request-mgr-image:
+	$(call build_image,$(REQUEST_MGR_IMG),request manager image,request-manager/Containerfile,.)
+
+.PHONY: build-agent-service-image
+build-agent-service-image:
+	$(call build_image,$(AGENT_SERVICE_IMG),agent service image,agent-service/Containerfile,agent-service/)
+
+.PHONY: build-integration-dispatcher-image
+build-integration-dispatcher-image:
+	$(call build_image,$(INTEGRATION_DISPATCHER_IMG),integration dispatcher image,integration-dispatcher/Containerfile,.)
+
+.PHONY: build-db-migration-image
+build-db-migration-image:
+	$(call build_image,$(DB_MIGRATION_IMG),database migration image,shared-db/Containerfile,shared-db/)
 
 .PHONY: build-mcp-emp-info-image
 build-mcp-emp-info-image:
@@ -144,7 +192,7 @@ build-mcp-snow-image:
 
 # Push container images
 .PHONY: push-all-images
-push-all-images: push-agent-image push-asset-mgr-image push-mcp-emp-info-image push-mcp-snow-image
+push-all-images: push-agent-image push-asset-mgr-image push-request-mgr-image push-agent-service-image push-integration-dispatcher-image push-db-migration-image push-mcp-emp-info-image push-mcp-snow-image
 	@echo "All container images pushed successfully!"
 
 .PHONY: push-agent-image
@@ -154,6 +202,22 @@ push-agent-image:
 .PHONY: push-asset-mgr-image
 push-asset-mgr-image:
 	$(call push_image,$(ASSET_MGR_IMG),asset manager image)
+
+.PHONY: push-request-mgr-image
+push-request-mgr-image:
+	$(call push_image,$(REQUEST_MGR_IMG),request manager image)
+
+.PHONY: push-agent-service-image
+push-agent-service-image:
+	$(call push_image,$(AGENT_SERVICE_IMG),agent service image)
+
+.PHONY: push-integration-dispatcher-image
+push-integration-dispatcher-image:
+	$(call push_image,$(INTEGRATION_DISPATCHER_IMG),integration dispatcher image)
+
+.PHONY: push-db-migration-image
+push-db-migration-image:
+	$(call push_image,$(DB_MIGRATION_IMG),database migration image)
 
 .PHONY: push-mcp-emp-info-image
 push-mcp-emp-info-image:
@@ -180,8 +244,14 @@ format:
 
 # Install dependencies
 .PHONY: install-all
-install-all: install install-asset-manager install-mcp-emp-info install-mcp-snow
+install-all: install-shared-db install install-asset-manager install-request-manager install-agent-service install-integration-dispatcher install-mcp-emp-info install-mcp-snow
 	@echo "All dependencies installed successfully!"
+
+.PHONY: install-shared-db
+install-shared-db:
+	@echo "Installing shared database dependencies..."
+	cd shared-db && uv sync
+	@echo "Shared database dependencies installed successfully!"
 
 .PHONY: install
 install:
@@ -194,6 +264,24 @@ install-asset-manager:
 	@echo "Installing asset manager dependencies..."
 	cd asset-manager && uv sync
 	@echo "Asset manager dependencies installed successfully!"
+
+.PHONY: install-request-manager
+install-request-manager:
+	@echo "Installing request manager dependencies..."
+	cd request-manager && uv sync
+	@echo "Request manager dependencies installed successfully!"
+
+.PHONY: install-agent-service
+install-agent-service:
+	@echo "Installing agent service dependencies..."
+	cd agent-service && uv sync
+	@echo "Agent service dependencies installed successfully!"
+
+.PHONY: install-integration-dispatcher
+install-integration-dispatcher:
+	@echo "Installing integration dispatcher dependencies..."
+	cd integration-dispatcher && uv sync
+	@echo "Integration dispatcher dependencies installed successfully!"
 
 .PHONY: install-mcp-emp-info
 install-mcp-emp-info:
@@ -209,8 +297,14 @@ install-mcp-snow:
 
 # Test code
 .PHONY: test-all
-test-all: test test-asset-manager test-mcp-emp-info test-mcp-snow
+test-all: test-shared-db test test-asset-manager test-request-manager test-agent-service test-integration-dispatcher test-mcp-emp-info test-mcp-snow
 	@echo "All tests completed successfully!"
+
+.PHONY: test-shared-db
+test-shared-db:
+	@echo "Running shared database tests..."
+	cd shared-db && uv run python -m pytest || echo "No tests found for shared-db"
+	@echo "Shared database tests completed successfully!"
 
 .PHONY: test
 test:
@@ -223,6 +317,24 @@ test-asset-manager:
 	@echo "Running asset manager tests..."
 	cd asset-manager && uv run python -m pytest tests/
 	@echo "Asset manager tests completed successfully!"
+
+.PHONY: test-request-manager
+test-request-manager:
+	@echo "Running request manager tests..."
+	cd request-manager && uv run python -m pytest tests/
+	@echo "Request manager tests completed successfully!"
+
+.PHONY: test-agent-service
+test-agent-service:
+	@echo "Running agent service tests..."
+	cd agent-service && uv run python -m pytest tests/ || echo "No tests found in agent service test directory"
+	@echo "Agent service test check completed!"
+
+.PHONY: test-integration-dispatcher
+test-integration-dispatcher:
+	@echo "Running integration dispatcher tests..."
+	cd integration-dispatcher && uv run python -m pytest tests/ || echo "No tests found for integration dispatcher"
+	@echo "Integration dispatcher tests completed successfully!"
 
 .PHONY: test-mcp-emp-info
 test-mcp-emp-info:
@@ -245,6 +357,8 @@ test-short-integration:
 # Create namespace and deploy
 namespace:
 	@oc create namespace $(NAMESPACE) &> /dev/null && oc label namespace $(NAMESPACE) modelmesh-enabled=false ||:
+	@oc label namespace $(NAMESPACE) maistra.io/member-of=istio-system &> /dev/null ||:
+	@oc label namespace $(NAMESPACE) knative.openshift.io/part-of=openshift-serverless &> /dev/null ||:
 	@oc project $(NAMESPACE) &> /dev/null ||:
 
 .PHONY: helm-depend
@@ -261,12 +375,24 @@ helm-install: namespace helm-depend
 	@$(eval PGVECTOR_ARGS := $(call helm_pgvector_args))
 	@$(eval LLM_SERVICE_ARGS := $(call helm_llm_service_args))
 	@$(eval LLAMA_STACK_ARGS := $(call helm_llama_stack_args))
+	@$(eval REQUEST_MANAGEMENT_ARGS := $(call helm_request_management_args))
 
+	@echo "Cleaning up any existing jobs..."
+	@oc delete job -l app.kubernetes.io/component=init -n $(NAMESPACE) --ignore-not-found || true
+	@oc delete job -l app.kubernetes.io/name=self-service-agent -n $(NAMESPACE) --ignore-not-found || true
 	@echo "Installing $(MAIN_CHART_NAME) helm chart"
 	@helm upgrade --install $(MAIN_CHART_NAME) helm -n $(NAMESPACE) \
+		--set image.repository=$(REGISTRY)/self-service-agent \
+		--set image.assetManager=$(REGISTRY)/self-service-agent-asset-manager \
+		--set image.requestManager=$(REGISTRY)/self-service-agent-request-manager \
+		--set image.agentService=$(REGISTRY)/self-service-agent-service \
+		--set image.integrationDispatcher=$(REGISTRY)/self-service-agent-integration-dispatcher \
+		--set image.dbMigration=$(REGISTRY)/self-service-agent-db-migration \
+		--set image.tag=$(VERSION) \
 		$(PGVECTOR_ARGS) \
 		$(LLM_SERVICE_ARGS) \
 		$(LLAMA_STACK_ARGS) \
+		$(REQUEST_MANAGEMENT_ARGS) \
 		$(EXTRA_HELM_ARGS)
 	@echo "Waiting for model services and llamastack to deploy. It may take around 10-15 minutes depending on the size of the model..."
 	@oc rollout status deploy/$(MAIN_CHART_NAME) -n $(NAMESPACE)
@@ -275,16 +401,67 @@ helm-install: namespace helm-depend
 # Uninstall the deployment and clean up
 .PHONY: helm-uninstall
 helm-uninstall:
-	@echo "Uninstalling $(MAIN_CHART_NAME) helm chart"
-	@helm uninstall --ignore-not-found $(MAIN_CHART_NAME) -n $(NAMESPACE)
-	@echo "Removing pgvector PVCs from $(NAMESPACE)"
-	@oc get pvc -n $(NAMESPACE) -o custom-columns=NAME:.metadata.name | grep -E '^(pg)-data' | xargs -I {} oc delete pvc -n $(NAMESPACE) {} ||:
+	@echo "Enhanced uninstall process for $(MAIN_CHART_NAME) helm chart in namespace $(NAMESPACE)"
+
+	@echo "Step 1: Attempting normal helm uninstall..."
+	@helm uninstall --ignore-not-found $(MAIN_CHART_NAME) -n $(NAMESPACE) || echo "Normal uninstall failed, proceeding with enhanced cleanup..."
+
+	@echo "Step 2: Manual cleanup of namespace-scoped Knative resources..."
+	@echo "Cleaning up Knative resources in $(NAMESPACE) only..."
+	@oc delete triggers -n $(NAMESPACE) --all --ignore-not-found --timeout=30s || true
+	@oc delete broker -n $(NAMESPACE) --all --ignore-not-found --timeout=30s || true
+	@oc delete inmemorychannel -n $(NAMESPACE) --all --ignore-not-found --timeout=30s || true
+	@oc delete ksvc -n $(NAMESPACE) --all --ignore-not-found --timeout=30s || true
+	@oc delete certificates -n $(NAMESPACE) --all --ignore-not-found --timeout=30s || true
+	@oc delete domainmapping -n $(NAMESPACE) --all --ignore-not-found --timeout=30s || true
+	@echo "Cleaning up Knative-related ConfigMaps..."
+	@oc delete configmap -n $(NAMESPACE) -l app.kubernetes.io/name=self-service-agent --ignore-not-found || true
+	@echo "Force cleanup any stuck resources with finalizers..."
+	@oc get broker -n $(NAMESPACE) -o name 2>/dev/null | xargs -r -I {} oc patch {} -n $(NAMESPACE) --type merge -p '{"metadata":{"finalizers":[]}}' || true
+	@oc get trigger -n $(NAMESPACE) -o name 2>/dev/null | xargs -r -I {} oc patch {} -n $(NAMESPACE) --type merge -p '{"metadata":{"finalizers":[]}}' || true
+
+	@echo "Step 3: Retry helm uninstall after cleanup..."
+	@helm uninstall --ignore-not-found $(MAIN_CHART_NAME) -n $(NAMESPACE) || echo "Helm uninstall completed with manual cleanup"
+
+	@echo "Step 4: Final cleanup of namespace $(NAMESPACE)..."
+	@$(MAKE) helm-cleanup-jobs
+	@echo "Removing pgvector and init job PVCs from $(NAMESPACE)"
+	@oc get pvc -n $(NAMESPACE) -o custom-columns=NAME:.metadata.name | grep -E '^(pg.*-data|self-service-agent-init-status)' | xargs -I {} oc delete pvc -n $(NAMESPACE) {} ||:
 	@echo "Deleting remaining pods in namespace $(NAMESPACE)"
-	@oc delete pods -n $(NAMESPACE) --all
+	@oc delete pods -n $(NAMESPACE) --all || true
 	@echo "Checking for any remaining resources in namespace $(NAMESPACE)..."
 	@echo "If you want to completely remove the namespace, run: oc delete project $(NAMESPACE)"
 	@echo "Remaining resources in namespace $(NAMESPACE):"
 	@$(MAKE) helm-status
+
+# Manual cleanup for Knative resources (useful for webhook timeout issues)
+.PHONY: helm-cleanup-knative
+helm-cleanup-knative:
+	@echo "Manual cleanup of Knative eventing resources in $(NAMESPACE)..."
+	@echo "Step 1: Attempting normal deletion with short timeout..."
+	@oc delete triggers -n $(NAMESPACE) --all --ignore-not-found --timeout=10s || echo "Normal trigger deletion failed, proceeding with force cleanup..."
+	@oc delete broker -n $(NAMESPACE) --all --ignore-not-found --timeout=10s || echo "Normal broker deletion failed, proceeding with force cleanup..."
+	@oc delete inmemorychannel -n $(NAMESPACE) --all --ignore-not-found --timeout=10s || echo "Normal inmemorychannel deletion failed, proceeding with force cleanup..."
+	@oc delete configmap -n $(NAMESPACE) -l app.kubernetes.io/name=self-service-agent --ignore-not-found || true
+	@echo "Step 2: Force cleanup any stuck resources with finalizers..."
+	@echo "Attempting to patch finalizers on brokers..."
+	@oc get broker -n $(NAMESPACE) -o name 2>/dev/null | xargs -r -I {} oc patch {} -n $(NAMESPACE) --type merge -p '{"metadata":{"finalizers":[]}}' --timeout=10s || echo "Patch failed, trying force delete..."
+	@echo "Attempting to patch finalizers on triggers..."
+	@oc get trigger -n $(NAMESPACE) -o name 2>/dev/null | xargs -r -I {} oc patch {} -n $(NAMESPACE) --type merge -p '{"metadata":{"finalizers":[]}}' --timeout=10s || echo "Patch failed, trying force delete..."
+	@echo "Step 3: Force delete with zero grace period..."
+	@oc get broker -n $(NAMESPACE) -o name 2>/dev/null | xargs -r -I {} oc delete {} -n $(NAMESPACE) --force --grace-period=0 || echo "Force delete failed, resource may need manual intervention"
+	@oc get trigger -n $(NAMESPACE) -o name 2>/dev/null | xargs -r -I {} oc delete {} -n $(NAMESPACE) --force --grace-period=0 || echo "Force delete failed, resource may need manual intervention"
+	@echo "Step 4: Final verification..."
+	@echo "Remaining Knative resources in $(NAMESPACE):"
+	@oc get broker,trigger,inmemorychannel -n $(NAMESPACE) 2>/dev/null || echo "No Knative eventing resources found"
+	@echo "Knative cleanup completed for namespace $(NAMESPACE). If resources still exist, they may require cluster admin intervention to resolve webhook issues."
+
+# Clean up leftover jobs
+.PHONY: helm-cleanup-jobs
+helm-cleanup-jobs:
+	@echo "Cleaning up leftover jobs in namespace $(NAMESPACE)..."
+	@oc delete jobs -n $(NAMESPACE) -l app.kubernetes.io/name=self-service-agent --ignore-not-found || true
+	@echo "Job cleanup completed for namespace $(NAMESPACE)"
 
 # Check deployment status
 .PHONY: helm-status

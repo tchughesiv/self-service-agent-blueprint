@@ -29,8 +29,10 @@ name = "asset-manager"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "fire" },
     { name = "llama-stack-client" },
     { name = "logging" },
+    { name = "requests" },
 ]
 
 [package.dev-dependencies]
@@ -43,8 +45,10 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "llama-stack-client", specifier = "==0.2.16" },
+    { name = "fire", specifier = ">=0.5.0" },
+    { name = "llama-stack-client", specifier = "==0.2.18" },
     { name = "logging", specifier = ">=0.4.9.6" },
+    { name = "requests", specifier = ">=2.31.0" },
 ]
 
 [package.metadata.requires-dev]
@@ -242,7 +246,7 @@ wheels = [
 
 [[package]]
 name = "llama-stack-client"
-version = "0.2.16"
+version = "0.2.18"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -261,9 +265,9 @@ dependencies = [
     { name = "tqdm" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/db/28/74ae2faae9af51205587b33fcf2f99a8af090de7aa4122701f2f70f04233/llama_stack_client-0.2.16.tar.gz", hash = "sha256:24294acc6bf40e79900a62f4fa61009acb9af7028b198b12c0ba8adab25c2049", size = 257642 }
+sdist = { url = "https://files.pythonhosted.org/packages/69/da/5e5a745495f8a2b8ef24fc4d01fe9031aa2277c36447cb22192ec8c8cc1e/llama_stack_client-0.2.18.tar.gz", hash = "sha256:860c885c9e549445178ac55cc9422e6e2a91215ac7aff5aaccfb42f3ce07e79e", size = 277284 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/30/ec/1874120a15b22f3a88d4e49700c870cc6540bc8c709a841db79a662d7949/llama_stack_client-0.2.16-py3-none-any.whl", hash = "sha256:5c0d13e6ac40143ce01cae4eec65fb39fe24e11f54b86afbd20f0033c38f83c0", size = 350329 },
+    { url = "https://files.pythonhosted.org/packages/0a/e4/e97f8fdd8a07aa1efc7f7e37b5657d84357b664bf70dd1885a437edc0699/llama_stack_client-0.2.18-py3-none-any.whl", hash = "sha256:90f827d5476f7fc15fd993f1863af6a6e72bd064646bf6a99435eb43a1327f70", size = 367586 },
 ]
 
 [[package]]

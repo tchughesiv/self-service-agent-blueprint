@@ -1,0 +1,172 @@
+{{- if and .Values.requestManagement.enabled .Values.requestManagement.requestManager.enabled .Values.requestManagement.useKnativeServices }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "self-service-agent.fullname" . }}-request-manager
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "self-service-agent.labels" . | nindent 4 }}
+  annotations:
+    security.istio.io/tlsMode: istio
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "self-service-agent.fullname" . }}-request-manager-role
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "self-service-agent.labels" . | nindent 4 }}
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list"]
+  resourceNames: ["pgvector", "api-keys", "slack-signing-secret"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "self-service-agent.fullname" . }}-request-manager-binding
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "self-service-agent.labels" . | nindent 4 }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "self-service-agent.fullname" . }}-request-manager
+  namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: Role
+  name: {{ include "self-service-agent.fullname" . }}-request-manager-role
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: {{ include "self-service-agent.fullname" . }}-request-manager
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "self-service-agent.labels" . | nindent 4 }}
+    app: {{ include "self-service-agent.fullname" . }}-request-manager
+    version: v1
+  annotations:
+    # Networking configuration
+    {{- if eq .Values.requestManagement.knative.serviceVisibility "cluster-local" }}
+    networking.knative.dev/visibility: cluster-local
+    {{- end }}
+    # Service Mesh integration annotations moved to pod template level
+spec:
+  template:
+    metadata:
+      labels:
+        {{- include "self-service-agent.labels" . | nindent 8 }}
+        app: {{ include "self-service-agent.fullname" . }}-request-manager
+        version: v1
+      annotations:
+        # Auto-scaling configuration
+        autoscaling.knative.dev/minScale: {{ .Values.requestManagement.requestManager.autoscaling.minScale | quote }}
+        autoscaling.knative.dev/maxScale: {{ .Values.requestManagement.requestManager.autoscaling.maxScale | quote }}
+        autoscaling.knative.dev/target: {{ .Values.requestManagement.requestManager.autoscaling.target | quote }}
+        # Resource limits
+        autoscaling.knative.dev/class: kpa.autoscaling.knative.dev
+        autoscaling.knative.dev/metric: concurrency
+        # Service Mesh sidecar configuration
+        sidecar.istio.io/inject: "true"
+        sidecar.istio.io/proxyCPU: "10m"
+        sidecar.istio.io/proxyMemory: "64Mi"
+        # Traffic configuration for Knative service port
+        traffic.sidecar.istio.io/includeInboundPorts: "8080"
+        traffic.sidecar.istio.io/excludeOutboundPorts: "5432"  # PostgreSQL
+    spec:
+      containerConcurrency: 100
+      timeoutSeconds: 300
+      serviceAccountName: {{ include "self-service-agent.fullname" . }}-request-manager
+      containers:
+      - name: request-manager
+        image: {{ .Values.image.requestManager }}:{{ .Values.image.tag }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        ports:
+        - containerPort: 8080
+          protocol: TCP
+        env:
+        - name: POSTGRES_HOST
+          valueFrom:
+            secretKeyRef:
+              name: pgvector
+              key: host
+        - name: POSTGRES_PORT
+          valueFrom:
+            secretKeyRef:
+              name: pgvector
+              key: port
+        - name: POSTGRES_DB
+          valueFrom:
+            secretKeyRef:
+              name: pgvector
+              key: dbname
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: pgvector
+              key: user
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: pgvector
+              key: password
+        - name: BROKER_URL
+          value: "{{ .Values.requestManagement.knative.broker.url }}/{{ .Release.Namespace }}/{{ .Values.requestManagement.knative.broker.name }}"
+        - name: LOG_LEVEL
+          value: "DEBUG"
+        - name: SQL_DEBUG
+          value: "false"
+        - name: EXPECTED_MIGRATION_VERSION
+          value: {{ .Values.database.expectedMigrationVersion | default "001" | quote }}
+        # Service Mesh and Security Configuration
+        - name: SLACK_SIGNING_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: slack-signing-secret
+              key: signing-secret
+        - name: SNOW_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: api-keys
+              key: snow-integration
+        - name: HR_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: api-keys
+              key: hr-system
+        - name: MONITORING_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: api-keys
+              key: monitoring-system
+        resources:
+          requests:
+            memory: {{ .Values.requestManagement.requestManager.resources.requests.memory }}
+            cpu: {{ .Values.requestManagement.requestManager.resources.requests.cpu }}
+          limits:
+            memory: {{ .Values.requestManagement.requestManager.resources.limits.memory }}
+            cpu: {{ .Values.requestManagement.requestManager.resources.limits.cpu }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+{{- end }}

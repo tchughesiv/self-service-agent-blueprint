@@ -1,0 +1,42 @@
+{{- if and .Values.requestManagement.enabled .Values.requestManagement.knative.enabled .Values.requestManagement.knative.domainMapping.enabled }}
+---
+apiVersion: serving.knative.dev/v1beta1
+kind: DomainMapping
+metadata:
+  name: {{ .Values.requestManagement.knative.domainMapping.domains.agentService }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "self-service-agent.labels" . | nindent 4 }}
+spec:
+  ref:
+    name: {{ include "self-service-agent.fullname" . }}-agent-service
+    kind: Service
+    apiVersion: serving.knative.dev/v1
+  # Use a simple .local domain that doesn't require external TLS
+---
+apiVersion: serving.knative.dev/v1beta1
+kind: DomainMapping
+metadata:
+  name: {{ .Values.requestManagement.knative.domainMapping.domains.requestManager }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "self-service-agent.labels" . | nindent 4 }}
+spec:
+  ref:
+    name: {{ include "self-service-agent.fullname" . }}-request-manager
+    kind: Service
+    apiVersion: serving.knative.dev/v1
+---
+apiVersion: serving.knative.dev/v1beta1
+kind: DomainMapping
+metadata:
+  name: {{ .Values.requestManagement.knative.domainMapping.domains.integrationDispatcher }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "self-service-agent.labels" . | nindent 4 }}
+spec:
+  ref:
+    name: {{ include "self-service-agent.fullname" . }}-integration-dispatcher
+    kind: Service
+    apiVersion: serving.knative.dev/v1
+{{- end }}

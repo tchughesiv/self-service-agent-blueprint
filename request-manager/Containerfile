@@ -1,0 +1,54 @@
+# Multi-stage build for Request Manager
+FROM python:3.12-slim as builder
+
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+
+# Copy shared database first
+WORKDIR /app
+COPY shared-db ./shared-db/
+
+# Set working directory for request manager
+WORKDIR /app/request-manager
+
+# Copy dependency files
+COPY request-manager/pyproject.toml request-manager/uv.lock ./
+
+# Install dependencies
+RUN uv sync --frozen --no-cache --no-dev
+
+# Production stage
+FROM python:3.12-slim
+
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+
+# Create non-root user
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+
+# Set working directory
+WORKDIR /app
+
+# Copy shared database and virtual environment from builder
+COPY --from=builder --chown=appuser:appuser /app/shared-db /app/shared-db
+COPY --from=builder --chown=appuser:appuser /app/request-manager/.venv /app/.venv
+
+# Copy application code
+COPY --chown=appuser:appuser request-manager/src/ ./src/
+COPY --chown=appuser:appuser request-manager/pyproject.toml ./
+
+# Set environment variables
+ENV PATH="/app/.venv/bin:$PATH"
+ENV PYTHONPATH="/app/shared-db/src:/app/src"
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Switch to non-root user
+USER appuser
+
+# Expose port
+EXPOSE 8080
+
+
+# Run the application
+CMD ["python", "-m", "uvicorn", "request_manager.main:app", "--host", "0.0.0.0", "--port", "8080"]

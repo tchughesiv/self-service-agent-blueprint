@@ -1,0 +1,88 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "self-service-agent.fullname" . }}-init
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "self-service-agent.labels" . | nindent 4 }}
+    app.kubernetes.io/component: init
+spec:
+  # Allow job to retry on failure
+  backoffLimit: 6
+  # Keep failed pods for debugging
+  ttlSecondsAfterFinished: 86400  # 24 hours
+  template:
+    metadata:
+      {{- if and .Values.requestManagement.enabled .Values.requestManagement.serviceMesh.enabled }}
+      annotations:
+        # Add Istio sidecar for mesh communication
+        sidecar.istio.io/inject: "{{ .Values.requestManagement.initJob.istio.sidecarInject }}"
+        sidecar.istio.io/proxyCPU: "10m"
+        sidecar.istio.io/proxyMemory: "64Mi"
+        # Configure sidecar to exit after main containers complete
+        sidecar.istio.io/proxyMetadata: |
+          EXIT_ON_ZERO_ACTIVE_CONNECTIONS: "true"
+        # Traffic configuration for init job
+        traffic.sidecar.istio.io/excludeOutboundPorts: "5432"  # PostgreSQL
+      {{- end }}
+      labels:
+        {{- include "self-service-agent.labels" . | nindent 8 }}
+        app.kubernetes.io/component: init
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "self-service-agent.serviceAccountName" . }}
+      restartPolicy: OnFailure
+      containers:
+        - name: init-and-complete
+          image: "{{ .Values.image.assetManager }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: LLAMA_STACK_MODELS
+              value: {{ include "self-service-agent.getModelList" . }}
+            - name: LLAMA_STACK_URL
+              value: {{ .Values.llama_stack_url }}
+            - name: LLAMASTACK_SERVICE_HOST
+              value: "llamastack"
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+
+              {{- if and .Values.requestManagement.enabled .Values.requestManagement.serviceMesh.enabled }}
+              echo "Waiting for Istio sidecar to be ready..."
+              until curl -fsS http://localhost:15021/healthz/ready; do
+                echo "Istio sidecar not ready, waiting..."
+                sleep 2
+              done
+              echo "Istio sidecar is ready"
+              {{- end }}
+              
+              echo "Waiting for LlamaStack at $LLAMA_STACK_URL..."
+              until curl -ks "$LLAMA_STACK_URL/" --max-time 5 --silent --fail || curl -ks "$LLAMA_STACK_URL" --max-time 5 --silent; do
+                echo "Still waiting for LlamaStack..."
+                sleep 10
+              done
+              echo "LlamaStack is ready"
+              
+              echo "Registering agents..."
+              
+              # Change to the asset manager directory and run the registration script
+              cd /app
+              
+              # Activate virtual environment and run the asset registration script
+              echo "Running asset registration script..."
+              /app/.venv/bin/python -m asset_manager.script.register_assets
+              
+              echo "Agents registered successfully"
+              
+              echo "Initialization job completed successfully"
+              
+              # Signal Istio sidecar to shut down
+              echo "Signaling Istio sidecar to terminate..."
+              curl -fsS -X POST http://localhost:15000/quitquitquit || true
+              
+              exit 0

@@ -1,0 +1,78 @@
+{{- if and .Values.requestManagement.enabled (not .Values.requestManagement.useKnativeServices) .Values.requestManagement.externalAccess.enabled (eq .Values.requestManagement.externalAccess.method "istio") .Values.requestManagement.istio.gateway.enabled }}
+---
+# Istio Gateway for external access
+apiVersion: networking.istio.io/v1beta1
+kind: Gateway
+metadata:
+  name: {{ include "self-service-agent.fullname" . }}-gateway
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "self-service-agent.labels" . | nindent 4 }}
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+  - port:
+      number: 80
+      name: http
+      protocol: HTTP
+    hosts:
+    - "*"
+
+---
+# VirtualService to route traffic to Request Manager
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: {{ include "self-service-agent.fullname" . }}-request-manager-vs
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "self-service-agent.labels" . | nindent 4 }}
+spec:
+  hosts:
+  - "*"
+  gateways:
+  - {{ include "self-service-agent.fullname" . }}-gateway
+  http:
+  - match:
+    - uri:
+        prefix: /
+    route:
+    - destination:
+        host: {{ include "self-service-agent.fullname" . }}-request-manager.{{ .Release.Namespace }}.svc.cluster.local
+        port:
+          number: 80
+    headers:
+      request:
+        set:
+          X-Forwarded-Proto: https
+    # Optional: Add rate limiting, JWT validation, etc.
+    {{- if .Values.requestManagement.istio.rateLimiting.enabled }}
+    fault:
+      delay:
+        percentage:
+          value: 0.1
+        fixedDelay: 5s
+    {{- end }}
+
+---
+# OpenShift Route to expose Istio Gateway
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: {{ include "self-service-agent.fullname" . }}-istio-gateway
+  namespace: istio-system
+  labels:
+    {{- include "self-service-agent.labels" . | nindent 4 }}
+spec:
+  to:
+    kind: Service
+    name: istio-ingressgateway
+    weight: 100
+  port:
+    targetPort: http2
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  wildcardPolicy: None
+{{- end }}

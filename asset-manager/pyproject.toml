@@ -5,8 +5,10 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "llama-stack-client==0.2.16",
+    "llama-stack-client==0.2.18",
     "logging>=0.4.9.6",
+    "fire>=0.5.0",
+    "requests>=2.31.0",
 ]
 
 [project.scripts]

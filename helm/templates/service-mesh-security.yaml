@@ -1,0 +1,209 @@
+{{- if and .Values.requestManagement.enabled .Values.requestManagement.serviceMesh.enabled }}
+---
+apiVersion: maistra.io/v1
+kind: ServiceMeshMember
+metadata:
+  name: default
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "self-service-agent.labels" . | nindent 4 }}
+spec:
+  controlPlaneRef:
+    namespace: {{ .Values.requestManagement.serviceMesh.controlPlane.namespace | default "istio-system" }}
+    name: {{ .Values.requestManagement.serviceMesh.controlPlane.name | default "basic" }}
+---
+apiVersion: security.istio.io/v1beta1
+kind: RequestAuthentication
+metadata:
+  name: {{ include "self-service-agent.fullname" . }}-jwt-auth
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "self-service-agent.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app: {{ include "self-service-agent.fullname" . }}-request-manager
+  jwtRules:
+  {{- range .Values.security.jwt.issuers }}
+  - issuer: {{ .issuer | quote }}
+    jwksUri: {{ .jwksUri | quote }}
+    audiences:
+    - {{ .audience | quote }}
+    forwardOriginalToken: true
+  {{- end }}
+---
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: {{ include "self-service-agent.fullname" . }}-api-access-policy
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "self-service-agent.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app: {{ include "self-service-agent.fullname" . }}-request-manager
+  rules:
+  # Allow health checks without authentication
+  - to:
+    - operation:
+        paths: ["/health", "/metrics"]
+  # Slack integration endpoint - requires Slack verification
+  - to:
+    - operation:
+        paths: ["/api/v1/requests/slack"]
+        methods: ["POST"]
+    when:
+    - key: request.headers[x-slack-signature]
+      values: ["*"]
+    - key: request.headers[x-slack-request-timestamp]
+      values: ["*"]
+  # Tool integration endpoint - requires API key or service account
+  - to:
+    - operation:
+        paths: ["/api/v1/requests/tool"]
+        methods: ["POST"]
+    when:
+    - key: request.headers[x-api-key]
+      values: ["*"]
+  # Web and CLI endpoints - require JWT authentication
+  - to:
+    - operation:
+        paths: ["/api/v1/requests/web", "/api/v1/requests/cli", "/api/v1/sessions/*"]
+    when:
+    - key: request.auth.claims[aud]
+      values: ["selfservice-api"]
+  # CloudEvent webhooks - require proper content type and source verification
+  - to:
+    - operation:
+        paths: ["/api/v1/events/cloudevents"]
+        methods: ["POST"]
+    when:
+    - key: request.headers[ce-source]
+      values: ["agent-service", "external-tool"]
+    - key: request.headers[content-type]
+      values: ["application/cloudevents+json", "application/json"]
+  # Internal service-to-service communication
+  - from:
+    - source:
+        principals: 
+          - "cluster.local/ns/{{ .Release.Namespace }}/sa/{{ include "self-service-agent.fullname" . }}-agent-service"
+          - "cluster.local/ns/{{ .Release.Namespace }}/sa/{{ include "self-service-agent.fullname" . }}-integration-dispatcher"
+        namespaces: ["{{ .Release.Namespace }}"]
+---
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: {{ include "self-service-agent.fullname" . }}-agent-service-policy
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "self-service-agent.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app: {{ include "self-service-agent.fullname" . }}-agent-service
+  rules:
+  # Allow health checks
+  - to:
+    - operation:
+        paths: ["/health"]
+  # Allow CloudEvent processing from Knative Eventing
+  - from:
+    - source:
+        namespaces: ["knative-eventing"]
+    to:
+    - operation:
+        paths: ["/"]
+        methods: ["POST"]
+  # Allow internal communication from request manager and integration dispatcher
+  - from:
+    - source:
+        principals: 
+          - "cluster.local/ns/{{ .Release.Namespace }}/sa/{{ include "self-service-agent.fullname" . }}-request-manager"
+          - "cluster.local/ns/{{ .Release.Namespace }}/sa/{{ include "self-service-agent.fullname" . }}-integration-dispatcher"
+---
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: {{ include "self-service-agent.fullname" . }}-integration-dispatcher-policy
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "self-service-agent.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app: {{ include "self-service-agent.fullname" . }}-integration-dispatcher
+  rules:
+  # Allow health checks
+  - to:
+    - operation:
+        paths: ["/health"]
+  # Allow CloudEvent processing from Knative Eventing (agent responses)
+  - from:
+    - source:
+        namespaces: ["knative-eventing"]
+    to:
+    - operation:
+        paths: ["/"]
+        methods: ["POST"]
+  # Allow user integration management API calls (via Service Mesh Gateway)
+  - to:
+    - operation:
+        paths: ["/api/v1/users/*/integrations*", "/api/v1/users/*/deliveries*"]
+    when:
+    - key: request.auth.claims[aud]
+      values: ["selfservice-api"]
+---
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: {{ include "self-service-agent.fullname" . }}-mtls
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "self-service-agent.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "self-service-agent.name" . }}
+  mtls:
+    mode: PERMISSIVE  # Allow both mTLS and plaintext for Knative Eventing compatibility
+---
+apiVersion: networking.istio.io/v1beta1
+kind: ServiceEntry
+metadata:
+  name: {{ include "self-service-agent.fullname" . }}-external-auth-service
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "self-service-agent.labels" . | nindent 4 }}
+spec:
+  hosts:
+  {{- range .Values.security.jwt.issuers }}
+  {{- $url := .issuer | replace "https://" "" | replace "http://" "" }}
+  {{- $parts := splitList "/" $url }}
+  - {{ index $parts 0 }}
+  {{- end }}
+  ports:
+  - number: 443
+    name: https
+    protocol: HTTPS
+  location: MESH_EXTERNAL
+  resolution: DNS
+---
+apiVersion: networking.istio.io/v1beta1
+kind: ServiceEntry
+metadata:
+  name: {{ include "self-service-agent.fullname" . }}-slack-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "self-service-agent.labels" . | nindent 4 }}
+spec:
+  hosts:
+  - slack.com
+  - api.slack.com
+  ports:
+  - number: 443
+    name: https
+    protocol: HTTPS
+  location: MESH_EXTERNAL
+  resolution: DNS
+{{- end }}

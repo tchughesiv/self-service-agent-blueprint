@@ -1,0 +1,126 @@
+{{- if and .Values.requestManagement.enabled .Values.requestManagement.serviceMesh.enabled }}
+---
+apiVersion: telemetry.istio.io/v1alpha1
+kind: Telemetry
+metadata:
+  name: {{ include "self-service-agent.fullname" . }}-request-manager-metrics
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "self-service-agent.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app: {{ include "self-service-agent.fullname" . }}-request-manager
+  metrics:
+  - providers:
+    - name: prometheus
+  - overrides:
+    - match:
+        metric: ALL_METRICS
+      tagOverrides:
+        request_id:
+          value: "%{REQUEST_ID}"
+        session_id:
+          value: "%{SESSION_ID}"
+        integration_type:
+          value: "%{INTEGRATION_TYPE}"
+        user_id:
+          value: "%{USER_ID}"
+---
+apiVersion: telemetry.istio.io/v1alpha1
+kind: Telemetry
+metadata:
+  name: {{ include "self-service-agent.fullname" . }}-request-manager-tracing
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "self-service-agent.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app: {{ include "self-service-agent.fullname" . }}-request-manager
+  tracing:
+  - providers:
+    - name: jaeger
+  - customTags:
+      request_id:
+        header:
+          name: x-request-id
+      session_id:
+        header:
+          name: x-session-id
+      integration_type:
+        header:
+          name: x-integration-type
+      user_id:
+        header:
+          name: x-user-id
+---
+apiVersion: telemetry.istio.io/v1alpha1
+kind: Telemetry
+metadata:
+  name: {{ include "self-service-agent.fullname" . }}-request-manager-access-logs
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "self-service-agent.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app: {{ include "self-service-agent.fullname" . }}-request-manager
+  accessLogging:
+  - providers:
+    - name: otel
+    - name: envoy
+  - disabled: false
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "self-service-agent.fullname" . }}-telemetry-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "self-service-agent.labels" . | nindent 4 }}
+data:
+  telemetry.yaml: |
+    # Custom telemetry configuration for Request Manager
+    metrics:
+      request_processing_time:
+        description: "Time taken to process requests"
+        unit: "milliseconds"
+        tags:
+          - integration_type
+          - user_id
+          - agent_id
+          - status
+      session_creation_rate:
+        description: "Rate of new session creation"
+        unit: "per_second"
+        tags:
+          - integration_type
+      event_publishing_success:
+        description: "CloudEvent publishing success rate"
+        unit: "percentage"
+        tags:
+          - event_type
+          - destination
+      database_connection_pool:
+        description: "Database connection pool metrics"
+        unit: "count"
+        tags:
+          - pool_status
+          - database_name
+    traces:
+      request_flow:
+        description: "End-to-end request processing trace"
+        spans:
+          - request_normalization
+          - session_lookup
+          - event_publishing
+          - response_handling
+      agent_interaction:
+        description: "Agent service interaction trace"
+        spans:
+          - cloudevent_received
+          - llama_stack_call
+          - response_generation
+          - response_publishing
+{{- end }}

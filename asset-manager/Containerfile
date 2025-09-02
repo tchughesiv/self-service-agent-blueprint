@@ -16,7 +16,6 @@ WORKDIR /app
 COPY --from=builder /app/.venv /app/.venv
 COPY config/ ./config
 COPY src/. ./src
-COPY script/ ./script
 
 # Set up paths
 ENV PATH="/app/.venv/bin:$PATH"
@@ -26,4 +25,4 @@ ENV PYTHONPATH="/app/src:$PYTHONPATH"
 USER 1001
 
 # Command to run the application using the virtual environment
-CMD ["python", "script/register_assets.py"]
+CMD ["python", "-m", "asset_manager.script.register_assets"]

@@ -1,0 +1,33 @@
+{{- if .Values.requestManagement.serviceMesh.enabled }}
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: {{ include "self-service-agent.fullname" . }}-llamastack-access
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "self-service-agent.labels" . | nindent 4 }}
+spec:
+  # This policy applies to LlamaStack service to allow agent service access via mTLS
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: llamastack
+  rules:
+  # Allow agent service to access LlamaStack via mTLS
+  - from:
+    - source:
+        principals:
+          - "cluster.local/ns/{{ .Release.Namespace }}/sa/{{ include "self-service-agent.fullname" . }}-agent-service"
+    to:
+    - operation:
+        methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"]
+        paths: ["/v1/*", "/health", "/docs", "/"]
+  # Allow main self-service-agent deployment to access LlamaStack via mTLS
+  - from:
+    - source:
+        principals:
+          - "cluster.local/ns/{{ .Release.Namespace }}/sa/{{ include "self-service-agent.serviceAccountName" . }}"
+    to:
+    - operation:
+        methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"]
+        paths: ["/v1/*", "/health", "/docs", "/"]
+{{- end }}

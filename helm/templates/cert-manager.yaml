@@ -1,0 +1,55 @@
+{{- if and .Values.requestManagement.enabled .Values.requestManagement.knative.enabled .Values.requestManagement.knative.certificates.enabled }}
+# Note: Using existing ClusterIssuer 'letsencrypt-production'
+# ClusterIssuer creation is skipped since it already exists
+---
+# Certificate for Agent Service
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "self-service-agent.fullname" . }}-agent-service-cert
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "self-service-agent.labels" . | nindent 4 }}
+spec:
+  secretName: {{ include "self-service-agent.fullname" . }}-agent-service-tls
+  issuerRef:
+    name: {{ .Values.requestManagement.knative.certificates.issuer.name }}
+    kind: ClusterIssuer
+  dnsNames:
+  - {{ .Values.requestManagement.knative.certificates.domains.agentService }}
+---
+# Certificate for Request Manager
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "self-service-agent.fullname" . }}-request-manager-cert
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "self-service-agent.labels" . | nindent 4 }}
+spec:
+  secretName: {{ include "self-service-agent.fullname" . }}-request-manager-tls
+  issuerRef:
+    name: {{ .Values.requestManagement.knative.certificates.issuer.name }}
+    kind: ClusterIssuer
+  dnsNames:
+  - {{ .Values.requestManagement.knative.certificates.domains.requestManager }}
+  {{- range .Values.requestManagement.serviceMesh.gateway.hosts }}
+  - {{ . }}
+  {{- end }}
+---
+# Certificate for Integration Dispatcher
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "self-service-agent.fullname" . }}-integration-dispatcher-cert
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "self-service-agent.labels" . | nindent 4 }}
+spec:
+  secretName: {{ include "self-service-agent.fullname" . }}-integration-dispatcher-tls
+  issuerRef:
+    name: {{ .Values.requestManagement.knative.certificates.issuer.name }}
+    kind: ClusterIssuer
+  dnsNames:
+  - {{ .Values.requestManagement.knative.certificates.domains.integrationDispatcher }}
+{{- end }}

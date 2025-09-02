@@ -9,10 +9,14 @@ replicaCount: 1
 image:
   repository: quay.io/ecosystem-appeng/self-service-agent
   assetManager: quay.io/ecosystem-appeng/self-service-agent-asset-manager
+  requestManager: quay.io/ecosystem-appeng/self-service-agent-request-manager
+  agentService: quay.io/ecosystem-appeng/self-service-agent-service
+  integrationDispatcher: quay.io/ecosystem-appeng/self-service-agent-integration-dispatcher
+  dbMigration: quay.io/ecosystem-appeng/self-service-agent-db-migration
   # This sets the pull policy for images.
   pullPolicy: Always
   # Overrides the image tag whose default is the chart appVersion.
-  #tag: "1.1.0"
+  tag: "0.0.2"
 
 # This is for the secrets for pulling an image from a private repository more information can be found here: https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/
 imagePullSecrets: []
@@ -20,12 +24,34 @@ imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
 
+# Database Configuration
+database:
+  # Expected migration version that services should wait for
+  expectedMigrationVersion: "005"
+  
+  # Database connection URL - leave empty to use default pgvector service
+  # Format: postgresql://username:password@host:port/database
+  url: ""  # Uses default: postgresql://postgres:changeme@self-service-agent-pgvector:5432/postgres
+
 # This section builds out the service account more information can be found here: https://kubernetes.io/docs/concepts/security/service-accounts/
-serviceAccount: {}
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Automatically mount a ServiceAccount's API credentials?
+  automount: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
 
 # This is for setting Kubernetes Annotations to a Pod.
 # For more information checkout: https://kubernetes.io/docs/concepts/overview/working-with-objects/annotations/
-podAnnotations: {}
+#podAnnotations:
+#  # Disable Istio injection to fix Kafka dispatcher cross-namespace connectivity
+#  sidecar.istio.io/inject: "false"
+#  sidecar.istio.io/proxyCPU: "10m"
+#  sidecar.istio.io/proxyMemory: "64Mi"
 # This is for setting Kubernetes Labels to a Pod.
 # For more information checkout: https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/
 podLabels: {}
@@ -90,6 +116,16 @@ pgvector:
 
 # Llama Stack agents configuration with PostgreSQL persistence
 llama-stack:
+  initContainers:
+    enabled: true
+  # Istio sidecar configuration for Llama Stack
+  podAnnotations:
+    sidecar.istio.io/inject: "false"
+    sidecar.istio.io/proxyCPU: "10m"
+    sidecar.istio.io/proxyMemory: "64Mi"
+    # Traffic configuration for Llama Stack
+    traffic.sidecar.istio.io/includeInboundPorts: "8000,8321"  # Include both API ports
+    traffic.sidecar.istio.io/excludeOutboundPorts: "5432"  # PostgreSQL
   providers:
     agents:
       - provider_id: meta-ref-postgres
@@ -123,3 +159,335 @@ mcp-servers:
       imageRepository: quay.io/ecosystem-appeng/self-service-agent-snow-mcp
       uri: http://self-service-agent-snow:8000/sse/
       imageTag: 0.0.2
+
+# Request Management Layer Configuration
+requestManagement:
+  enabled: true
+  
+  # Service Deployment Mode Configuration
+  # Set to false to use regular Deployments + Services instead of Knative Services
+  # This provides better external access and debugging capabilities
+  useKnativeServices: false  # Switch to true to revert to Knative Services
+  
+  # External Access Configuration (only for Deployment mode)
+  externalAccess:
+    enabled: true  # Set to true to create external access
+    # When disabled, services are only accessible within the cluster
+    
+    # Choose external access method:
+    # "route" - Use OpenShift Route (simple, limited Istio features)
+    # "istio" - Use Istio Gateway + Route (full Istio features)
+    method: "route"  # Options: "route", "istio"
+  
+  # Service Mesh Configuration
+  serviceMesh:
+    enabled: false  # Disabled since we're using OpenShift Routes and have disabled Istio sidecars
+    # Service Mesh Control Plane reference for ServiceMeshMember
+    # When serviceMesh.enabled=true, a ServiceMeshMember resource is automatically created
+    # to register the deployment namespace with the specified Service Mesh Control Plane
+    controlPlane:
+      name: "data-science-smcp"
+      namespace: "istio-system"
+  
+  # Istio Gateway Configuration (only used when externalAccess.method = "istio")
+  istio:
+    gateway:
+      enabled: true  # Enable when using Istio Gateway for external access
+      hosts:
+        - "*"  # Configure specific hosts in production
+    rateLimiting:
+      enabled: false
+      requestsPerSecond: 100
+    security:
+      jwt:
+        enabled: false
+        issuer: ""
+        audiences: []
+    
+  # Knative Configuration
+  knative:
+    enabled: true
+    # Service visibility configuration
+    # - "cluster-local" bypasses external load balancer issues
+    # - "external" uses external domains (requires working ingress gateway)
+    serviceVisibility: "external"
+    # Knative Eventing (separate from Knative Services)
+    eventing:
+      enabled: true  # Keep broker and triggers for event-driven architecture
+    broker:
+      name: "self-service-agent-broker"
+      # Centralized broker URL configuration
+      url: "http://kafka-broker-ingress.knative-eventing.svc.cluster.local"
+      config:
+        # Kafka Broker configuration
+        numPartitions: 3
+        replicationFactor: 1
+        retentionDuration: P7D
+    
+    # KnativeKafka configuration
+    kafka:
+      enabled: true  # Set to true to enable KnativeKafka in your namespace
+      name: "self-service-agent-kafka-eventing"
+      replicas: 1
+      logLevel: "INFO"
+      
+      # Channel configuration (disabled - using Kafka brokers instead)
+      channel:
+        enabled: false  # Not needed when using Kafka broker class
+        defaultPartitions: 3
+        retentionMs: "604800000"  # 7 days
+        compressionType: "snappy"
+      
+      # Broker configuration (Knative Kafka Broker - enables Kafka broker support)
+      broker:
+        enabled: true  # Enable since we're now using Kafka broker class
+        numPartitions: 10
+        retentionMs: "2592000000"  # 30 days
+        compressionType: "snappy"
+      
+      # Source/Sink configuration
+      source:
+        enabled: false
+      sink:
+        enabled: false
+      
+      # Resource limits for KnativeKafka components
+      resources:
+        requests:
+          memory: "256Mi"
+          cpu: "100m"
+        limits:
+          memory: "512Mi"
+          cpu: "500m"
+      
+      # Security configuration
+      security:
+        protocol: "PLAINTEXT"  # or "SASL_PLAINTEXT", "SSL", "SASL_SSL"
+        sasl:
+          enabled: false
+          mechanism: "PLAIN"  # or "SCRAM-SHA-256", "SCRAM-SHA-512"
+          user: ""
+          secretName: ""
+          secretKey: ""
+    # DomainMapping configuration for custom domains
+    domainMapping:
+      enabled: false  # Disabled for cluster-local services
+      domains:
+        agentService: "agent-service.local"
+        requestManager: "request-manager.local"
+        integrationDispatcher: "integration-dispatcher.local"
+    # Certificate management (handled automatically by OpenShift Routes when externalAccess.enabled=true)
+    certificates:
+      enabled: false  # OpenShift handles TLS automatically
+  
+  # Kafka cluster configuration for KnativeKafka channels
+  kafka:
+    enabled: true
+    name: "self-service-agent-kafka"
+    replicas: 1
+    storage:
+      type: "ephemeral"  # Use "persistent-claim" for production
+      size: "10Gi"       # Only used if type is "persistent-claim"
+    config:
+      defaultReplicationFactor: 1
+      minInSyncReplicas: 1
+      offsetsTopicReplicationFactor: 1
+      transactionStateLogMinIsr: 1
+      transactionStateLogReplicationFactor: 1
+    resources:
+      requests:
+        memory: "1Gi"
+        cpu: "500m"
+      limits:
+        memory: "2Gi"
+        cpu: "1000m"
+    entityOperator:
+      topicOperator:
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+      userOperator:
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+
+  
+  # Network Policies Configuration
+  networkPolicies:
+    enabled: true  # Enable network policies for cross-namespace communication
+    additionalIngressRules: []  # Additional ingress rules if needed
+  
+  # Request Manager Service
+  requestManager:
+    enabled: true
+    replicas: 1  # For Deployment mode
+    # Istio sidecar injection control
+    istio:
+      sidecarInject: false  # Set to false to disable Istio sidecar
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "100m"
+      limits:
+        memory: "512Mi"
+        cpu: "500m"
+    # Knative-style autoscaling (when useKnativeServices: true)
+    autoscaling:
+      minScale: 1
+      maxScale: 10
+      target: 10
+      # HPA-style autoscaling (when useKnativeServices: false)
+      enabled: true
+      minReplicas: 1
+      maxReplicas: 10
+      targetCPUUtilization: 70
+      targetMemoryUtilization: 80
+    
+    resources:
+      requests:
+        memory: "512Mi"
+        cpu: "200m"
+      limits:
+        memory: "1Gi"
+        cpu: "1000m"
+    # Knative-style autoscaling (when useKnativeServices: true)
+    autoscaling:
+      minScale: 1
+      maxScale: 20
+      target: 5
+      # HPA-style autoscaling (when useKnativeServices: false)
+      enabled: true
+      minReplicas: 1
+      maxReplicas: 20
+      targetCPUUtilization: 70
+      targetMemoryUtilization: 80
+  
+  # Integration Dispatcher Service
+  integrationDispatcher:
+    enabled: true
+    replicas: 1  # For Deployment mode
+    # Istio sidecar injection control
+    istio:
+      sidecarInject: false  # Set to false to disable Istio sidecar
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "100m"
+      limits:
+        memory: "512Mi"
+        cpu: "500m"
+    # Knative-style autoscaling (when useKnativeServices: true)
+    autoscaling:
+      minScale: 1
+      maxScale: 5
+      target: 5
+      # HPA-style autoscaling (when useKnativeServices: false)
+      enabled: true
+      minReplicas: 1
+      maxReplicas: 5
+      targetCPUUtilization: 70
+      targetMemoryUtilization: 80
+  
+  # Agent Service
+  agentService:
+    enabled: true
+    replicas: 1  # For Deployment mode
+    # Istio sidecar injection control
+    istio:
+      sidecarInject: false  # Set to true to enable Istio sidecar (requires proper cross-namespace mesh config)
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "100m"
+      limits:
+        memory: "512Mi"
+        cpu: "500m"
+    autoscaling:
+      # Knative autoscaling (when useKnativeServices: true)
+      minScale: 0
+      maxScale: 5
+      target: 5
+      # HPA-style autoscaling (when useKnativeServices: false)
+      enabled: true
+      minReplicas: 1
+      maxReplicas: 5
+      targetCPUUtilization: 70
+      targetMemoryUtilization: 80
+  
+  # Init Job
+  initJob:
+    # Istio sidecar injection control
+    istio:
+      sidecarInject: false  # Set to false to disable Istio sidecar
+    resources:
+      requests:
+        memory: "512Mi"
+        cpu: "200m"
+      limits:
+        memory: "1Gi"
+        cpu: "1000m"
+  
+  # Integration Configuration
+  integrations:
+    email:
+      smtpHost: "smtp.example.com"
+      smtpPort: "587"
+      smtpUseTls: "true"
+      fromEmail: "noreply@selfservice.local"
+      fromName: "Self-Service Agent"
+    slack:
+      enabled: false
+      # Slack credentials loaded from secrets
+  
+  # Database Migration
+  dbMigration:
+    enabled: true
+    resources:
+      requests:
+        memory: "128Mi"
+        cpu: "50m"
+      limits:
+        memory: "256Mi"
+        cpu: "200m"
+
+# Security Configuration
+security:
+  # API Keys for tool integrations
+  apiKeys:
+    # Set these via --set-string or external secrets
+    snowIntegration: ""
+    hrSystem: ""
+    monitoringSystem: ""
+  
+  # Slack configuration
+  slack:
+    signingSecret: ""
+    botToken: ""  # For Integration Dispatcher
+  
+  # Email configuration for Integration Dispatcher
+  email:
+    smtpHost: ""
+    smtpPort: "587"
+    smtpUsername: ""
+    smtpPassword: ""
+    smtpUseTls: "true"
+    fromEmail: "noreply@selfservice.local"
+    fromName: "Self-Service Agent"
+  
+  # JWT Authentication
+  jwt:
+    issuers:
+      - issuer: "https://auth.selfservice.apps.cluster.local"
+        jwksUri: "https://auth.selfservice.apps.cluster.local/.well-known/jwks.json"
+        audience: "selfservice-api"
+      - issuer: "https://sso.redhat.com/auth/realms/redhat-external"
+        jwksUri: "https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/certs"
+        audience: "selfservice-api"

@@ -1,0 +1,228 @@
+{{- if and .Values.requestManagement.enabled (not .Values.requestManagement.useKnativeServices) }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "self-service-agent.fullname" . }}-request-manager
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "self-service-agent.labels" . | nindent 4 }}
+    app: {{ include "self-service-agent.fullname" . }}-request-manager
+    component: request-manager
+spec:
+  replicas: {{ .Values.requestManagement.requestManager.replicas | default 2 }}
+  selector:
+    matchLabels:
+      {{- include "self-service-agent.selectorLabels" . | nindent 6 }}
+      app: {{ include "self-service-agent.fullname" . }}-request-manager
+      component: request-manager
+  template:
+    metadata:
+      labels:
+        {{- include "self-service-agent.labels" . | nindent 8 }}
+        app: {{ include "self-service-agent.fullname" . }}-request-manager
+        component: request-manager
+        version: v1
+      annotations:
+        # Service Mesh sidecar configuration
+        sidecar.istio.io/inject: "{{ .Values.requestManagement.requestManager.istio.sidecarInject }}"
+        sidecar.istio.io/proxyCPU: "10m"
+        sidecar.istio.io/proxyMemory: "64Mi"
+        # Traffic configuration
+        traffic.sidecar.istio.io/includeInboundPorts: "8080"
+        traffic.sidecar.istio.io/excludeOutboundPorts: "5432"  # PostgreSQL
+    spec:
+      serviceAccountName: {{ include "self-service-agent.serviceAccountName" . }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: request-manager
+        image: {{ .Values.image.requestManager }}:{{ .Values.image.tag | default .Chart.AppVersion }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        ports:
+        - containerPort: 8080
+          protocol: TCP
+          name: http
+        env:
+        # Database configuration
+        - name: POSTGRES_HOST
+          valueFrom:
+            secretKeyRef:
+              name: pgvector
+              key: host
+        - name: POSTGRES_PORT
+          valueFrom:
+            secretKeyRef:
+              name: pgvector
+              key: port
+        - name: POSTGRES_DB
+          valueFrom:
+            secretKeyRef:
+              name: pgvector
+              key: dbname
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: pgvector
+              key: user
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: pgvector
+              key: password
+        - name: BROKER_URL
+          value: "{{ .Values.requestManagement.knative.broker.url }}/{{ .Release.Namespace }}/{{ .Values.requestManagement.knative.broker.name }}"
+        - name: LOG_LEVEL
+          value: "INFO"
+        - name: EVENT_MAX_RETRIES
+          value: "3"
+        - name: EVENT_BASE_DELAY
+          value: "1.0"
+        - name: PORT
+          value: "8080"
+        - name: HOST
+          value: "0.0.0.0"
+        - name: EXPECTED_MIGRATION_VERSION
+          value: {{ .Values.database.expectedMigrationVersion | default "001" | quote }}
+        - name: SQL_DEBUG
+          value: "false"
+        # Service Mesh and Security Configuration
+        - name: SLACK_SIGNING_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: slack-signing-secret
+              key: signing-secret
+              optional: true
+        - name: SNOW_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: api-keys
+              key: snow-integration
+              optional: true
+        - name: HR_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: api-keys
+              key: hr-system
+              optional: true
+        - name: MONITORING_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: api-keys
+              key: monitoring-system
+              optional: true
+        resources:
+          requests:
+            memory: {{ .Values.requestManagement.requestManager.resources.requests.memory }}
+            cpu: {{ .Values.requestManagement.requestManager.resources.requests.cpu }}
+          limits:
+            memory: {{ .Values.requestManagement.requestManager.resources.limits.memory }}
+            cpu: {{ .Values.requestManagement.requestManager.resources.limits.cpu }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 3
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 30
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "self-service-agent.fullname" . }}-request-manager
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "self-service-agent.labels" . | nindent 4 }}
+    app: {{ include "self-service-agent.fullname" . }}-request-manager
+    component: request-manager
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "self-service-agent.selectorLabels" . | nindent 4 }}
+    app: {{ include "self-service-agent.fullname" . }}-request-manager
+    component: request-manager
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+    protocol: TCP
+---
+{{- if .Values.requestManagement.requestManager.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "self-service-agent.fullname" . }}-request-manager
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "self-service-agent.labels" . | nindent 4 }}
+    app: {{ include "self-service-agent.fullname" . }}-request-manager
+    component: request-manager
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "self-service-agent.fullname" . }}-request-manager
+  minReplicas: {{ .Values.requestManagement.requestManager.autoscaling.minReplicas | default 1 }}
+  maxReplicas: {{ .Values.requestManagement.requestManager.autoscaling.maxReplicas | default 10 }}
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: {{ .Values.requestManagement.requestManager.autoscaling.targetCPUUtilization | default 70 }}
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: {{ .Values.requestManagement.requestManager.autoscaling.targetMemoryUtilization | default 80 }}
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 10
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+      - type: Pods
+        value: 2
+        periodSeconds: 60
+      selectPolicy: Max
+{{- end }}
+{{- end }}
