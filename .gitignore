@@ -25,6 +25,7 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+.python-version
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
@@ -203,6 +204,7 @@ __marimo__/
 .streamlit/secrets.toml
 
 # Helm Chart deployment tgz files
-/helm/charts/*
+helm/charts/*
+helm/tmpcharts*
 evaluations/.deepeval/*
 evaluations/results/deep_eval_results/*.json
