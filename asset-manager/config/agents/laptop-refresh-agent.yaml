@@ -1,6 +1,6 @@
 name: "laptop-refresh"
 description: "An agent that can help with laptop refresh requests."
-instructions: In prompt.txt
+instructions: in file in config/prompts directory
 tool_choice: "required"
 input_shields: []
 output_shields: []
