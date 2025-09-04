@@ -27,8 +27,21 @@ else
 HF_TOKEN ?=
 endif
 
-MAIN_CHART_NAME := self-service-agent 
+MAIN_CHART_NAME := self-service-agent
 TOLERATIONS_TEMPLATE=[{"key":"$(1)","effect":"NoSchedule","operator":"Exists"}]
+
+# Slack Configuration - only when ENABLE_SLACK set to true
+ifeq ($(ENABLE_SLACK),true)
+ifndef SLACK_BOT_TOKEN
+SLACK_BOT_TOKEN := $(shell bash -c 'read -r -p "Enter Slack Bot Token (xoxb-...): " TOKEN; echo $$TOKEN')
+endif
+ifndef SLACK_SIGNING_SECRET  
+SLACK_SIGNING_SECRET := $(shell bash -c 'read -r -p "Enter Slack Signing Secret: " SECRET; echo $$SECRET')
+endif
+endif
+
+# Check if Slack should be enabled
+SLACK_ENABLED := $(if $(and $(SLACK_BOT_TOKEN),$(SLACK_SIGNING_SECRET)),true,false)
 
 helm_pgvector_args = \
     --set pgvector.secret.user=$(POSTGRES_USER) \
@@ -106,6 +119,9 @@ help:
 	@echo "  {SAFETY,LLM}_URL         - Model URL"
 	@echo "  {SAFETY,LLM}_API_TOKEN   - Model API token for remote models"
 	@echo "  {SAFETY,LLM}_TOLERATION  - Model pod toleration"
+	@echo "  SLACK_BOT_TOKEN          - Slack Bot Token (xoxb-...) for Slack integration"
+	@echo "  SLACK_SIGNING_SECRET     - Slack Signing Secret for request verification"
+	@echo "  ENABLE_SLACK             - Set to 'true' to enable Slack integration and prompt for tokens"
 
 # Build function: $(call build_image,IMAGE_NAME,DESCRIPTION,CONTAINERFILE_PATH,BUILD_CONTEXT)
 define build_image
@@ -119,6 +135,12 @@ define push_image
 	@echo "Pushing $(2): $(1)"
 	$(CONTAINER_TOOL) push $(1)
 	@echo "Successfully pushed $(1)"
+endef
+
+define PRINT_SLACK_URL
+	@echo "--- Your Slack Event URL is: ---"
+	@sleep 10
+	@echo "  https://$$(oc get route $(MAIN_CHART_NAME)-slack -n $(NAMESPACE) -o jsonpath='{.spec.host}')/slack/events"
 endef
 
 # Build container images
@@ -267,10 +289,13 @@ helm-install: namespace helm-depend
 		$(PGVECTOR_ARGS) \
 		$(LLM_SERVICE_ARGS) \
 		$(LLAMA_STACK_ARGS) \
+		--set slack.enabled=$(SLACK_ENABLED) \
+		$(if $(filter true,$(SLACK_ENABLED)),--set slack.botToken=$(SLACK_BOT_TOKEN) --set slack.signingSecret=$(SLACK_SIGNING_SECRET),) \
 		$(EXTRA_HELM_ARGS)
 	@echo "Waiting for model services and llamastack to deploy. It may take around 10-15 minutes depending on the size of the model..."
 	@oc rollout status deploy/$(MAIN_CHART_NAME) -n $(NAMESPACE)
 	@echo "$(MAIN_CHART_NAME) installed successfully"
+	$(if $(filter true,$(SLACK_ENABLED)),$(PRINT_SLACK_URL))
 
 # Uninstall the deployment and clean up
 .PHONY: helm-uninstall
