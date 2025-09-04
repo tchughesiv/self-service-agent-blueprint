@@ -298,6 +298,9 @@ helm-install: namespace helm-depend
 		$(LLAMA_STACK_ARGS) \
 		--set slack.enabled=$(SLACK_ENABLED) \
 		$(if $(filter true,$(SLACK_ENABLED)),--set slack.botToken=$(SLACK_BOT_TOKEN) --set slack.signingSecret=$(SLACK_SIGNING_SECRET),) \
+		--set image.registry=$(REGISTRY) \
+		--set mcp-servers.mcp-servers.self-service-agent-employee-info.imageRepository=$(REGISTRY)/self-service-agent-employee-info-mcp \
+		--set mcp-servers.mcp-servers.self-service-agent-snow.imageRepository=$(REGISTRY)/self-service-agent-snow-mcp \
 		$(EXTRA_HELM_ARGS)
 	@echo "Waiting for model services and llamastack to deploy. It may take around 10-15 minutes depending on the size of the model..."
 	@kubectl rollout status deploy/$(MAIN_CHART_NAME) -n $(NAMESPACE) --timeout 20m
