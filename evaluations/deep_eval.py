@@ -8,15 +8,9 @@ import sys
 from typing import Dict, List, Optional
 
 from deepeval.evaluate import DisplayConfig, evaluate
-from deepeval.metrics import (
-    ConversationalGEval,
-    ConversationCompletenessMetric,
-    RoleAdherenceMetric,
-    TurnRelevancyMetric,
-)
-from deepeval.models import DeepEvalBaseLLM
-from deepeval.test_case import ConversationalTestCase, Turn, TurnParams
+from deepeval.test_case import ConversationalTestCase, Turn
 from deepeval.test_run import global_test_run_manager
+from get_deepeval_metrics import get_metrics
 from helpers.copy_context import copy_context_files
 from helpers.custom_llm import CustomLLM, get_api_configuration
 from helpers.deep_eval_summary import print_final_summary
@@ -72,117 +66,6 @@ def _convert_to_turns(conversation_data: List[Dict[str, str]]) -> List[Turn]:
         turns.append(Turn(role=role, content=content))
 
     return turns
-
-
-def _create_laptop_refresh_metrics(
-    custom_model: Optional[DeepEvalBaseLLM] = None,
-) -> List[ConversationalGEval]:
-    """
-    Create comprehensive evaluation metrics for laptop refresh conversation assessment.
-
-    This function defines a suite of conversational metrics specifically designed
-    to evaluate IT support conversations related to laptop refresh requests.
-    Includes both standard conversation metrics and custom laptop-specific criteria.
-
-    Args:
-        custom_model: Optional custom LLM model instance to use for evaluations.
-                     If None, uses the default DeepEval model.
-
-    Returns:
-        List[ConversationalGEval]: List of evaluation metrics including:
-    """
-    # Prepare model configuration for all metrics
-    model_kwargs = {"model": custom_model}
-
-    metrics = [
-        TurnRelevancyMetric(
-            threshold=0.8,
-            **model_kwargs,
-        ),
-        RoleAdherenceMetric(
-            threshold=0.8,
-            **model_kwargs,
-        ),
-        ConversationCompletenessMetric(
-            threshold=0.8,
-            **model_kwargs,
-        ),
-        ConversationalGEval(
-            name="Information Gathering",
-            threshold=0.8,
-            evaluation_params=[TurnParams.CONTENT, TurnParams.ROLE],
-            evaluation_steps=[
-                "Assess if the assistant properly requests employee ID from the user.",
-                "Evaluate if the assistant gathers necessary information about the user's current laptop.",
-                "Check if the assistant follows a logical flow for information collection.",
-            ],
-            **model_kwargs,
-        ),
-        ConversationalGEval(
-            name="Policy Compliance",
-            threshold=0.8,
-            evaluation_params=[TurnParams.CONTENT, TurnParams.ROLE],
-            evaluation_steps=[
-                "Assess if the assistant correctly applies laptop refresh policies.",
-                "Evaluate if eligibility determination is accurate based on laptop age and warranty.",
-                "Check if the assistant provides clear policy explanations.",
-            ],
-            **model_kwargs,
-        ),
-        ConversationalGEval(
-            name="Option Presentation",
-            threshold=0.8,
-            evaluation_params=[TurnParams.CONTENT, TurnParams.ROLE],
-            evaluation_steps=[
-                "Assess if the assistant presents appropriate laptop options based on user location.",
-                "Evaluate if laptop specifications are clearly and completely presented.",
-                "Check if the assistant guides the user through selection process effectively.",
-            ],
-            **model_kwargs,
-        ),
-        ConversationalGEval(
-            name="Process Completion",
-            threshold=0.8,
-            evaluation_params=[TurnParams.CONTENT, TurnParams.ROLE],
-            evaluation_steps=[
-                "Assess if the assistant guides the user through the complete laptop refresh process.",
-                "Evaluate if the assistant confirms user selections appropriately.",
-                "Check if the assistant provides clear next steps or completion actions.",
-            ],
-            **model_kwargs,
-        ),
-        ConversationalGEval(
-            name="User Experience",
-            threshold=0.8,
-            evaluation_params=[TurnParams.CONTENT, TurnParams.ROLE],
-            evaluation_steps=[
-                "Assess if the assistant is helpful and professional throughout the conversation.",
-                "Evaluate if responses are clear and easy to understand.",
-                "Check if the assistant addresses user needs effectively.",
-            ],
-            **model_kwargs,
-        ),
-        ConversationalGEval(
-            name="Flow termination",
-            threshold=0.8,
-            evaluation_params=[TurnParams.CONTENT, TurnParams.ROLE],
-            evaluation_steps=[
-                "Check if the conversation ends with DONEDONEDONE or the agent returning a service now ticket number to the user. If the ends in any other way the conversation failed"
-            ],
-            **model_kwargs,
-        ),
-        ConversationalGEval(
-            name="Ticket number validation",
-            threshold=1.0,
-            evaluation_params=[TurnParams.CONTENT, TurnParams.ROLE],
-            evaluation_steps=[
-                "Check that the ticket number for the laptop request starts with INC"
-            ],
-            **model_kwargs,
-        ),
-    ]
-
-    return metrics
 
 
 def _evaluate_conversations(
@@ -244,7 +127,7 @@ def _evaluate_conversations(
 
     print(f"Found {len(json_files)} conversation files to evaluate")
 
-    metrics = _create_laptop_refresh_metrics(custom_model)
+    metrics = get_metrics(custom_model)
 
     # Initialize tracking for evaluation results and success metrics
     all_results = []

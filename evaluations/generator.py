@@ -48,6 +48,8 @@ logger = logging.getLogger(__name__)
 # Initialize the OpenShift client (for agent under test)
 client = OpenShiftChatClient()
 
+random.seed()
+
 
 def _parse_arguments() -> argparse.Namespace:
     """Parse command line arguments for the conversation generator."""
@@ -73,8 +75,7 @@ def _parse_arguments() -> argparse.Namespace:
 def _create_conversation_golden(conversation_number: int) -> ConversationalGolden:
     """Create a single ConversationalGolden object for simulation."""
     # Use conversation number to ensure reproducible but varied employee IDs
-    random.seed(conversation_number + 2)
-    employee_id = random.randint(1000, 1010)
+    employee_id = random.randint(1001, 1010)
 
     conversation_golden = ConversationalGolden(
         scenario="An Employee wants to refresh their laptop, they do not share their employee id until asked for it. The agent shows them a list they can choose from, they select the appropriate laptop and a service now ticket number is returned.",

@@ -7,10 +7,12 @@ from asset_manager.util import load_config_from_path
 
 
 def main():
-    config = load_config_from_path(Path("config"))
+    config_path = Path("config")
+    config = load_config_from_path(config_path)
 
     # Initialize managers
     agent_manager = AgentManager(config)
+    agent_manager.set_config_path(config_path)  # Set config path for prompt loading
     kb_manager = KnowledgeBaseManager(config)
     tg_manager = ToolgroupsManager(config)
 

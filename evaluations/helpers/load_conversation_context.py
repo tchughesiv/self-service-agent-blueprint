@@ -103,6 +103,32 @@ def load_context_files_from_directory(
     return context_list
 
 
+def load_default_context() -> List[str]:
+    """
+    Load default context files that apply to all conversations.
+
+    This method loads all context files from the default context directory
+    (conversations_config/default_context/) without requiring any parameters.
+
+    Returns:
+        List of context strings loaded from default context files.
+        Returns empty list if no default context files are available.
+    """
+    default_context_dir = "conversations_config/default_context"
+    default_contexts = load_context_files_from_directory(
+        default_context_dir, "default context"
+    )
+
+    if default_contexts:
+        logger.info(
+            f"Loaded {len(default_contexts)} default context file(s) from {default_context_dir}"
+        )
+    else:
+        logger.info(f"No default context files found in {default_context_dir}")
+
+    return default_contexts
+
+
 def load_context_for_file(
     filename: str, context_dir: Optional[str] = None
 ) -> Optional[List[str]]:

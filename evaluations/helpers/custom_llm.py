@@ -62,7 +62,6 @@ class CustomLLM(DeepEvalBaseLLM):
                 model=self.model_name,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
-                max_tokens=16000,
             )
             return response.choices[0].message.content
         except Exception as e:
@@ -92,7 +91,6 @@ class CustomLLM(DeepEvalBaseLLM):
             response = await async_client.chat.completions.create(
                 model=self.model_name,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=16000,
                 temperature=0.0,
             )
 
