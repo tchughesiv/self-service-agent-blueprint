@@ -259,10 +259,16 @@ test-mcp-snow:
 	cd mcp-servers/snow && uv run python -m pytest tests/
 	@echo "Snow MCP tests completed successfully!"
 
+.PHONY: sync-evaluations
+sync-evaluations:
+	@echo "Syncing evaluations libraries"
+	uv --directory evaluations sync
+	@echo "Syncing evaluations libraries completed successfully!"
+
 .PHONY: test-short-integration
 test-short-integration:
 	@echo "Running short integration test..."
-	cd evaluations && uv run python evaluate.py -n 1
+	uv --directory evaluations run evaluate.py -n 1
 	@echo "short integrations tests completed successfully!"
 
 # Create namespace and deploy
