@@ -172,19 +172,19 @@ push-all-images: push-agent-image push-asset-mgr-image push-mcp-emp-info-image p
 
 .PHONY: push-agent-image
 push-agent-image:
-	$(call push_image,$(AGENT_IMG),self-service agent image)
+	$(call push_image,$(AGENT_IMG) $(PUSH_EXTRA_AGRS),self-service agent image)
 
 .PHONY: push-asset-mgr-image
 push-asset-mgr-image:
-	$(call push_image,$(ASSET_MGR_IMG),asset manager image)
+	$(call push_image,$(ASSET_MGR_IMG) $(PUSH_EXTRA_AGRS),asset manager image)
 
 .PHONY: push-mcp-emp-info-image
 push-mcp-emp-info-image:
-	$(call push_image,$(MCP_EMP_INFO_IMG),employee info MCP image)
+	$(call push_image,$(MCP_EMP_INFO_IMG) $(PUSH_EXTRA_AGRS),employee info MCP image)
 
 .PHONY: push-mcp-snow-image
 push-mcp-snow-image:
-	$(call push_image,$(MCP_SNOW_IMG),snow MCP image)
+	$(call push_image,$(MCP_SNOW_IMG) $(PUSH_EXTRA_AGRS),snow MCP image)
 
 # Code quality
 .PHONY: lint

@@ -35,6 +35,14 @@ runs:
       run: make helm-depend
       shell: bash
 
-    - name: Helm Install
-      run: make helm-install NAMESPACE=${{inputs.namespace}} LLM=${{inputs.llm}} LLM_ID=${{inputs.llm_id}} LLM_URL=${{inputs.llm_url}} LLM_API_TOKEN=$LLM_API_TOKEN
+    - name: Build local images
+      run: make build-all-images REGISTRY=localhost:5001
+      shell: bash
+
+    - name: Push local images to the local registry
+      run: make push-all-images REGISTRY=localhost:5001 PUSH_EXTRA_AGRS="--tls-verify=false"
+      shell: bash  
+
+    - name: Helm Install (using local registry)
+      run: make helm-install NAMESPACE=${{inputs.namespace}} REGISTRY=localhost:5001 LLM=${{inputs.llm}} LLM_ID=${{inputs.llm_id}} LLM_URL=${{inputs.llm_url}} LLM_API_TOKEN=$LLM_API_TOKEN
       shell: bash
