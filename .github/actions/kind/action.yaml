@@ -8,16 +8,13 @@ inputs:
     default: test
   llm:
     description: The LLM to use
-    required: false
-    default: llama-4-scout-17b-16e-w4a16
+    required: true
   llm_id:
     description: The LLM ID
-    required: false
-    default: llama-4-scout-17b-16e-w4a16
+    required: true
   llm_url:
     description: The LLM URL
-    required: false
-    default: https://llama-4-scout-17b-16e-w4a16-maas-apicast-production.apps.prod.rhoai.rh-aiservices-bu.com:443/v1
+    required: true
 
 runs:
   using: composite
