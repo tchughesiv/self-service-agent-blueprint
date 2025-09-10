@@ -1,7 +1,17 @@
 import uuid
+from pathlib import Path
+
+from asset_manager.agent_manager import AgentManager
+from asset_manager.util import load_config_from_path
 
 
 class SessionManager:
+    """
+    Manages user sessions and conversations with agents.
+    """
+
+    ROUTING_AGENT_NAME = "routing-agent"
+
     def __init__(self, agent_manager):
         """
         Initializes the SessionManager.
@@ -27,7 +37,7 @@ class SessionManager:
     ) -> str:
         """Send a message to an agent and return the response"""
         try:
-            response_stream = self.agent_manager._client.agents.turn.create(
+            response_stream = self.agent_manager.create_agent_turn(
                 agent_id=agent_id,
                 session_id=session_id,
                 stream=True,
@@ -45,10 +55,15 @@ class SessionManager:
                     hasattr(chunk, "event")
                     and hasattr(chunk.event, "payload")
                     and chunk.event.payload.event_type == "turn_complete"
+                    and hasattr(chunk.event.payload.turn, "output_message")
                 ):
-                    if hasattr(chunk.event.payload.turn, "output_message"):
-                        content = chunk.event.payload.turn.output_message.content
-                        response += content
+                    turn = chunk.event.payload.turn
+                    stop_reason = turn.output_message.stop_reason
+
+                    if stop_reason == "end_of_turn":
+                        response += turn.output_message.content
+                    else:
+                        print(f"Agent turn stopped for reason: {stop_reason}")
 
             return response.strip()
 
@@ -63,7 +78,7 @@ class SessionManager:
 
         # Create a new session for the specialist agent
         session_name = self._generate_session_name(user_id, agent_name)
-        new_session = self.agent_manager._client.agents.session.create(
+        new_session = self.agent_manager.create_session(
             new_agent_id, session_name=session_name
         )
 
@@ -85,12 +100,12 @@ class SessionManager:
         Handles an incoming message, manages sessions and history, and returns a response.
         """
         if user_id not in self.user_sessions:
-            routing_agent_id = self.agents.get("routing-agent")
+            routing_agent_id = self.agents.get(self.ROUTING_AGENT_NAME)
             if not routing_agent_id:
                 return "Error: Core routing agent not available."
 
             session_name = self._generate_session_name(user_id)
-            session = self.agent_manager._client.agents.session.create(
+            session = self.agent_manager.create_session(
                 routing_agent_id, session_name=session_name
             )
             self.user_sessions[user_id] = {
@@ -108,14 +123,49 @@ class SessionManager:
             text,
         )
 
-        potential_agent_name = agent_response.strip()
-        if (
-            potential_agent_name in self.agents
-            and potential_agent_name != "routing-agent"
-            and current_session["agent_id"] == self.agents.get("routing-agent")
-        ):
-            return self._route_to_specialist(
-                user_id, potential_agent_name, text, current_session
+        signal = agent_response.strip().lower()
+
+        if (signal == "task_complete_return_to_router") and current_session[
+            "agent_id"
+        ] != self.agents.get(self.ROUTING_AGENT_NAME):
+            print(
+                f"Specialist task complete. Returning user {user_id} to the routing agent."
             )
+            self.reset_user_session(user_id)
+            return self.handle_user_message(user_id, "hi", user_email)
+
+        if (
+            signal in self.agents
+            and signal != self.ROUTING_AGENT_NAME
+            and current_session["agent_id"] == self.agents.get(self.ROUTING_AGENT_NAME)
+        ):
+            return self._route_to_specialist(user_id, signal, text, current_session)
 
         return agent_response
+
+    def reset_user_session(self, user_id: str):
+        """
+        Removes a user's session from the session manager.
+        """
+        if user_id in self.user_sessions:
+            del self.user_sessions[user_id]
+            print(f"Session for user {user_id} has been reset.")
+            return True
+        return False
+
+
+def create_session_manager():
+    """
+    Factory function to load config, initialize an AgentManager,
+    and return a fully configured SessionManager instance.
+    """
+    # Use absolute path since we might be running from different working directory
+    config_path = Path("/app/asset-manager/config")
+    if not config_path.exists():
+        config_path = Path("asset_manager/config")  # fallback to relative path
+
+    config = load_config_from_path(config_path)
+    agent_manager = AgentManager(config)
+    session_manager = SessionManager(agent_manager=agent_manager)
+
+    return session_manager
