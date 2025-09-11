@@ -134,12 +134,26 @@ class SlackService:
     async def handle_button_interaction(self, payload: SlackInteractionPayload) -> Dict:
         """Handle button interactions."""
         try:
+            logger.info(
+                "Button interaction received",
+                user_id=payload.user.id,
+                actions=payload.actions,
+                payload_type=payload.type,
+            )
+            
             if not payload.actions:
+                logger.warning("No actions in button interaction")
                 return {"text": "No action specified"}
 
             action = payload.actions[0]
             action_id = action.get("action_id")
             action_value = action.get("value", "")
+            
+            logger.info(
+                "Processing button action",
+                action_id=action_id,
+                action_value=action_value,
+            )
 
             if action_id == "view_session":
                 session_id = action_value

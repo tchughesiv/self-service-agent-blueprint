@@ -877,9 +877,18 @@ async def handle_slack_interactive(request: Request):
         data = json.loads(payload_json)
         payload = SlackInteractionPayload(**data)
 
+        logger.info(
+            "Slack interaction received",
+            interaction_type=payload.type,
+            user_id=payload.user.id,
+            has_actions=bool(payload.actions),
+        )
+
         # Handle interaction
         if payload.type == "block_actions":
+            logger.info("Routing to button interaction handler")
             response = await slack_service.handle_button_interaction(payload)
+            logger.info("Button interaction response", response=response)
             return response
         elif payload.type == "view_submission":
             response = await slack_service.handle_modal_submission(payload)
