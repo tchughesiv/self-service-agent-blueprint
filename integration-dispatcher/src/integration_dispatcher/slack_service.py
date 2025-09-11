@@ -156,42 +156,26 @@ class SlackService:
 
             elif action_id == "ask_followup":
                 session_id = action_value.replace("followup:", "")
+
+                # For modals, we need to use the Slack Web API, not a direct response
+                # Return a simple acknowledgment for now and log the attempt
+                logger.info(
+                    "Ask Follow-up button clicked",
+                    user_id=payload.user.id,
+                    session_id=session_id,
+                    trigger_id=payload.trigger_id,
+                )
+
+                # TODO: Implement modal opening via Slack Web API
                 return {
                     "response_type": "ephemeral",
-                    "replace_original": False,
-                    "view": {
-                        "type": "modal",
-                        "callback_id": f"followup_modal:{session_id}",
-                        "title": {"type": "plain_text", "text": "Ask Follow-up"},
-                        "submit": {"type": "plain_text", "text": "Send"},
-                        "close": {"type": "plain_text", "text": "Cancel"},
-                        "blocks": [
-                            {
-                                "type": "section",
-                                "text": {
-                                    "type": "mrkdwn",
-                                    "text": f"💬 *Continue your conversation*\n\nSession ID: `{session_id}`",
-                                },
-                            },
-                            {
-                                "type": "input",
-                                "block_id": "followup_input_block",
-                                "element": {
-                                    "type": "plain_text_input",
-                                    "action_id": "followup_input",
-                                    "placeholder": {
-                                        "type": "plain_text",
-                                        "text": "What would you like to ask or discuss next?",
-                                    },
-                                    "multiline": True,
-                                },
-                                "label": {
-                                    "type": "plain_text",
-                                    "text": "Your follow-up question",
-                                },
-                            },
-                        ],
-                    },
+                    "text": f"💬 *Follow-up Modal Coming Soon!*\n\n"
+                    f"Session ID: `{session_id}`\n\n"
+                    f"For now, you can continue this conversation by:\n"
+                    f"• Using `/agent [your question]`\n"
+                    f"• Sending me a direct message\n"
+                    f"• Mentioning me in a channel\n\n"
+                    f"I'll remember our previous conversation!",
                 }
 
             return {"text": "Unknown action"}
