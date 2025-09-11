@@ -120,17 +120,29 @@ This flow handles requests initiated directly by users through command-line tool
                        │   Delivery      │    │                 │
                        └─────────────────┘    └─────────────────┘
                                 │
-                                │ Deliver Response
-                                ▼
-                       ┌─────────────────┐
-                       │   Integration   │
-                       │   Handlers      │
-                       │                 │
-                       │ • SLACK         │
-                       │ • EMAIL         │
-                       │ • WEBHOOK       │
-                       │ • TEST          │
-                       └─────────────────┘
+                   ┌────────────┴────────────┐
+                   │                         │
+                   ▼ (if integration_type)   ▼ (if polling)
+          ┌─────────────────┐       ┌─────────────────┐
+          │   Integration   │       │   Database      │
+          │   Handlers      │       │   Storage       │
+          │                 │       │                 │
+          │ • SLACK         │       │ • Store Result  │
+          │ • EMAIL         │       │ • Update Status │
+          │ • WEBHOOK       │       │ • Available for │
+          │ • TEST          │       │   API Polling   │
+          └─────────────────┘       └─────────────────┘
+                   │                         │
+                   ▼                         ▼
+          ┌─────────────────┐       ┌─────────────────┐
+          │   Final         │       │   User Polls    │
+          │   Delivery      │       │   for Result    │
+          │                 │       │                 │
+          │ • Slack DM      │       │ • GET /status   │
+          │ • Email Inbox   │       │ • GET /result   │
+          │ • Webhook POST  │       │ • API Response  │
+          │ • Test Output   │       │                 │
+          └─────────────────┘       └─────────────────┘
 ```
 
 ### Key Characteristics:
