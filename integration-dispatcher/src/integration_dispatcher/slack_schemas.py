@@ -88,6 +88,7 @@ class SlackInteractionPayload(BaseModel):
     message: Optional[Dict[str, Any]] = None
     response_url: Optional[str] = None
     actions: Optional[List[Dict[str, Any]]] = None
+    view: Optional[Dict[str, Any]] = None
 
 
 class SlackSlashCommand(BaseModel):

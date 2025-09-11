@@ -158,12 +158,40 @@ class SlackService:
                 session_id = action_value.replace("followup:", "")
                 return {
                     "response_type": "ephemeral",
-                    "text": f"💬 *Ready for your follow-up question!*\n\n"
-                    f"You can continue this conversation by:\n"
-                    f"• Typing `/agent [your question]`\n"
-                    f"• Sending me a direct message\n"
-                    f"• Mentioning me in a channel\n\n"
-                    f"I'll remember our previous conversation (Session: `{session_id}`).",
+                    "replace_original": False,
+                    "view": {
+                        "type": "modal",
+                        "callback_id": f"followup_modal:{session_id}",
+                        "title": {"type": "plain_text", "text": "Ask Follow-up"},
+                        "submit": {"type": "plain_text", "text": "Send"},
+                        "close": {"type": "plain_text", "text": "Cancel"},
+                        "blocks": [
+                            {
+                                "type": "section",
+                                "text": {
+                                    "type": "mrkdwn",
+                                    "text": f"💬 *Continue your conversation*\n\nSession ID: `{session_id}`",
+                                },
+                            },
+                            {
+                                "type": "input",
+                                "block_id": "followup_input_block",
+                                "element": {
+                                    "type": "plain_text_input",
+                                    "action_id": "followup_input",
+                                    "placeholder": {
+                                        "type": "plain_text",
+                                        "text": "What would you like to ask or discuss next?",
+                                    },
+                                    "multiline": True,
+                                },
+                                "label": {
+                                    "type": "plain_text",
+                                    "text": "Your follow-up question",
+                                },
+                            },
+                        ],
+                    },
                 }
 
             return {"text": "Unknown action"}
@@ -171,6 +199,64 @@ class SlackService:
         except Exception as e:
             logger.error("Error handling button interaction", error=str(e))
             return {"text": "❌ Error processing interaction"}
+
+    async def handle_modal_submission(self, payload: SlackInteractionPayload) -> Dict:
+        """Handle modal form submissions."""
+        try:
+            callback_id = payload.view.get("callback_id", "")
+
+            if callback_id.startswith("followup_modal:"):
+                session_id = callback_id.replace("followup_modal:", "")
+
+                # Extract the user's input from the modal
+                values = payload.view.get("state", {}).get("values", {})
+                followup_input = (
+                    values.get("followup_input_block", {})
+                    .get("followup_input", {})
+                    .get("value", "")
+                )
+
+                if not followup_input.strip():
+                    return {
+                        "response_action": "errors",
+                        "errors": {
+                            "followup_input_block": "Please enter your follow-up question"
+                        },
+                    }
+
+                logger.info(
+                    "Processing follow-up from modal",
+                    user_id=payload.user.id,
+                    session_id=session_id,
+                    text=followup_input[:100],
+                )
+
+                # Forward to Request Manager with session context
+                await self._forward_to_request_manager(
+                    user_id=payload.user.id,
+                    content=followup_input,
+                    integration_type="slack",
+                    metadata={
+                        "slack_channel": (
+                            payload.channel.id if payload.channel else payload.user.id
+                        ),
+                        "source": "slack_followup_modal",
+                        "session_id": session_id,  # Include session ID for continuity
+                    },
+                )
+
+                return {"response_action": "clear"}
+
+            return {"response_action": "clear"}
+
+        except Exception as e:
+            logger.error("Error handling modal submission", error=str(e))
+            return {
+                "response_action": "errors",
+                "errors": {
+                    "followup_input_block": "Sorry, there was an error processing your request. Please try again."
+                },
+            }
 
     def _clean_message_text(self, text: str) -> str:
         """Clean message text by removing bot mentions."""

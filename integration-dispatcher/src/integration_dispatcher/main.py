@@ -881,6 +881,9 @@ async def handle_slack_interactive(request: Request):
         if payload.type == "block_actions":
             response = await slack_service.handle_button_interaction(payload)
             return response
+        elif payload.type == "view_submission":
+            response = await slack_service.handle_modal_submission(payload)
+            return response
 
         logger.warning("Unknown interaction type", interaction_type=payload.type)
         return {"text": "Unknown interaction"}
