@@ -99,12 +99,16 @@ This flow handles requests initiated directly by users through command-line tool
          ▼                       ▼                       ▼
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
 │   Response      │    │   Database      │    │   Agent         │
-│   (Sync/Async)  │    │                 │    │   Service       │
-│                 │    │ • Request Store │    │                 │
-│ • 202 Accepted  │    │ • Session Data  │    │ • AI Processing │
-│ • request_id    │    │ • User Config   │    │ • LLM Calls     │
-│ • session_id    │    │ • Integration   │    │ • Tool Usage    │
-│ • (or result)   │    │   Settings      │    │ • Response Gen  │
+│                 │    │                 │    │   Service       │
+│ SYNC:           │    │ • Request Store │    │                 │
+│ • 200 OK        │    │ • Session Data  │    │ • AI Processing │
+│ • Complete      │    │ • User Config   │    │ • LLM Calls     │
+│   Result        │    │ • Integration   │    │ • Tool Usage    │
+│                 │    │   Settings      │    │ • Response Gen  │
+│ ASYNC:          │    │                 │    │                 │
+│ • 202 Accepted  │    │                 │    │                 │
+│ • request_id    │    │                 │    │                 │
+│ • session_id    │    │                 │    │                 │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
                                 │                       │
                                 │                       │ CloudEvent
