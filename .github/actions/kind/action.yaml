@@ -25,7 +25,7 @@ runs:
       shell: bash
 
     - name: Create Kind Cluster
-      run: ./scripts/ci/kind-with-registry.sh
+      run: bash ./scripts/ci/kind-with-registry.sh
       shell: bash
 
     - name: Helm Depend
