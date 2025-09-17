@@ -349,8 +349,9 @@ class Agent:
 
             logger.debug(f"Received response from LlamaStack: {type(response)}")
 
-            # Count tokens from the response
-            count_tokens_from_response(response, self.model, "chat_agent")
+            count_tokens_from_response(
+                response, self.model, "chat_agent", messages_with_system
+            )
 
             # Check for error conditions in the response
             error_info = self._check_response_errors(response)

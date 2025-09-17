@@ -156,8 +156,71 @@ class TokenCounter:
             )
 
 
+def estimate_tokens_from_text(text: str) -> int:
+    """Improved token estimation from text content"""
+    if not text:
+        return 0
+
+    # More sophisticated estimation accounting for common patterns
+    # This is still approximate but much better than a fixed value
+
+    # Remove extra whitespace
+    cleaned_text = " ".join(text.split())
+    char_count = len(cleaned_text)
+
+    # Base estimation: ~3.5-4 characters per token for English
+    # Adjust based on content patterns
+    base_tokens = char_count / 3.7
+
+    # Adjust for common patterns that affect tokenization
+    # Technical terms, code, structured data tend to use more tokens
+    if any(
+        keyword in text.lower()
+        for keyword in [
+            "critical",
+            "assistant:",
+            "user:",
+            "employee_id",
+            "laptop",
+            "servicenow",
+        ]
+    ):
+        base_tokens *= 1.1  # Technical content uses slightly more tokens
+
+    # JSON-like structures or repeated patterns
+    if text.count("{") > 2 or text.count(":") > 5:
+        base_tokens *= 1.15
+
+    return max(1, int(base_tokens))
+
+
+def count_tokens_from_messages(messages: list) -> int:
+    """Estimate input tokens from the actual messages being sent to LLM"""
+    if not messages:
+        return 0
+
+    total_tokens = 0
+    for message in messages:
+        if isinstance(message, dict):
+            content = message.get("content", "")
+            # Add small overhead for role and message structure
+            total_tokens += estimate_tokens_from_text(content) + 3
+        elif hasattr(message, "content"):
+            total_tokens += estimate_tokens_from_text(str(message.content)) + 3
+        else:
+            total_tokens += estimate_tokens_from_text(str(message)) + 3
+
+    # Add overhead for message formatting and API structure
+    total_tokens += len(messages) * 2
+
+    return total_tokens
+
+
 def count_tokens_from_response(
-    response, model: Optional[str] = None, context: Optional[str] = None
+    response,
+    model: Optional[str] = None,
+    context: Optional[str] = None,
+    input_messages: list = None,
 ):
     """Extract and count tokens from a LlamaStack response object"""
     try:
@@ -179,13 +242,20 @@ def count_tokens_from_response(
             ):
                 input_tokens = response.input_tokens or 0
                 output_tokens = response.output_tokens or 0
-        except AttributeError as e:
+        except AttributeError:
             # Handle cases where attributes don't exist or are inaccessible
-            print(f"Warning: Could not access token attributes: {e}")
+            pass
 
-        # If direct token access failed, try content estimation
+        # If direct token access failed, use improved estimation
         if input_tokens == 0 and output_tokens == 0:
-            # Try to estimate tokens from content length
+            # Estimate input tokens from the messages that were actually sent
+            if input_messages:
+                input_tokens = count_tokens_from_messages(input_messages)
+            else:
+                # Fallback to old behavior if messages not provided
+                input_tokens = 50
+
+            # Estimate output tokens from response content
             content = ""
             try:
                 if hasattr(response, "output_text"):
@@ -198,9 +268,7 @@ def count_tokens_from_response(
                             content = content_item.text or ""
 
                 if content:
-                    # Rough estimation: 1 token ~= 4 characters
-                    output_tokens = max(1, len(content) // 4)
-                    input_tokens = 50  # Rough estimate for prompts
+                    output_tokens = estimate_tokens_from_text(content)
             except Exception:
                 pass
 
