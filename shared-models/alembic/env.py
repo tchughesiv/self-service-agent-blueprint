@@ -5,8 +5,8 @@ from logging.config import fileConfig
 from alembic import context
 
 # Import the shared database configuration
-from shared_db.config import get_db_config
-from shared_db.models import Base
+from shared_models.database import get_db_config
+from shared_models.models import Base
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 

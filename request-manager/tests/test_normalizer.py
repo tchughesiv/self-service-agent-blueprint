@@ -2,7 +2,7 @@
 
 from request_manager.normalizer import RequestNormalizer
 from request_manager.schemas import CLIRequest, SlackRequest, ToolRequest, WebRequest
-from shared_db.models import IntegrationType
+from shared_models.models import IntegrationType
 
 
 class TestRequestNormalizer:

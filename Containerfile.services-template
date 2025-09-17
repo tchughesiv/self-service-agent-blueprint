@@ -15,10 +15,13 @@ RUN pip3 install --no-cache-dir uv
 WORKDIR /app
 
 # Copy shared database if needed (most services need it)
-COPY shared-db ./shared-db/
+COPY shared-models ./shared-models/
 
 # Copy shared clients package
 COPY shared-clients ./shared-clients/
+
+# Copy agent-service (needed by request-manager and integration-dispatcher)
+COPY agent-service ./agent-service/
 
 # Copy service files
 ARG SERVICE_NAME
@@ -35,10 +38,13 @@ FROM registry.access.redhat.com/ubi9/python-312-minimal:latest
 WORKDIR /app
 
 # Copy shared database if needed
-COPY --from=builder /app/shared-db /app/shared-db
+COPY --from=builder /app/shared-models /app/shared-models
 
 # Copy shared clients package
 COPY --from=builder /app/shared-clients /app/shared-clients
+
+# Copy agent-service (needed by request-manager and integration-dispatcher)
+COPY --from=builder /app/agent-service /app/agent-service
 
 # Copy virtual environment from builder (service-specific, but ARG not needed yet)
 ARG SERVICE_NAME
@@ -52,7 +58,7 @@ COPY ${SERVICE_NAME}/pyproject.toml ./
 
 # Set environment variables
 ENV PATH="/app/.venv/bin:$PATH"
-ENV PYTHONPATH="/app/shared-db/src:/app/shared-clients/src:/app/src"
+ENV PYTHONPATH="/app/agent-service/src:/app/shared-models/src:/app/shared-clients/src:/app/src"
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 

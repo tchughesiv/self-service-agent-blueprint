@@ -3,7 +3,7 @@
 import json
 from typing import Any, Dict
 
-from shared_db.models import DeliveryRequest, DeliveryStatus, UserIntegrationConfig
+from shared_models.models import DeliveryRequest, DeliveryStatus, UserIntegrationConfig
 
 from .base import BaseIntegrationHandler, IntegrationResult
 

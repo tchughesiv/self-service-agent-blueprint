@@ -219,7 +219,7 @@ curl -X POST https://api.selfservice.apps.cluster.local/api/v1/sessions \
   -H "Content-Type: application/json" \
   -d '{
     "user_id": "test.user",
-    "integration_type": "web"
+    "integration_type": "WEB"
   }'
 
 # Get session info

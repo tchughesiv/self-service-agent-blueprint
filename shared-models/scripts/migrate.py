@@ -10,15 +10,13 @@ from pathlib import Path
 from alembic import command
 from alembic.config import Config
 
-# Add the src directory to Python path and import shared_db modules
+# Add the src directory to Python path and import shared_models modules
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 try:
-    from shared_db.config import get_db_config
-    from shared_db.session import get_database_manager
+    from shared_models.database import get_database_manager, get_db_config
 except ImportError:
     # If running in container, try direct import
-    from shared_db.config import get_db_config  # noqa: F401
-    from shared_db.session import get_database_manager  # noqa: F401
+    from shared_models.database import get_database_manager, get_db_config  # noqa: F401
 
 # Configure logging
 logging.basicConfig(

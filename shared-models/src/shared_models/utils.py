@@ -22,7 +22,7 @@ def get_enum_value(enum_obj: Union[Enum, str, Any]) -> str:
         str: The enum's .value if it exists, otherwise str(enum_obj)
 
     Examples:
-        >>> from shared_db.models import IntegrationType
+        >>> from shared_models.models import IntegrationType
         >>> get_enum_value(IntegrationType.WEB)
         'WEB'
         >>> get_enum_value("WEB")

@@ -10,7 +10,7 @@ import httpx
 import structlog
 from cloudevents.http import CloudEvent, to_structured
 from cloudevents.http.event import CloudEvent as CloudEventType
-from shared_db import get_enum_value
+from shared_models import get_enum_value
 
 from .schemas import AgentResponse, NormalizedRequest
 

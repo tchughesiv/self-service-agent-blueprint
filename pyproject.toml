@@ -57,8 +57,8 @@ dependencies = [
     "gunicorn>=23.0.0",
     "slack_sdk>=3.36.0",
     "slack-bolt>=1.18.0",
-    "shared-clients",
-    "self-service-agent-shared-db",
+    "self-service-agent-shared-clients",
+    "self-service-agent-shared-models",
     "asset-manager",
 ]
 
@@ -88,8 +88,8 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 
 [tool.uv.sources]
-shared-clients = { path = "shared-clients" }
-self-service-agent-shared-db = { path = "shared-db" }
+self-service-agent-shared-clients = { path = "shared-clients" }
+self-service-agent-shared-models = { path = "shared-models" }
 asset-manager = { path = "asset-manager" }
 
 [dependency-groups]
@@ -97,5 +97,7 @@ dev = [
     "black>=25.1.0",
     "flake8>=7.3.0",
     "isort>=5.13.0",
+    "mypy>=1.17.1",
     "pytest>=8.4.1",
+    "types-pyyaml>=6.0.12.20250915",
 ]

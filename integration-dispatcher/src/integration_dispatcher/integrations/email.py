@@ -6,7 +6,7 @@ from email.mime.text import MIMEText
 from typing import Any, Dict
 
 import aiosmtplib
-from shared_db.models import DeliveryRequest, DeliveryStatus, UserIntegrationConfig
+from shared_models.models import DeliveryRequest, DeliveryStatus, UserIntegrationConfig
 
 from .base import BaseIntegrationHandler, IntegrationResult
 
@@ -143,7 +143,14 @@ class EmailIntegrationHandler(BaseIntegrationHandler):
 
         logger = structlog.get_logger()
 
-        logger.info(
+        # Return False if no SMTP configuration is provided
+        if not self.smtp_username or not self.smtp_password:
+            logger.debug(
+                "Email integration not available - no SMTP credentials configured"
+            )
+            return False
+
+        logger.debug(
             "Email integration health check started (connectivity only)",
             smtp_host=self.smtp_host,
             smtp_port=self.smtp_port,
@@ -162,7 +169,7 @@ class EmailIntegrationHandler(BaseIntegrationHandler):
                 # Use a simple socket connection test to avoid Gmail sending limits
                 import socket
 
-                logger.info("Testing SMTP connectivity on port 587 (STARTTLS)")
+                logger.debug("Testing SMTP connectivity on port 587 (STARTTLS)")
 
                 # Test basic TCP connectivity first
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -171,24 +178,24 @@ class EmailIntegrationHandler(BaseIntegrationHandler):
                 try:
                     # Connect to SMTP server
                     sock.connect((self.smtp_host, int(self.smtp_port)))
-                    logger.info("TCP connection to SMTP server established")
+                    logger.debug("TCP connection to SMTP server established")
 
                     # Read the initial SMTP greeting
                     response = sock.recv(1024).decode("utf-8")
-                    logger.info(
+                    logger.debug(
                         "SMTP server greeting received", response=response[:100]
                     )
 
                     # Send EHLO command
                     sock.send(b"EHLO health-check\r\n")
                     response = sock.recv(1024).decode("utf-8")
-                    logger.info("EHLO response received", response=response[:100])
+                    logger.debug("EHLO response received", response=response[:100])
 
                     # Test STARTTLS capability
                     if "STARTTLS" in response:
-                        logger.info("STARTTLS capability confirmed")
+                        logger.debug("STARTTLS capability confirmed")
                         sock.close()
-                        logger.info(
+                        logger.debug(
                             "Email integration health check passed (connectivity verified)"
                         )
                         return True
@@ -205,7 +212,7 @@ class EmailIntegrationHandler(BaseIntegrationHandler):
                 # Port 465 (SMTPS) or other configurations - test connection without authentication
                 import socket
 
-                logger.info(
+                logger.debug(
                     "Testing SMTP connectivity on port 465 (SMTPS) or other configuration"
                 )
 
@@ -216,18 +223,18 @@ class EmailIntegrationHandler(BaseIntegrationHandler):
                 try:
                     # Connect to SMTP server
                     sock.connect((self.smtp_host, int(self.smtp_port)))
-                    logger.info("TCP connection to SMTP server established")
+                    logger.debug("TCP connection to SMTP server established")
 
                     # Read the initial SMTP greeting
                     response = sock.recv(1024).decode("utf-8")
-                    logger.info(
+                    logger.debug(
                         "SMTP server greeting received", response=response[:100]
                     )
 
                     # Send EHLO command
                     sock.send(b"EHLO health-check\r\n")
                     response = sock.recv(1024).decode("utf-8")
-                    logger.info("EHLO response received", response=response[:100])
+                    logger.debug("EHLO response received", response=response[:100])
 
                     # Close the connection
                     sock.close()

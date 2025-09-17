@@ -4,11 +4,10 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 import structlog
-from shared_db.models import RequestLog
+from shared_models.models import RequestLog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .routing import detect_and_validate_agent_routing
 from .session_manager import SessionManager
 
 logger = structlog.get_logger()
@@ -49,23 +48,11 @@ class UnifiedResponseHandler:
                 "request_id": request_id,
             }
 
-        # Check if this is a routing response that should switch agents
-        routed_agent = await self._detect_and_validate_agent_routing(content, agent_id)
-
-        if routed_agent:
-            # Update session to use the routed agent
-            await self.session_manager.update_session(
-                session_id,
-                agent_id=routed_agent,
-                status="ACTIVE",
-            )
-            logger.info(
-                "Agent routing detected",
-                request_id=request_id,
-                session_id=session_id,
-                from_agent=agent_id,
-                to_agent=routed_agent,
-            )
+        logger.debug(
+            "Response processed - routing handled by Agent Service",
+            session_id=session_id,
+            agent_id=agent_id,
+        )
 
         # Update request log with response
         await self._update_request_log(
@@ -151,13 +138,6 @@ class UnifiedResponseHandler:
             agent_id=agent_id,
             has_metadata=bool(metadata),
         )
-
-    async def _detect_and_validate_agent_routing(
-        self, content: str, current_agent_id: str
-    ) -> Optional[str]:
-        """Detect if the response indicates agent routing should occur."""
-        # Use the routing detection logic
-        return await detect_and_validate_agent_routing(content, current_agent_id)
 
     async def get_response_data(self, request_id: str) -> Optional[Dict[str, Any]]:
         """Get response data for a request."""

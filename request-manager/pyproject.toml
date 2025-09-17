@@ -17,7 +17,9 @@ dependencies = [
     "python-json-logger>=2.0.7",
     "pyjwt[crypto]>=2.8.0",
     "cryptography>=41.0.0",
-    "self-service-agent-shared-db",
+    "self-service-agent-shared-models",
+    "self-service-agent-shared-clients",
+    "self-service-agent-service",
 ]
 
 [project.optional-dependencies]
@@ -56,7 +58,9 @@ warn_unused_configs = true
 disallow_untyped_defs = true
 
 [tool.uv.sources]
-self-service-agent-shared-db = { path = "../shared-db" }
+self-service-agent-shared-models = { path = "../shared-models" }
+self-service-agent-shared-clients = { path = "../shared-clients" }
+self-service-agent-service = { path = "../agent-service" }
 
 [dependency-groups]
 dev = [

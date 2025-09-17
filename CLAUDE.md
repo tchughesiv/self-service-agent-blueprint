@@ -12,7 +12,8 @@ This is a self-service agent blueprint implementing a complete AI agent manageme
 - **asset-manager/**: Agent, knowledge base, and toolgroup registration
 - **mcp-servers/**: MCP (Model Context Protocol) servers for external tool integration
 - **mock-eventing-service/**: Lightweight mock service for testing without Knative infrastructure
-- **shared-db/**: Database models and Alembic migrations
+- **shared-models/**: Database models, Pydantic schemas, and Alembic migrations
+- **shared-clients/**: Centralized HTTP client libraries for inter-service communication
 - **helm/**: Kubernetes Helm charts for OpenShift deployment
 - **test/**: Testing utilities and scripts
 

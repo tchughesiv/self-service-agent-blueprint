@@ -1,14 +1,15 @@
-"""Session management for Request Manager."""
+"""Session management for Agent Service."""
 
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
-from agent_service.schemas import SessionCreate, SessionResponse
 from shared_models import get_enum_value
 from shared_models.models import IntegrationType, RequestSession, SessionStatus
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from .schemas import SessionCreate, SessionResponse
 
 
 class SessionManager:
@@ -137,10 +138,6 @@ class SessionManager:
         if existing_session:
             await self._update_session_activity(existing_session.session_id)
             return SessionResponse.from_orm(existing_session)
-
-        # For Slack, if no exact match found, the _find_active_session method will handle
-        # smart fallback logic (preferring same channel type, then most recent)
-        # No additional fallback needed here since the logic is now consolidated
 
         # Create new session
         session_data = SessionCreate(

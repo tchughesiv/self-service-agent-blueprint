@@ -8,12 +8,15 @@ import os
 import sys
 from datetime import datetime
 
-# Add the shared-db src directory to Python path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "shared-db", "src"))
+# Add the shared-models src directory to Python path
+sys.path.insert(
+    0, os.path.join(os.path.dirname(__file__), "..", "shared-models", "src")
+)
+
+from shared_models import get_database_manager  # noqa: E402
 
 # Import after path modification
-from shared_db.models import IntegrationType, UserIntegrationConfig  # noqa: E402
-from shared_db.session import DatabaseManager  # noqa: E402
+from shared_models.models import IntegrationType, UserIntegrationConfig  # noqa: E402
 from sqlalchemy import select  # noqa: E402
 
 
@@ -22,7 +25,7 @@ async def setup_test_integration(user_id: str = "e2e-test-user"):
     print(f"🔧 Setting up test integration for user: {user_id}")
 
     # Initialize database
-    db_manager = DatabaseManager()
+    db_manager = get_database_manager()
 
     async with db_manager.get_session() as db:
         # Check if config already exists
@@ -81,7 +84,7 @@ async def setup_slack_integration(
         return None
 
     # Initialize database
-    db_manager = DatabaseManager()
+    db_manager = get_database_manager()
 
     async with db_manager.get_session() as db:
         # Check if config already exists
@@ -138,7 +141,7 @@ async def list_user_integrations(user_id: str):
     """List all integration configurations for a user."""
     print(f"📋 Integration configurations for user: {user_id}")
 
-    db_manager = DatabaseManager()
+    db_manager = get_database_manager()
 
     async with db_manager.get_session() as db:
         stmt = (

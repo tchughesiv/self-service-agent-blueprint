@@ -3,7 +3,7 @@
 from typing import Any, Dict
 
 import httpx
-from shared_db.models import DeliveryRequest, DeliveryStatus, UserIntegrationConfig
+from shared_models.models import DeliveryRequest, DeliveryStatus, UserIntegrationConfig
 
 from .base import BaseIntegrationHandler, IntegrationResult
 

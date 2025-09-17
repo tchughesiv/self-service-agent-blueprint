@@ -4,10 +4,16 @@ import hashlib
 import hmac
 import os
 import time
-from typing import Dict, Optional
+import uuid
+from datetime import datetime, timezone
+from typing import Any, Dict, Optional
 
 import httpx
 import structlog
+from cloudevents.http import CloudEvent, to_structured
+from shared_clients import AgentServiceClient
+from shared_clients.service_client import RequestManagerClient
+from shared_models import CloudEventBuilder
 
 from .slack_schemas import SlackInteractionPayload, SlackSlashCommand
 
@@ -19,11 +25,13 @@ class SlackService:
 
     def __init__(self):
         self.signing_secret = os.getenv("SLACK_SIGNING_SECRET")
-        self.request_manager_url = os.getenv(
-            "REQUEST_MANAGER_URL", "http://self-service-agent-request-manager"
-        )
+        self.request_manager_client = RequestManagerClient()
+        self.agent_service_client = AgentServiceClient()
         # Simple rate limiting: track last request time per user
         self._last_request_time = {}
+        # Eventing configuration
+        self.eventing_enabled = os.getenv("EVENTING_ENABLED", "true").lower() == "true"
+        self.broker_url = os.getenv("BROKER_URL")
 
     def verify_slack_signature(
         self, body: bytes, timestamp: str, signature: str
@@ -52,6 +60,62 @@ class SlackService:
         )
 
         return hmac.compare_digest(expected_signature, signature)
+
+    async def _send_cloudevent(
+        self, event_data: Dict[str, Any], event_type: str
+    ) -> bool:
+        """Send a CloudEvent to the broker."""
+        if not self.eventing_enabled or not self.broker_url:
+            logger.info("Eventing disabled or no broker URL - skipping CloudEvent")
+            return False
+
+        try:
+            # Create CloudEvent using shared utilities
+            builder = CloudEventBuilder("integration-dispatcher")
+            if event_type == "com.self-service-agent.request.created":
+                event = builder.create_request_event(
+                    event_data,
+                    event_data.get("request_id"),
+                    event_data.get("user_id"),
+                    event_data.get("session_id"),
+                )
+            else:
+                # For other event types, create a basic event
+                event = CloudEvent(
+                    {
+                        "type": event_type,
+                        "source": "integration-dispatcher",
+                        "id": str(uuid.uuid4()),
+                        "time": datetime.now(timezone.utc).isoformat(),
+                    },
+                    event_data,
+                )
+
+            # Send to broker
+            headers, body = to_structured(event)
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    self.broker_url,
+                    headers=headers,
+                    content=body,
+                    timeout=30.0,
+                )
+                response.raise_for_status()
+
+            logger.info(
+                "CloudEvent sent successfully",
+                event_type=event_type,
+                event_id=event["id"],
+            )
+            return True
+
+        except Exception as e:
+            logger.error(
+                "Failed to send CloudEvent",
+                event_type=event_type,
+                error=str(e),
+            )
+            return False
 
     async def handle_message_event(self, event: Dict, team_id: str = None) -> None:
         """Handle incoming Slack message."""
@@ -145,16 +209,31 @@ class SlackService:
             )
 
             # Forward to Request Manager
+            # Provide default team_id if not available
+            effective_team_id = team_id or "unknown"
+
+            metadata = {
+                "slack_channel": channel,
+                "slack_thread_ts": thread_ts,
+                "slack_team_id": effective_team_id,
+                "source": "slack_message",
+            }
+
+            logger.debug(
+                "Creating Slack metadata",
+                user_id=user_id,
+                channel=channel,
+                thread_ts=thread_ts,
+                team_id=team_id,
+                effective_team_id=effective_team_id,
+                metadata=metadata,
+            )
+
             await self._forward_to_request_manager(
                 user_id=user_id,
                 content=text,
-                integration_type="slack",
-                metadata={
-                    "slack_channel": channel,
-                    "slack_thread_ts": thread_ts,
-                    "slack_team_id": team_id,
-                    "source": "slack_message",
-                },
+                integration_type="SLACK",
+                metadata=metadata,
             )
 
         except Exception as e:
@@ -181,7 +260,7 @@ class SlackService:
             await self._forward_to_request_manager(
                 user_id=command.user_id,
                 content=command.text,
-                integration_type="slack",
+                integration_type="SLACK",
                 metadata={
                     "slack_channel": command.channel_id,
                     "slack_response_url": command.response_url,
@@ -265,19 +344,10 @@ class SlackService:
 
                 # Close the current session by marking it as completed
                 try:
-                    async with httpx.AsyncClient() as client:
-                        close_response = await client.put(
-                            f"{self.request_manager_url}/api/v1/sessions/{old_session_id}",
-                            json={"status": "INACTIVE"},
-                            timeout=10.0,
-                        )
-                        print(
-                            f"DEBUG: Session close status: {close_response.status_code}"
-                        )
-                        if close_response.status_code != 200:
-                            print(
-                                f"DEBUG: Failed to close session: {close_response.text}"
-                            )
+                    await self.agent_service_client.update_session(
+                        old_session_id, {"status": "INACTIVE"}
+                    )
+                    print("DEBUG: Session closed successfully")
                 except Exception as e:
                     logger.error(f"Error closing session: {e}")
 
@@ -295,7 +365,7 @@ class SlackService:
                     await self._forward_to_request_manager(
                         user_id=user_id,
                         content=new_session_content,
-                        integration_type="slack",
+                        integration_type="SLACK",
                         metadata={
                             "slack_channel": channel_id,
                             "slack_team_id": team_id,
@@ -381,7 +451,7 @@ class SlackService:
                 await self._forward_to_request_manager(
                     user_id=payload.user.id,
                     content=followup_input,
-                    integration_type="slack",
+                    integration_type="SLACK",
                     metadata={
                         "slack_channel": (
                             payload.channel.id if payload.channel else payload.user.id
@@ -428,6 +498,7 @@ class SlackService:
             slack_user_id = user_id  # Slack user ID is the same as user_id
             slack_team_id = metadata.get("slack_team_id", "") if metadata else ""
 
+            # Create payload - Request Manager will generate request_id and session_id
             payload = {
                 "user_id": user_id,
                 "content": content,
@@ -440,18 +511,28 @@ class SlackService:
                 "metadata": metadata or {},
             }
 
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.request_manager_url}/api/v1/requests/slack",
-                    json=payload,
-                    timeout=30.0,
-                )
-                response.raise_for_status()
+            logger.debug(
+                "Sending Slack request to Request Manager",
+                user_id=user_id,
+                channel_id=channel_id,
+                slack_user_id=slack_user_id,
+                slack_team_id=slack_team_id,
+                thread_id=thread_id,
+                payload=payload,
+            )
 
+            # Always use Request Manager HTTP API - it handles session management and eventing
+            response = await self.request_manager_client.send_slack_request(payload)
+            if response:
                 logger.info(
                     "Request forwarded to Request Manager",
                     user_id=user_id,
-                    status_code=response.status_code,
+                    status="success",
+                )
+            else:
+                logger.error(
+                    "Failed to forward request to Request Manager",
+                    user_id=user_id,
                 )
 
         except Exception as e:
@@ -463,69 +544,61 @@ class SlackService:
             raise
 
     async def _get_session_details(self, session_id: str) -> str:
-        """Fetch session details from Request Manager."""
+        """Fetch session details from Agent Service."""
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    f"{self.request_manager_url}/api/v1/sessions/{session_id}",
-                    timeout=10.0,
-                )
+            session_data = await self.agent_service_client.get_session(session_id)
+            if not session_data:
+                return "Session not found"
 
-                if response.status_code == 200:
-                    session_data = response.json()
+            # Format session information
+            created_at = getattr(session_data, "created_at", "Unknown")
+            if created_at != "Unknown":
+                # Parse and format the datetime
+                from datetime import datetime
 
-                    # Format session information
-                    created_at = session_data.get("created_at", "Unknown")
-                    if created_at != "Unknown":
-                        # Parse and format the datetime
-                        from datetime import datetime
+                try:
+                    dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                    created_at = dt.strftime("%Y-%m-%d %H:%M UTC")
+                except Exception:
+                    pass
 
-                        try:
-                            dt = datetime.fromisoformat(
-                                created_at.replace("Z", "+00:00")
-                            )
-                            created_at = dt.strftime("%Y-%m-%d %H:%M UTC")
-                        except Exception:
-                            pass
+            total_requests = getattr(session_data, "total_requests", 0)
+            status = getattr(session_data, "status", "Unknown")
+            agent_id = getattr(session_data, "current_agent_id", None) or "Not assigned"
 
-                    total_requests = session_data.get("total_requests", 0)
-                    status = session_data.get("status", "Unknown")
-                    agent_id = session_data.get("current_agent_id") or "Not assigned"
+            # Convert agent UUID to human-readable name using existing AgentMapping
+            agent_name = agent_id
+            if agent_id and agent_id != "Not assigned":
+                try:
+                    from shared_models import create_agent_mapping
 
-                    return (
-                        f"📋 *Session Information*\n\n"
-                        f"**Session ID:** `{session_id}`\n"
-                        f"**Status:** {status}\n"
-                        f"**Created:** {created_at}\n"
-                        f"**Total Requests:** {total_requests}\n"
-                        f"**Current Agent:** {agent_id}\n\n"
-                        f"💡 **Continue this conversation by:**\n"
-                        f"• Using `/agent [your message]` in Slack\n"
-                        f"• Mentioning me in your message\n"
-                        f"• Sending a DM to this bot\n\n"
-                        f"Your session context will be maintained automatically!"
-                    )
-                else:
-                    return (
-                        f"📋 *Session Information*\n\n"
-                        f"**Session ID:** `{session_id}`\n"
-                        f"**Status:** Unable to fetch details (HTTP {response.status_code})\n\n"
-                        f"💡 **Continue this conversation by:**\n"
-                        f"• Using `/agent [your message]` in Slack\n"
-                        f"• Mentioning me in your message\n"
-                        f"• Sending a DM to this bot"
+                    agents_response = await self.agent_service_client.list_agents()
+                    if agents_response and "agents" in agents_response:
+                        # Create AgentMapping from the response
+                        agent_mapping = create_agent_mapping(agents_response["agents"])
+                        # Use the existing get_name method
+                        agent_name = agent_mapping.get_name(agent_id) or agent_id
+                except Exception as e:
+                    logger.warning(
+                        "Failed to convert agent UUID to name",
+                        agent_id=agent_id,
+                        error=str(e),
                     )
 
-        except Exception as e:
-            logger.error(
-                "Failed to fetch session details", session_id=session_id, error=str(e)
-            )
             return (
                 f"📋 *Session Information*\n\n"
                 f"**Session ID:** `{session_id}`\n"
-                f"**Status:** Unable to fetch details (error: {str(e)})\n\n"
+                f"**Status:** {status}\n"
+                f"**Created:** {created_at}\n"
+                f"**Total Requests:** {total_requests}\n"
+                f"**Current Agent:** {agent_name}\n\n"
                 f"💡 **Continue this conversation by:**\n"
                 f"• Using `/agent [your message]` in Slack\n"
                 f"• Mentioning me in your message\n"
-                f"• Sending a DM to this bot"
+                f"• Sending a DM to this bot\n\n"
+                f"Your session context will be maintained automatically!"
             )
+
+        except Exception as e:
+            logger.error(f"Error fetching session details: {e}")
+            return f"Error fetching session details: {str(e)}"

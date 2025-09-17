@@ -229,6 +229,35 @@ Both flows share these core components:
 └─────────────────┘
 ```
 
+### **Shared Libraries Architecture**
+```
+┌─────────────────┐    ┌─────────────────┐
+│   shared-models │    │  shared-clients │
+│                 │    │                 │
+│ • Database      │    │ • HTTP Clients  │
+│   Models        │    │ • Service       │
+│ • Pydantic      │    │   Communication │
+│   Schemas       │    │ • Unified API   │
+│ • Enums &       │    │   Interface     │
+│   Utilities     │    │ • Error         │
+│ • Migration     │    │   Handling      │
+│   Scripts       │    │ • Retry Logic   │
+└─────────────────┘    └─────────────────┘
+         │                       │
+         │ Used by all services  │ Used by all services
+         │ for data models       │ for inter-service
+         │ and database access   │ communication
+         ▼                       ▼
+┌─────────────────────────────────────────┐
+│           All Services                  │
+│                                         │
+│ • agent-service                         │
+│ • request-manager                       │
+│ • integration-dispatcher                │
+│ • mcp-servers                           │
+└─────────────────────────────────────────┘
+```
+
 ### **AI/Agent Layer**
 ```
 ┌─────────────────┐
@@ -239,7 +268,67 @@ Both flows share these core components:
 │ • RAG Pipeline  │
 │ • Context Mgmt  │
 │ • Response Gen  │
+│ • Session CRUD  │
+│   (Centralized) │
 └─────────────────┘
+```
+
+### **Communication Modes**
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Unified Architecture                     │
+│                                                             │
+│  ┌─────────────────┐              ┌─────────────────┐      │
+│  │   Eventing      │              │   Direct HTTP   │      │
+│  │   Mode          │              │   Mode          │      │
+│  │                 │              │                 │      │
+│  │ • Knative       │              │ • HTTP Clients  │      │
+│  │   Broker        │              │ • Service URLs  │      │
+│  │ • CloudEvents   │              │ • Direct Calls  │      │
+│  │ • Triggers      │              │ • No Eventing   │      │
+│  │ • Async         │              │ • Sync/Async    │      │
+│  └─────────────────┘              └─────────────────┘      │
+│           │                               │                │
+│           └───────────┬───────────────────┘                │
+│                       │                                    │
+│                       ▼                                    │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │           Unified Request Processor                 │   │
+│  │                                                     │   │
+│  │ • Strategy Pattern                                  │   │
+│  │ • Mode Detection                                    │   │
+│  │ • Session Management                                │   │
+│  │ • Agent Routing                                     │   │
+│  │ • Response Handling                                 │   │
+│  └─────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### **Session Management Architecture**
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Request       │    │   Agent         │    │   Integration   │
+│   Manager       │───▶│   Service       │◀───│   Dispatcher    │
+│                 │    │                 │    │                 │
+│ • Request       │    │ • Session CRUD  │    │ • Session       │
+│   Logging       │    │   Endpoints     │    │   Queries       │
+│ • Event         │    │ • Database      │    │ • User Context  │
+│   Deduplication │    │   Access        │    │ • Integration   │
+│ • Request       │    │ • LlamaStack    │    │   Metadata      │
+│   Tracking      │    │   Session Mgmt  │    │                 │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+         │                       │                       │
+         │ HTTP API Calls        │ Direct DB Access      │ HTTP API Calls
+         │ (shared-clients)      │ (shared-models)       │ (shared-clients)
+         ▼                       ▼                       ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    PostgreSQL Database                      │
+│                                                             │
+│ • RequestSession (Agent Service)                           │
+│ • RequestLog (Request Manager)                             │
+│ • ProcessedEvent (Request Manager)                         │
+│ • User Config & Integration Settings                       │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -257,3 +346,38 @@ Both flows share these core components:
 | **Delivery** | Back to originating integration | Any configured integration |
 
 Both flows converge at the Agent Service and use the same event-driven architecture for reliability and scalability.
+
+---
+
+## Key Architectural Improvements
+
+### **1. Unified Communication Strategy**
+- **Single Codebase**: Both eventing and direct HTTP modes use the same business logic
+- **Strategy Pattern**: Communication mechanism is abstracted and interchangeable
+- **Environment-Driven**: Mode selection via `EVENTING_ENABLED` environment variable
+- **Consistent API**: Same request/response patterns regardless of communication mode
+
+### **2. Centralized Session Management**
+- **Single Source of Truth**: All session operations handled by Agent Service
+- **HTTP API**: Session CRUD operations exposed via REST endpoints
+- **Shared Clients**: Consistent HTTP client usage across all services
+- **Database Separation**: Session data (Agent Service) vs Request logging (Request Manager)
+
+### **3. Shared Libraries Architecture**
+- **`shared-models`**: Common data models, schemas, and database utilities
+- **`shared-clients`**: Centralized HTTP client implementations for inter-service communication
+- **Consistent Naming**: All packages follow `self-service-agent-*` naming convention
+- **Dependency Management**: Proper package dependencies and local path references
+
+### **4. Service Responsibilities**
+- **Agent Service**: AI processing, session management, LlamaStack integration
+- **Request Manager**: Request logging, event deduplication, request tracking
+- **Integration Dispatcher**: External system integration, user context management
+- **Shared Libraries**: Common functionality and inter-service communication
+
+### **5. Benefits**
+- **Maintainability**: Single codebase for both communication modes
+- **Consistency**: Unified API patterns and error handling
+- **Scalability**: Eventing for high-throughput, HTTP for direct integration
+- **Reliability**: Centralized session management with proper error handling
+- **Developer Experience**: Clear separation of concerns and shared utilities

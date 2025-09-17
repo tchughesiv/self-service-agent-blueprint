@@ -3,7 +3,7 @@
 import os
 from typing import Any, Dict
 
-from shared_db.models import DeliveryRequest, DeliveryStatus, UserIntegrationConfig
+from shared_models.models import DeliveryRequest, DeliveryStatus, UserIntegrationConfig
 from slack_sdk.errors import SlackApiError
 from slack_sdk.web.async_client import AsyncWebClient
 
@@ -127,7 +127,7 @@ class SlackIntegrationHandler(BaseIntegrationHandler):
 
         logger = structlog.get_logger()
 
-        logger.info(
+        logger.debug(
             "Slack integration health check started",
             has_client=bool(self.client),
             has_bot_token=bool(self.bot_token),
@@ -140,10 +140,10 @@ class SlackIntegrationHandler(BaseIntegrationHandler):
             return False
 
         try:
-            logger.info("Testing Slack API connectivity...")
+            logger.debug("Testing Slack API connectivity...")
             response = await self.client.auth_test()
             if response["ok"]:
-                logger.info(
+                logger.debug(
                     "Slack integration health check passed",
                     user_id=response.get("user_id"),
                     team_id=response.get("team_id"),

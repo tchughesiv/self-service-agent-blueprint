@@ -6,32 +6,14 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 
-import structlog
 from cloudevents.http import CloudEvent
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from shared_models import configure_logging, simple_health_check
 
 # Configure structured logging
-structlog.configure(
-    processors=[
-        structlog.stdlib.filter_by_level,
-        structlog.stdlib.add_logger_name,
-        structlog.stdlib.add_log_level,
-        structlog.stdlib.PositionalArgumentsFormatter(),
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.StackInfoRenderer(),
-        structlog.processors.format_exc_info,
-        structlog.processors.UnicodeDecoder(),
-        structlog.processors.JSONRenderer(),
-    ],
-    context_class=dict,
-    logger_factory=structlog.stdlib.LoggerFactory(),
-    wrapper_class=structlog.stdlib.BoundLogger,
-    cache_logger_on_first_use=True,
-)
-
-logger = structlog.get_logger()
+logger = configure_logging("mock-eventing-service")
 
 
 class EventSubscription(BaseModel):
@@ -219,13 +201,10 @@ app.add_middleware(
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
-    return {
-        "status": "healthy",
-        "service": "mock-eventing-service",
-        "version": "0.1.0",
-        "subscriptions": len(mock_service.subscriptions),
-        "events_processed": len(mock_service.event_history),
-    }
+    return await simple_health_check(
+        service_name="mock-eventing-service",
+        version="0.1.0",
+    )
 
 
 @app.post("/{namespace}/{broker_name}")

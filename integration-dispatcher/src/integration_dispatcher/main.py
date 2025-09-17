@@ -6,12 +6,17 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
 
-import structlog
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from shared_db import get_enum_value
-from shared_db.models import (
+from shared_models import (
+    HealthChecker,
+    configure_logging,
+    get_database_manager,
+    get_db_session_dependency,
+    get_enum_value,
+)
+from shared_models.models import (
     DeliveryLog,
     DeliveryRequest,
     DeliveryStatus,
@@ -20,8 +25,7 @@ from shared_db.models import (
     ProcessedEvent,
     UserIntegrationConfig,
 )
-from shared_db.session import get_database_manager, get_db_session
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import __version__
@@ -46,25 +50,7 @@ from .slack_service import SlackService
 from .template_engine import TemplateEngine
 
 # Configure structured logging
-structlog.configure(
-    processors=[
-        structlog.stdlib.filter_by_level,
-        structlog.stdlib.add_logger_name,
-        structlog.stdlib.add_log_level,
-        structlog.stdlib.PositionalArgumentsFormatter(),
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.StackInfoRenderer(),
-        structlog.processors.format_exc_info,
-        structlog.processors.UnicodeDecoder(),
-        structlog.processors.JSONRenderer(),
-    ],
-    context_class=dict,
-    logger_factory=structlog.stdlib.LoggerFactory(),
-    wrapper_class=structlog.stdlib.BoundLogger,
-    cache_logger_on_first_use=True,
-)
-
-logger = structlog.get_logger()
+logger = configure_logging("integration-dispatcher")
 
 
 class IntegrationDispatcher:
@@ -325,25 +311,8 @@ async def lifespan(app: FastAPI):
         logger.error("Failed to verify database migration", error=str(e))
         raise
 
-    # Test initial health check
-    logger.info("Performing initial health check...")
-    try:
-        # This will help us see what's happening during startup
-        from shared_db.session import get_db_session
-
-        from .main import health_check
-
-        async for db in get_db_session():
-            health_result = await health_check(db)
-            logger.info(
-                "Initial health check completed",
-                status=health_result.status,
-                database_connected=health_result.database_connected,
-                integrations_available=health_result.integrations_available,
-            )
-            break
-    except Exception as e:
-        logger.warning("Initial health check failed", error=str(e))
+    # Database migration is sufficient for startup validation
+    logger.info("Integration Dispatcher startup validation completed")
 
     logger.info("Integration Dispatcher startup completed successfully")
 
@@ -388,64 +357,30 @@ app.add_middleware(
 
 
 @app.get("/health", response_model=HealthCheck)
-async def health_check(db: AsyncSession = Depends(get_db_session)) -> HealthCheck:
+async def health_check(
+    db: AsyncSession = Depends(get_db_session_dependency),
+) -> HealthCheck:
     """Health check endpoint."""
-    logger.info("Health check started")
+    checker = HealthChecker("integration-dispatcher", __version__)
 
-    # Test database connection
-    database_connected = False
-    try:
-        logger.info("Testing database connection...")
-        await db.execute(text("SELECT 1"))
-        database_connected = True
-        logger.info("Database connection successful")
-    except Exception as e:
-        logger.error("Database connection failed", error=str(e))
-        database_connected = False
-
-    # Check integration handlers
-    integrations_available = []
-    integration_errors = {}
-
-    logger.info(
-        "Checking integration handlers", total_handlers=len(dispatcher.handlers)
-    )
-
+    # Convert integration handlers to the format expected by HealthChecker
+    integration_handlers = {}
     for integration_type, handler in dispatcher.handlers.items():
         integration_name = get_enum_value(integration_type)
-        try:
-            logger.info("Testing integration health", integration=integration_name)
-            if await handler.health_check():
-                integrations_available.append(integration_name)
-                logger.info(
-                    "Integration health check passed", integration=integration_name
-                )
-            else:
-                logger.warning(
-                    "Integration health check failed", integration=integration_name
-                )
-        except Exception as e:
-            logger.error(
-                "Integration health check error",
-                integration=integration_name,
-                error=str(e),
-            )
-            integration_errors[integration_name] = str(e)
+        integration_handlers[integration_name] = handler
 
-    logger.info(
-        "Health check completed",
-        database_connected=database_connected,
-        integrations_available=integrations_available,
-        integration_errors=integration_errors,
+    result = await checker.perform_health_check(
+        db=db,
+        integration_handlers=integration_handlers,
     )
 
     return HealthCheck(
-        status="healthy" if database_connected else "degraded",
-        database_connected=database_connected,
-        integrations_available=integrations_available,
+        status=result.status,
+        database_connected=result.database_connected,
+        integrations_available=result.integrations_available,
         services={
-            "database": "connected" if database_connected else "disconnected",
-            "integrations": f"{len(integrations_available)}/{len(dispatcher.handlers)} available",
+            "database": "connected" if result.database_connected else "disconnected",
+            "integrations": f"{len(result.integrations_available)}/{len(dispatcher.handlers)} available",
         },
     )
 
@@ -453,7 +388,7 @@ async def health_check(db: AsyncSession = Depends(get_db_session)) -> HealthChec
 @app.post("/notifications")
 async def handle_notification_event(
     request: Request,
-    db: AsyncSession = Depends(get_db_session),
+    db: AsyncSession = Depends(get_db_session_dependency),
 ) -> Dict[str, Any]:
     """Handle notification CloudEvents (request acknowledgments, status updates)."""
     try:
@@ -498,7 +433,7 @@ async def handle_notification_event(
 @app.post("/")
 async def handle_cloudevent(
     request: Request,
-    db: AsyncSession = Depends(get_db_session),
+    db: AsyncSession = Depends(get_db_session_dependency),
 ) -> Dict[str, Any]:
     """Handle incoming CloudEvents for delivery requests."""
 
@@ -661,7 +596,7 @@ async def handle_cloudevent(
 @app.post("/deliver")
 async def handle_direct_delivery(
     request: Request,
-    db: AsyncSession = Depends(get_db_session),
+    db: AsyncSession = Depends(get_db_session_dependency),
 ) -> Dict[str, Any]:
     """Handle direct delivery requests (for non-eventing mode)."""
     try:
@@ -678,7 +613,7 @@ async def handle_direct_delivery(
         )
 
         # Create delivery request from the payload using shared model
-        from shared_db.models import DeliveryRequest
+        from shared_models.models import DeliveryRequest
 
         delivery_request = DeliveryRequest(
             request_id=delivery_data.get("request_id"),
@@ -800,7 +735,7 @@ async def _handle_processing_notification(
 )
 async def get_user_integrations(
     user_id: str,
-    db: AsyncSession = Depends(get_db_session),
+    db: AsyncSession = Depends(get_db_session_dependency),
 ) -> List[UserIntegrationConfigResponse]:
     """Get user's integration configurations."""
     stmt = (
@@ -821,7 +756,7 @@ async def get_user_integrations(
 async def create_user_integration(
     user_id: str,
     config_data: UserIntegrationConfigCreate,
-    db: AsyncSession = Depends(get_db_session),
+    db: AsyncSession = Depends(get_db_session_dependency),
 ) -> UserIntegrationConfigResponse:
     """Create or update user integration configuration."""
     # Check if configuration already exists
@@ -880,7 +815,7 @@ async def update_user_integration(
     user_id: str,
     integration_type: IntegrationType,
     config_update: UserIntegrationConfigUpdate,
-    db: AsyncSession = Depends(get_db_session),
+    db: AsyncSession = Depends(get_db_session_dependency),
 ) -> UserIntegrationConfigResponse:
     """Update user integration configuration."""
     stmt = select(UserIntegrationConfig).where(
@@ -914,7 +849,7 @@ async def update_user_integration(
 async def delete_user_integration(
     user_id: str,
     integration_type: IntegrationType,
-    db: AsyncSession = Depends(get_db_session),
+    db: AsyncSession = Depends(get_db_session_dependency),
 ) -> Dict[str, str]:
     """Delete user integration configuration."""
     stmt = select(UserIntegrationConfig).where(
@@ -948,7 +883,7 @@ async def get_user_deliveries(
     user_id: str,
     limit: int = 50,
     offset: int = 0,
-    db: AsyncSession = Depends(get_db_session),
+    db: AsyncSession = Depends(get_db_session_dependency),
 ) -> List[DeliveryLogResponse]:
     """Get user's delivery history."""
     stmt = (

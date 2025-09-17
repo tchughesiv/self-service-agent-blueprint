@@ -48,7 +48,7 @@ spec:
       - name: db-migration
         image: "{{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ .Values.image.tag }}"
         imagePullPolicy: {{ .Values.image.pullPolicy }}
-        command: ["python", "shared-db/scripts/migrate.py"]
+        command: ["python", "shared-models/scripts/migrate.py"]
         env:
         - name: POSTGRES_HOST
           valueFrom:

@@ -5,74 +5,50 @@ import hmac
 import json
 
 # Configure structured logging
-import logging
 import os
-import sys
 import time
-import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Union
 
 import jwt
-import structlog
-from cloudevents.http import CloudEvent
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt.exceptions import InvalidTokenError
-from shared_db import get_enum_value
-from shared_db.models import ErrorResponse, ProcessedEvent, RequestLog, RequestSession
-from shared_db.session import get_database_manager, get_db_session
-from sqlalchemy import select, text
+from shared_models import (
+    CloudEventSender,
+    HealthChecker,
+    configure_logging,
+    get_database_manager,
+    get_db_session_dependency,
+)
+from shared_models.models import (
+    ErrorResponse,
+    ProcessedEvent,
+    RequestLog,
+    RequestSession,
+)
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import __version__
 from .communication_strategy import UnifiedRequestProcessor, get_communication_strategy
-from .direct_client import initialize_direct_clients
-from .events import EventTypes, get_event_publisher
+from .events import EventTypes
 from .normalizer import RequestNormalizer
 from .response_handler import UnifiedResponseHandler
 from .schemas import (
     BaseRequest,
     CLIRequest,
     HealthCheck,
-    SessionCreate,
-    SessionResponse,
-    SessionUpdate,
     SlackRequest,
     ToolRequest,
     WebRequest,
 )
-from .session_manager import SessionManager
 
-# Set up basic logging to stdout
-logging.basicConfig(
-    level=logging.DEBUG if os.getenv("LOG_LEVEL", "INFO") == "DEBUG" else logging.INFO,
-    format="%(message)s",
-    stream=sys.stdout,
-)
-
-structlog.configure(
-    processors=[
-        structlog.stdlib.filter_by_level,
-        structlog.stdlib.add_logger_name,
-        structlog.stdlib.add_log_level,
-        structlog.stdlib.PositionalArgumentsFormatter(),
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.StackInfoRenderer(),
-        structlog.processors.format_exc_info,
-        structlog.processors.UnicodeDecoder(),
-        structlog.processors.JSONRenderer(),
-    ],
-    context_class=dict,
-    logger_factory=structlog.stdlib.LoggerFactory(),
-    wrapper_class=structlog.stdlib.BoundLogger,
-    cache_logger_on_first_use=True,
-)
-
-logger = structlog.get_logger()
+# Configure structured logging
+logger = configure_logging("request-manager")
 
 
 @asynccontextmanager
@@ -92,26 +68,44 @@ async def lifespan(app: FastAPI):
         logger.error("Failed to verify database migration", error=str(e))
         raise
 
-    # Initialize direct clients if eventing is disabled
-    eventing_enabled = os.getenv("EVENTING_ENABLED", "true").lower() == "true"
-    if not eventing_enabled:
-        agent_service_url = os.getenv(
-            "AGENT_SERVICE_URL", "http://self-service-agent-agent-service:8080"
-        )
-        integration_dispatcher_url = os.getenv(
-            "INTEGRATION_DISPATCHER_URL",
-            "http://self-service-agent-integration-dispatcher:8080",
-        )
-        initialize_direct_clients(agent_service_url, integration_dispatcher_url)
-        logger.info("Initialized direct HTTP clients for non-eventing mode")
+    # Initialize service clients for both modes (always use HTTP for session operations)
+    agent_service_url = os.getenv(
+        "AGENT_SERVICE_URL", "http://self-service-agent-agent-service:8080"
+    )
+    integration_dispatcher_url = os.getenv(
+        "INTEGRATION_DISPATCHER_URL",
+        "http://self-service-agent-integration-dispatcher:8080",
+    )
+    from shared_clients import initialize_service_clients
+
+    initialize_service_clients(agent_service_url, None, integration_dispatcher_url)
+    logger.info("Initialized service clients for both eventing and direct HTTP modes")
+
+    # Initialize direct clients for direct HTTP mode
+    from .direct_client import initialize_direct_clients
+
+    initialize_direct_clients(
+        agent_service_url=agent_service_url,
+        integration_dispatcher_url=integration_dispatcher_url,
+        agent_timeout=120.0,
+        integration_timeout=30.0,
+    )
+    logger.info("Initialized direct clients for direct HTTP mode")
 
     # Initialize unified processor
     global unified_processor
     communication_strategy = get_communication_strategy()
-    unified_processor = UnifiedRequestProcessor(communication_strategy)
+
+    # Get agent client for session operations (only available in direct HTTP mode)
+    from shared_clients import get_agent_client
+
+    agent_client = get_agent_client()
+
+    unified_processor = UnifiedRequestProcessor(communication_strategy, agent_client)
     logger.info(
         "Initialized unified request processor",
         strategy_type=type(communication_strategy).__name__,
+        has_agent_client=agent_client is not None,
     )
 
     yield
@@ -122,14 +116,13 @@ async def lifespan(app: FastAPI):
     # Close database connections
     await db_manager.close()
 
-    # Close event publisher
-    event_publisher = get_event_publisher()
-    await event_publisher.close()
+    # Close event sender
+    # Note: CloudEventSender doesn't need explicit closing
 
-    # Close direct clients
-    from .direct_client import cleanup_direct_clients
+    # Close service clients
+    from shared_clients import cleanup_service_clients
 
-    await cleanup_direct_clients()
+    await cleanup_service_clients()
 
 
 # Create FastAPI application
@@ -369,124 +362,41 @@ async def get_current_user(
 
 
 @app.get("/health", response_model=HealthCheck)
-async def health_check(db: AsyncSession = Depends(get_db_session)) -> HealthCheck:
+async def health_check(
+    db: AsyncSession = Depends(get_db_session_dependency),
+) -> HealthCheck:
     """Health check endpoint."""
-    try:
-        # Test database connection
-        await db.execute(text("SELECT 1"))
-        database_connected = True
-    except Exception:
-        database_connected = False
+    checker = HealthChecker("request-manager", __version__)
+
+    # Add custom service checks
+    async def check_event_sender():
+        try:
+            # CloudEventSender is stateless, so we just check if we can create one
+            broker_url = os.getenv("BROKER_URL", "http://knative-broker:8080")
+            event_sender = CloudEventSender(broker_url, "request-manager")
+            return event_sender is not None
+        except Exception:
+            return False
+
+    result = await checker.perform_health_check(
+        db=db, additional_checks={"event_sender": check_event_sender}
+    )
 
     return HealthCheck(
-        status="healthy" if database_connected else "degraded",
-        database_connected=database_connected,
-        services={
-            "database": "connected" if database_connected else "disconnected",
-            "event_publisher": "ready",
-        },
+        status=result.status,
+        database_connected=result.database_connected,
+        services=result.services,
     )
 
 
-@app.post("/api/v1/sessions", response_model=SessionResponse)
-async def create_session(
-    session_data: SessionCreate,
-    db: AsyncSession = Depends(get_db_session),
-) -> SessionResponse:
-    """Create a new session."""
-    session_manager = SessionManager(db)
-
-    try:
-        session = await session_manager.create_session(session_data)
-
-        # Publish session created event
-        event_publisher = get_event_publisher()
-        await event_publisher.publish_session_event(
-            session.session_id,
-            EventTypes.SESSION_CREATED,
-            {
-                "session_id": session.session_id,
-                "user_id": session.user_id,
-                "integration_type": get_enum_value(session.integration_type),
-                "created_at": session.created_at.isoformat(),
-            },
-        )
-
-        logger.info(
-            "Session created",
-            session_id=session.session_id,
-            user_id=session.user_id,
-            integration_type=get_enum_value(session.integration_type),
-        )
-
-        return session
-
-    except Exception as e:
-        logger.error("Failed to create session", error=str(e))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create session",
-        )
-
-
-@app.get("/api/v1/sessions/{session_id}", response_model=SessionResponse)
-async def get_session(
-    session_id: str,
-    db: AsyncSession = Depends(get_db_session),
-) -> SessionResponse:
-    """Get session information."""
-    session_manager = SessionManager(db)
-
-    session = await session_manager.get_session(session_id)
-    if not session:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Session not found",
-        )
-
-    return session
-
-
-@app.put("/api/v1/sessions/{session_id}", response_model=SessionResponse)
-async def update_session(
-    session_id: str,
-    session_update: SessionUpdate,
-    db: AsyncSession = Depends(get_db_session),
-) -> SessionResponse:
-    """Update session information."""
-    session_manager = SessionManager(db)
-
-    # Check if session exists
-    existing_session = await session_manager.get_session(session_id)
-    if not existing_session:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Session not found",
-        )
-
-    # Update session with provided fields
-    updated_session = await session_manager.update_session(
-        session_id=session_id,
-        agent_id=session_update.current_agent_id,
-        llama_stack_session_id=session_update.llama_stack_session_id,
-        status=session_update.status,
-        conversation_context=session_update.conversation_context,
-        user_context=session_update.user_context,
-    )
-
-    if not updated_session:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update session",
-        )
-
-    return updated_session
+# Session CRUD endpoints have been moved to the agent service
+# The request-manager now forwards session operations to the agent service via HTTP calls
 
 
 @app.get("/api/v1/requests/{request_id}")
 async def get_request_status(
     request_id: str,
-    db: AsyncSession = Depends(get_db_session),
+    db: AsyncSession = Depends(get_db_session_dependency),
     current_user: Optional[Dict[str, Any]] = Depends(get_current_user),
 ) -> Dict[str, Any]:
     """Get request status and response by request ID."""
@@ -547,7 +457,7 @@ async def get_request_status(
 async def handle_slack_request(
     slack_request: SlackRequest,
     request: Request,
-    db: AsyncSession = Depends(get_db_session),
+    db: AsyncSession = Depends(get_db_session_dependency),
     x_slack_signature: Optional[str] = Header(None, alias="x-slack-signature"),
     x_slack_request_timestamp: Optional[str] = Header(
         None, alias="x-slack-request-timestamp"
@@ -573,7 +483,7 @@ async def handle_slack_request(
 @app.post("/api/v1/requests/web")
 async def handle_web_request(
     web_request: WebRequest,
-    db: AsyncSession = Depends(get_db_session),
+    db: AsyncSession = Depends(get_db_session_dependency),
     current_user: Optional[Dict[str, Any]] = Depends(get_current_user),
 ) -> Dict[str, Any]:
     """Handle web interface requests with JWT authentication."""
@@ -601,7 +511,7 @@ async def handle_web_request(
 @app.post("/api/v1/requests/cli")
 async def handle_cli_request(
     cli_request: CLIRequest,
-    db: AsyncSession = Depends(get_db_session),
+    db: AsyncSession = Depends(get_db_session_dependency),
     current_user: Optional[Dict[str, Any]] = Depends(get_current_user),
 ) -> Dict[str, Any]:
     """Handle CLI requests with authentication."""
@@ -629,7 +539,7 @@ async def handle_cli_request(
 @app.post("/api/v1/requests/tool")
 async def handle_tool_request(
     tool_request: ToolRequest,
-    db: AsyncSession = Depends(get_db_session),
+    db: AsyncSession = Depends(get_db_session_dependency),
     x_api_key: Optional[str] = Header(None, alias="x-api-key"),
 ) -> Dict[str, Any]:
     """Handle tool-generated requests with API key authentication."""
@@ -646,7 +556,7 @@ async def handle_tool_request(
 @app.post("/api/v1/requests/generic")
 async def handle_generic_request(
     request: BaseRequest,
-    db: AsyncSession = Depends(get_db_session),
+    db: AsyncSession = Depends(get_db_session_dependency),
 ) -> Dict[str, Any]:
     """Handle generic requests."""
     return await _process_request_adaptive(request, db)
@@ -655,7 +565,7 @@ async def handle_generic_request(
 @app.post("/api/v1/requests/generic/sync")
 async def handle_generic_request_sync(
     request: BaseRequest,
-    db: AsyncSession = Depends(get_db_session),
+    db: AsyncSession = Depends(get_db_session_dependency),
     timeout: int = 120,
 ) -> Dict[str, Any]:
     """Handle generic requests synchronously - waits for AI response."""
@@ -665,7 +575,7 @@ async def handle_generic_request_sync(
 @app.post("/api/v1/events/cloudevents")
 async def handle_cloudevent(
     request: Request,
-    db: AsyncSession = Depends(get_db_session),
+    db: AsyncSession = Depends(get_db_session_dependency),
 ) -> Dict[str, Any]:
     """Handle incoming CloudEvents (e.g., from agent responses)."""
     try:
@@ -685,7 +595,9 @@ async def handle_cloudevent(
         )
 
         # ✅ CIRCUIT BREAKER: Prevent feedback loops by ignoring self-generated events
-        if event_source == "request-manager":
+        if event_source and (
+            "request-manager" in event_source or event_source == "request-manager"
+        ):
             logger.info(
                 "Ignoring self-generated event to prevent feedback loop",
                 event_id=event_id,
@@ -832,7 +744,7 @@ async def _wait_for_response(
     import asyncio
     from datetime import datetime, timedelta
 
-    from shared_db.models import RequestLog
+    from shared_models.models import RequestLog
     from sqlalchemy import select
 
     start_time = datetime.now()
@@ -1028,8 +940,9 @@ async def _forward_response_to_integration_dispatcher(
             )
             return True  # Success, but intentionally not delivered
 
-        # Publish response event for Integration Dispatcher to deliver
-        event_publisher = get_event_publisher()
+        # Send response event for Integration Dispatcher to deliver
+        broker_url = os.getenv("BROKER_URL", "http://knative-broker:8080")
+        event_sender = CloudEventSender(broker_url, "request-manager")
 
         # Create delivery event data for Integration Dispatcher
         # This matches the structure expected by DeliveryRequest in Integration Dispatcher
@@ -1043,22 +956,13 @@ async def _forward_response_to_integration_dispatcher(
             "agent_id": event_data.get("agent_id"),
         }
 
-        # Create CloudEvent for Integration Dispatcher
-        event = CloudEvent(
-            {
-                "specversion": "1.0",
-                "type": "com.self-service-agent.agent.response-ready",
-                "source": "request-manager",
-                "id": str(uuid.uuid4()),
-                "time": datetime.now(timezone.utc).isoformat(),
-                "subject": f"session/{event_data.get('session_id')}",
-                "datacontenttype": "application/json",
-            },
+        # Send response event using shared utilities
+        success = await event_sender.send_response_event(
             delivery_event_data,
+            event_data.get("request_id"),
+            event_data.get("agent_id"),
+            event_data.get("session_id"),
         )
-
-        # Publish directly to broker
-        success = await event_publisher._publish_event(event)
 
         if success:
             logger.info(
@@ -1244,10 +1148,17 @@ async def _resend_original_request_to_routed_agent(
         db.add(request_log)
         await db.commit()
 
-        # Publish request event to broker (same as normal request processing)
-        event_publisher = get_event_publisher()
-        success = await event_publisher.publish_request_event(
-            normalized_request, EventTypes.REQUEST_CREATED
+        # Send request event to broker (same as normal request processing)
+        broker_url = os.getenv("BROKER_URL", "http://knative-broker:8080")
+        event_sender = CloudEventSender(broker_url, "request-manager")
+
+        # Create request event data
+        request_event_data = normalized_request.model_dump(mode="json")
+        success = await event_sender.send_request_event(
+            request_event_data,
+            normalized_request.request_id,
+            normalized_request.user_id,
+            normalized_request.session_id,
         )
 
         if not success:

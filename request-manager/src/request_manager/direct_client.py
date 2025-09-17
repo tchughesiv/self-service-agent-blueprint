@@ -5,8 +5,8 @@ from typing import Optional
 
 import httpx
 import structlog
-from shared_db import get_enum_value
-from shared_db.models import AgentResponse
+from shared_models import get_enum_value
+from shared_models.models import AgentResponse
 
 from .schemas import NormalizedRequest
 
@@ -110,6 +110,111 @@ class DirectAgentClient:
             )
             return None
 
+    async def create_session(self, session_data: dict) -> Optional[dict]:
+        """Create a new session via agent service."""
+        try:
+            logger.info(
+                "Creating session via agent service",
+                user_id=session_data.get("user_id"),
+                integration_type=session_data.get("integration_type"),
+            )
+
+            response = await self.client.post(
+                f"{self.agent_service_url}/api/v1/sessions",
+                json=session_data,
+                headers={"Content-Type": "application/json"},
+            )
+
+            response.raise_for_status()
+            return response.json()
+
+        except Exception as e:
+            logger.error(
+                "Failed to create session via agent service",
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+            return None
+
+    async def get_session(self, session_id: str) -> Optional[dict]:
+        """Get session information via agent service."""
+        try:
+            logger.info(
+                "Getting session via agent service",
+                session_id=session_id,
+            )
+
+            response = await self.client.get(
+                f"{self.agent_service_url}/api/v1/sessions/{session_id}",
+            )
+
+            response.raise_for_status()
+            return response.json()
+
+        except Exception as e:
+            logger.error(
+                "Failed to get session via agent service",
+                session_id=session_id,
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+            return None
+
+    async def update_session(
+        self, session_id: str, session_update: dict
+    ) -> Optional[dict]:
+        """Update session information via agent service."""
+        try:
+            logger.info(
+                "Updating session via agent service",
+                session_id=session_id,
+            )
+
+            response = await self.client.put(
+                f"{self.agent_service_url}/api/v1/sessions/{session_id}",
+                json=session_update,
+                headers={"Content-Type": "application/json"},
+            )
+
+            response.raise_for_status()
+            return response.json()
+
+        except Exception as e:
+            logger.error(
+                "Failed to update session via agent service",
+                session_id=session_id,
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+            return None
+
+    async def increment_request_count(self, session_id: str, request_id: str) -> bool:
+        """Increment request count for a session via agent service."""
+        try:
+            logger.info(
+                "Incrementing request count via agent service",
+                session_id=session_id,
+                request_id=request_id,
+            )
+
+            response = await self.client.post(
+                f"{self.agent_service_url}/api/v1/sessions/{session_id}/increment",
+                params={"request_id": request_id},
+            )
+
+            response.raise_for_status()
+            return True
+
+        except Exception as e:
+            logger.error(
+                "Failed to increment request count via agent service",
+                session_id=session_id,
+                request_id=request_id,
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+            return False
+
     async def close(self):
         """Close the HTTP client."""
         await self.client.aclose()
@@ -134,7 +239,7 @@ class DirectIntegrationClient:
             )
 
             # Create delivery request using the proper schema
-            from shared_db.models import DeliveryRequest
+            from shared_models.models import DeliveryRequest
 
             delivery_request = DeliveryRequest(
                 request_id=agent_response.request_id,

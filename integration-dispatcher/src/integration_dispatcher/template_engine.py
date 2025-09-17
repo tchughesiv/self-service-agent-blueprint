@@ -3,8 +3,8 @@
 from typing import Any, Dict
 
 import jinja2
-from shared_db import get_enum_value
-from shared_db.models import IntegrationTemplate, IntegrationType
+from shared_models import get_enum_value
+from shared_models.models import IntegrationTemplate, IntegrationType
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 

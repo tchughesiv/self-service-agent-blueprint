@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import (
     JSON,
     Boolean,
@@ -338,6 +338,14 @@ class NormalizedRequest(BaseModel):
 
     # Timestamps
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @field_validator("integration_type", mode="before")
+    @classmethod
+    def normalize_integration_type(cls, v):
+        """Convert integration_type to uppercase for case-insensitive input."""
+        if isinstance(v, str):
+            return IntegrationType(v.upper())
+        return v
 
     class Config:
         """Pydantic config."""

@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, field_validator
-from shared_db.models import DeliveryStatus, IntegrationType
+from shared_models.models import DeliveryStatus, IntegrationType
 
 
 class UserIntegrationConfigCreate(BaseModel):
@@ -161,4 +161,4 @@ class HealthCheck(BaseModel):
     services: Dict[str, str]
 
 
-# ErrorResponse is now imported from shared_db.models
+# ErrorResponse is now imported from shared_models.models

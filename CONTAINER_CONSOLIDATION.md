@@ -19,7 +19,7 @@ All three use cases now use the existing repository image: **`self-service-agent
 ### Unified Containerfile
 
 The new `Containerfile.template` includes:
-- All source code from asset-manager, shared-clients, and shared-db
+- All source code from asset-manager, shared-clients, and shared-models
 - All dependencies installed via `uv sync`
 - Proper Python path configuration
 - Default command that can be overridden
@@ -31,7 +31,7 @@ The same image is used with different commands in different deployments:
 #### 1. Database Migration (Job)
 ```yaml
 image: "quay.io/ecosystem-appeng/self-service-agent:0.0.2"
-command: ["python", "shared-db/scripts/migrate.py"]
+command: ["python", "shared-models/scripts/migrate.py"]
 ```
 
 #### 2. Asset Registration (Init Job)
@@ -69,7 +69,7 @@ command: ["./scripts/containers/entrypoint.sh"]
 ### Files Removed
 
 1. **`asset-manager/Containerfile`** - No longer needed (functionality in unified image)
-2. **`shared-db/Containerfile`** - No longer needed (functionality in unified image)
+2. **`shared-models/Containerfile`** - No longer needed (functionality in unified image)
 
 ### Files Renamed
 

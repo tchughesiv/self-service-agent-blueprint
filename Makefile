@@ -115,7 +115,7 @@ help:
 	@echo "  install-mcp-emp-info                - Install dependencies for employee info MCP server"
 	@echo "  install-mcp-snow                    - Install dependencies for snow MCP server"
 	@echo "  install-request-manager             - Install dependencies for request manager"
-	@echo "  install-shared-db                   - Install dependencies for shared database"
+	@echo "  install-shared-models               - Install dependencies for shared models"
 	@echo ""
 	@echo "Push Commands:"
 	@echo "  push-all-images                     - Push all container images to registry"
@@ -135,7 +135,7 @@ help:
 	@echo "  test-mcp-emp-info                   - Run tests for employee info MCP server"
 	@echo "  test-mcp-snow                       - Run tests for snow MCP server"
 	@echo "  test-request-manager                - Run tests for request manager"
-	@echo "  test-shared-db                      - Run tests for shared database"
+	@echo "  test-shared-models                  - Run tests for shared models"
 	@echo "  test-short-integration              - Run short integration tests"
 	@echo ""
 	@echo "Utility Commands:"
@@ -295,9 +295,32 @@ push-mcp-snow-image:
 # Code quality
 .PHONY: lint
 lint:
-	@echo "Running flake8 linting on entire codebase..."
+	@echo "Running comprehensive linting on entire codebase..."
+	@echo "1. Running flake8 for code style and basic issues..."
 	uv run flake8 .
+	@echo "2. Running mypy for import validation (imports only)..."
+	uv run mypy --ignore-missing-imports --no-strict-optional --disable-error-code=assignment \
+		--disable-error-code=var-annotated --disable-error-code=attr-defined \
+		--disable-error-code=return-value --disable-error-code=call-overload \
+		--disable-error-code=dict-item --disable-error-code=list-item \
+		--disable-error-code=arg-type --disable-error-code=valid-type \
+		--disable-error-code=misc --disable-error-code=operator \
+		--disable-error-code=union-attr --disable-error-code=type-var \
+		--disable-error-code=call-arg --disable-error-code=annotation-unchecked \
+		$$(find . -path "*/src" -type d | grep -v ".venv" | grep -v "__pycache__")
+	@echo "3. Running isort to check import organization..."
+	uv run isort --check-only --diff .
 	@echo "Linting completed successfully!"
+
+lint-strict:
+	@echo "Running strict linting on entire codebase..."
+	@echo "1. Running flake8 for code style and basic issues..."
+	uv run flake8 .
+	@echo "2. Running mypy for comprehensive type checking..."
+	uv run mypy .
+	@echo "3. Running isort to check import organization..."
+	uv run isort --check-only --diff .
+	@echo "Strict linting completed!"
 
 .PHONY: format
 format:
@@ -309,14 +332,14 @@ format:
 
 # Install dependencies
 .PHONY: install-all
-install-all: install-shared-db install install-asset-manager install-request-manager install-agent-service install-integration-dispatcher install-mcp-emp-info install-mcp-snow
+install-all: install-shared-models install install-asset-manager install-request-manager install-agent-service install-integration-dispatcher install-mcp-emp-info install-mcp-snow
 	@echo "All dependencies installed successfully!"
 
-.PHONY: install-shared-db
-install-shared-db:
-	@echo "Installing shared database dependencies..."
-	cd shared-db && uv sync
-	@echo "Shared database dependencies installed successfully!"
+.PHONY: install-shared-models
+install-shared-models:
+	@echo "Installing shared models dependencies..."
+	cd shared-models && uv sync
+	@echo "Shared models dependencies installed successfully!"
 
 .PHONY: install
 install:
@@ -362,14 +385,14 @@ install-mcp-snow:
 
 # Test code
 .PHONY: test-all
-test-all: test-shared-db test test-asset-manager test-request-manager test-agent-service test-integration-dispatcher test-mcp-emp-info test-mcp-snow
+test-all: test-shared-models test test-asset-manager test-request-manager test-agent-service test-integration-dispatcher test-mcp-emp-info test-mcp-snow
 	@echo "All tests completed successfully!"
 
-.PHONY: test-shared-db
-test-shared-db:
-	@echo "Running shared database tests..."
-	cd shared-db && uv run python -m pytest || echo "No tests found for shared-db"
-	@echo "Shared database tests completed successfully!"
+.PHONY: test-shared-models
+test-shared-models:
+	@echo "Running shared models tests..."
+	cd shared-models && uv run python -m pytest || echo "No tests found for shared-models"
+	@echo "Shared models tests completed successfully!"
 
 .PHONY: test
 test:

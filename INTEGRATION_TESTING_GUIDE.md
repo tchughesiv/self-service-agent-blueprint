@@ -196,7 +196,7 @@ curl -X POST "${REQUEST_MANAGER_URL}/api/v1/requests/generic/sync" \
   -d '{
     "user_id": "test-user-123",
     "request_content": "Please help me test the email integration",
-    "integration_type": "web"
+    "integration_type": "WEB"
   }'
 ```
 

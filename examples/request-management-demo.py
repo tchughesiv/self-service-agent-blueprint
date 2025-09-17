@@ -301,7 +301,7 @@ async def demo_session_management():
         web_session = await client.create_session(
             {
                 "user_id": user_id,
-                "integration_type": "web",
+                "integration_type": "WEB",
                 "integration_metadata": {"browser": "chrome"},
             }
         )
