@@ -33,21 +33,6 @@ class UnifiedResponseHandler:
     ) -> Dict[str, Any]:
         """Process an agent response and update the database."""
 
-        # Check if this request already has a response (deduplication)
-        existing_response = await self._check_existing_response(request_id)
-        if existing_response:
-            logger.info(
-                "Request already has response - skipping duplicate processing",
-                request_id=request_id,
-                session_id=session_id,
-                agent_id=agent_id,
-            )
-            return {
-                "status": "skipped",
-                "reason": "response already processed",
-                "request_id": request_id,
-            }
-
         logger.debug(
             "Response processed - routing handled by Agent Service",
             session_id=session_id,
