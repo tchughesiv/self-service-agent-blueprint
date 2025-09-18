@@ -108,8 +108,6 @@ class IntegrationDispatcher:
             # If the config has an ID, it's already persisted in the database
             if "id" in config_data:
                 # Load the existing config from database
-                from sqlalchemy import select
-
                 stmt = select(UserIntegrationConfig).where(
                     UserIntegrationConfig.id == config_data["id"]
                 )
