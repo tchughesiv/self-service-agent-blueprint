@@ -620,10 +620,9 @@ class AgentService:
         # Use routing agent for all requests unless a specific target agent is provided
         agent_name = self.config.default_agent_id
 
-        # Refresh agent mapping if we haven't done it already for this request
-        if len(self.agent_mapping.get_all_names()) == 0:
-            logger.debug("Refreshing agent mapping for request", agent_name=agent_name)
-            await self._build_agent_mapping()
+        # Always refresh agent mapping to ensure we have the latest agents from LlamaStack
+        logger.debug("Refreshing agent mapping for request", agent_name=agent_name)
+        await self._build_agent_mapping()
 
         # Resolve agent name to ID using simple conversion
         logger.debug(
