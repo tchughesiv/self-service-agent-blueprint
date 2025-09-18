@@ -5,7 +5,7 @@ import os
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, NewType, Optional
 
 import httpx
 from cloudevents.http import CloudEvent, to_structured
@@ -32,6 +32,11 @@ from .session_manager import SessionManager
 
 # Configure structured logging
 logger = configure_logging("agent-service")
+
+# Type aliases for clarity
+RequestManagerSessionId = NewType("RequestManagerSessionId", str)
+LlamaStackSessionId = NewType("LlamaStackSessionId", str)
+AgentId = NewType("AgentId", str)
 
 
 class AgentConfig:
@@ -63,7 +68,9 @@ class AgentService:
         self.config = config
         self.client: Optional[LlamaStackClient] = None
         self.http_client = httpx.AsyncClient(timeout=30.0)
-        self.sessions: Dict[str, str] = {}  # session_id -> llama_stack_session_id
+        self.sessions: Dict[str, LlamaStackSessionId] = (
+            {}
+        )  # session_key -> llama_stack_session_id
         self.agent_mapping: AgentMapping = create_agent_mapping(
             {}
         )  # Type-safe agent mapping
@@ -157,9 +164,9 @@ class AgentService:
                 resolved_agent_id=agent_id,
             )
 
-            # Get or create session
-            llama_stack_session_id = await self._get_or_create_session(
-                request.session_id, agent_id
+            # Get or create LlamaStack session for this specific agent
+            llama_stack_session_id = await self._get_or_create_llama_stack_session(
+                RequestManagerSessionId(request.session_id), AgentId(agent_id)
             )
 
             # Send message to agent
@@ -639,18 +646,38 @@ class AgentService:
                 f"Please check agent configuration or create the agent in llama-stack."
             )
 
-    async def _get_or_create_session(self, session_id: str, agent_id: str) -> str:
-        """Get or create a Llama Stack session."""
-        # Use agent-specific session key to avoid conflicts between agents
-        session_key = f"{session_id}_{agent_id}"
+    async def _get_or_create_llama_stack_session(
+        self, request_manager_session_id: RequestManagerSessionId, agent_id: AgentId
+    ) -> LlamaStackSessionId:
+        """Get or create a LlamaStack session for a specific agent.
+
+        Args:
+            request_manager_session_id: The Request Manager session ID (user conversation context)
+            agent_id: The agent ID for which to create/get the LlamaStack session
+
+        Returns:
+            The LlamaStack session ID for this agent
+        """
+        # Each agent should have its own LlamaStack session for proper AI context
+        # The Request Manager session_id is used for user context, but LlamaStack sessions
+        # should be agent-specific to maintain proper conversation memory
+        session_key = f"{request_manager_session_id}_{agent_id}"
+
+        # Check if we already have a session for this specific agent
         if session_key in self.sessions:
+            logger.info(
+                "Reusing existing LlamaStack session for agent",
+                request_manager_session_id=request_manager_session_id,
+                agent_id=agent_id,
+                llama_stack_session_id=self.sessions[session_key],
+            )
             return self.sessions[session_key]
 
         try:
             # Create new session
             session_response = self.client.agents.session.create(
                 agent_id=agent_id,
-                session_name=f"session-{session_id}",
+                session_name=f"session-{request_manager_session_id}",
             )
 
             llama_stack_session_id = session_response.session_id
@@ -658,7 +685,7 @@ class AgentService:
 
             logger.info(
                 "Created new agent session",
-                session_id=session_id,
+                request_manager_session_id=request_manager_session_id,
                 llama_stack_session_id=llama_stack_session_id,
                 agent_id=agent_id,
             )

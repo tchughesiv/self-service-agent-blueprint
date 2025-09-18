@@ -837,10 +837,18 @@ async def _handle_agent_response_event(
             followup_actions=event_data.get("followup_actions", []),
         )
 
-        # Forward response to Integration Dispatcher for delivery to user
-        await _forward_response_to_integration_dispatcher(
-            event_data, result.get("routed_agent") is not None
-        )
+        # Only forward response to Integration Dispatcher if it was actually processed
+        if result.get("status") == "processed":
+            await _forward_response_to_integration_dispatcher(
+                event_data, result.get("routed_agent") is not None
+            )
+        else:
+            logger.info(
+                "Skipping Integration Dispatcher forwarding for duplicate response",
+                request_id=request_id,
+                status=result.get("status"),
+                reason=result.get("reason"),
+            )
 
         logger.info(
             "Agent response received and processed",
