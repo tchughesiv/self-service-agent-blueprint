@@ -337,10 +337,28 @@ def upgrade() -> None:
         unique=False,
     )
 
+    # Create integration_default_configs table (from migration 002)
+    op.create_table(
+        "integration_default_configs",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("integration_type", integration_type_enum, nullable=False),
+        sa.Column("enabled", sa.Boolean(), nullable=False),
+        sa.Column("config", sa.JSON(), nullable=False),
+        sa.Column("priority", sa.Integer(), nullable=False),
+        sa.Column("retry_count", sa.Integer(), nullable=False),
+        sa.Column("retry_delay_seconds", sa.Integer(), nullable=False),
+        sa.Column("created_by", sa.String(length=255), nullable=True),
+        sa.Column("created_at", postgresql.TIMESTAMP(timezone=True), nullable=False),
+        sa.Column("updated_at", postgresql.TIMESTAMP(timezone=True), nullable=False),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_integration_default_configs")),
+        sa.UniqueConstraint("integration_type", name="uq_integration_default_type"),
+    )
+
 
 def downgrade() -> None:
     """Downgrade database schema."""
     # Drop tables in reverse order
+    op.drop_table("integration_default_configs")
     op.drop_table("processed_events")
     op.drop_table("delivery_logs")
     op.drop_table("integration_credentials")
