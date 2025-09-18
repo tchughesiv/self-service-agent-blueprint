@@ -10,7 +10,7 @@ A FastMCP server that provides tools for creating ServiceNow laptop refresh tick
 
 ## Tools
 
-### `open_laptop_refresh_ticket(employee_id: str, employee_name: str, business_justification: str, preferred_model: str = None)`
+### `open_laptop_refresh_ticket(employee_id: str, employee_name: str, business_justification: str, preferred_model: str)`
 
 Creates a ServiceNow laptop refresh ticket for an employee.
 
@@ -18,7 +18,7 @@ Creates a ServiceNow laptop refresh ticket for an employee.
 - `employee_id` (string): The unique identifier for the employee (e.g., '1001')
 - `employee_name` (string): The full name of the employee
 - `business_justification` (string): Business reason for the laptop refresh request
-- `preferred_model` (string, optional): Preferred laptop model (defaults to "Standard Business Laptop")
+- `preferred_model` (string): Preferred laptop model (required)
 
 **Returns:**
 - Ticket number and details
@@ -127,11 +127,20 @@ snow/
 - `MCP_TRANSPORT`: Transport protocol (default: "sse")
 - `SELF_SERVICE_AGENT_SNOW_SERVER_SERVICE_PORT_HTTP`: HTTP port (default: 8001)
 - `MCP_HOST`: Host address (default: "0.0.0.0")
+- `SERVICENOW_INSTANCE_URL`: ServiceNow instance URL (e.g., "https://dev295439.service-now.com/")
+- `SERVICENOW_USERNAME`: ServiceNow username for authentication
+- `SERVICENOW_AUTH_TYPE`: Authentication type (e.g., "basic")
+- `SERVICENOW_PASSWORD`: ServiceNow password (sensitive - store as secret)
+- `USE_REAL_SERVICENOW`: if set to "true" will attempt to call the APIs of `SERVICENOW_INSTANCE_URL` (default: false)
 
 ## Error Handling
 
 The server validates all required parameters and returns meaningful error messages:
 
-- Empty employee ID, name, or business justification will raise `ValueError`
+- Empty employee ID, name, business justification, or preferred model will raise `ValueError`
 - All successful ticket creations return formatted ticket details
 - Health check endpoint available at `/health`
+
+## Attribution
+
+The ServiceNow integration code in `src/snow/servicenow/` is based on the work from the [servicenow-mcp](https://github.com/echelon-ai-labs/servicenow-mcp) project by Echelon AI Labs. We acknowledge and appreciate their contribution to the ServiceNow MCP implementation.
