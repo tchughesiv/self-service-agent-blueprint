@@ -70,11 +70,12 @@ class TestIntegrationHandler(BaseIntegrationHandler):
         import structlog
 
         logger = structlog.get_logger()
-        logger.info(
-            "TEST integration health check",
-            enabled=self.enabled,
-            env_value=os.getenv("TEST_INTEGRATION_ENABLED", "not_set"),
-        )
+        # Only log if enabled to reduce noise
+        if self.enabled:
+            logger.info(
+                "TEST integration health check",
+                enabled=self.enabled,
+            )
         return self.enabled
 
     def get_required_config_fields(self) -> list[str]:

@@ -98,10 +98,12 @@ class HealthChecker:
                     else:
                         # This is an actual failure, not just not configured
                         integration_errors[integration_name] = "Health check failed"
-                        logger.warning(
-                            "Integration health check failed",
-                            integration=integration_name,
-                        )
+                        # Don't log warnings for TEST integration when disabled
+                        if integration_name != "TEST":
+                            logger.warning(
+                                "Integration health check failed",
+                                integration=integration_name,
+                            )
                 else:
                     # If no health check method, assume healthy
                     integrations_available.append(integration_name)
