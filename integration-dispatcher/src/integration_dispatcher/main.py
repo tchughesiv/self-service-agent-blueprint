@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import __version__
 from .integrations.base import BaseIntegrationHandler
+from .integrations.defaults import IntegrationDefaultsService
 from .integrations.email import EmailIntegrationHandler
 from .integrations.slack import SlackIntegrationHandler
 from .integrations.test import TestIntegrationHandler
@@ -65,6 +66,58 @@ class IntegrationDispatcher:
         }
         self.template_engine = TemplateEngine()
 
+    async def _get_user_integration_configs(
+        self, user_id: str, db: AsyncSession
+    ) -> List[UserIntegrationConfig]:
+        """Get user integration configurations using smart defaults with overrides."""
+        # First, try to get user-specific configurations from database
+        stmt = (
+            select(UserIntegrationConfig)
+            .where(
+                UserIntegrationConfig.user_id == user_id,
+                UserIntegrationConfig.enabled == True,  # noqa: E712
+            )
+            .order_by(UserIntegrationConfig.priority.desc())
+        )
+
+        result = await db.execute(stmt)
+        db_configs = result.scalars().all()
+
+        # If user has specific configurations, use them
+        if db_configs:
+            logger.info(
+                "Using user-specific integration configs",
+                user_id=user_id,
+                configs_found=len(db_configs),
+            )
+            return db_configs
+
+        # Otherwise, use smart defaults
+        logger.info(
+            "No user-specific configs found, using smart defaults", user_id=user_id
+        )
+
+        # Get integration defaults for this user
+        default_configs = await integration_defaults_service.get_user_integrations(
+            user_id
+        )
+
+        # Convert integration defaults to UserIntegrationConfig objects
+        config_objects = []
+        for config_data in default_configs:
+            config = UserIntegrationConfig(
+                user_id=user_id,
+                integration_type=config_data["integration_type"],
+                enabled=config_data["enabled"],
+                priority=config_data["priority"],
+                retry_count=config_data["retry_count"],
+                retry_delay_seconds=config_data["retry_delay_seconds"],
+                config=config_data["config"],
+            )
+            config_objects.append(config)
+
+        return config_objects
+
     async def dispatch(
         self,
         request: DeliveryRequest,
@@ -79,18 +132,8 @@ class IntegrationDispatcher:
             agent_id=request.agent_id,
         )
 
-        # Get user's integration configurations
-        stmt = (
-            select(UserIntegrationConfig)
-            .where(
-                UserIntegrationConfig.user_id == request.user_id,
-                UserIntegrationConfig.enabled == True,  # noqa: E712
-            )
-            .order_by(UserIntegrationConfig.priority.desc())
-        )
-
-        result = await db.execute(stmt)
-        configs = result.scalars().all()
+        # Get user's integration configurations using smart defaults
+        configs = await self._get_user_integration_configs(request.user_id, db)
 
         logger.info(
             "Retrieved user integration configs",
@@ -334,8 +377,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Initialize Slack service
+# Initialize services
 slack_service = SlackService()
+integration_defaults_service = IntegrationDefaultsService()
 
 
 # Debug middleware to log all requests
@@ -876,6 +920,83 @@ async def delete_user_integration(
     )
 
     return {"message": "Integration configuration deleted"}
+
+
+# Integration Defaults Management APIs
+@app.get("/api/v1/integration-defaults")
+async def get_integration_defaults() -> Dict[str, Any]:
+    """Get current integration defaults configuration."""
+    defaults = integration_defaults_service.get_default_integrations()
+    return {"default_integrations": defaults}
+
+
+@app.get("/api/v1/users/{user_id}/integration-defaults")
+async def get_user_integration_defaults(
+    user_id: str,
+    db: AsyncSession = Depends(get_db_session_dependency),
+) -> Dict[str, Any]:
+    """Get user's effective integration configuration using integration defaults."""
+    # Get user's overrides from database
+    stmt = (
+        select(UserIntegrationConfig)
+        .where(UserIntegrationConfig.user_id == user_id)
+        .order_by(UserIntegrationConfig.priority.desc())
+    )
+
+    result = await db.execute(stmt)
+    user_configs = result.scalars().all()
+
+    # Convert to override format
+    user_overrides = {}
+    for config in user_configs:
+        user_overrides[config.integration_type.value] = {
+            "enabled": config.enabled,
+            "priority": config.priority,
+            "retry_count": config.retry_count,
+            "retry_delay_seconds": config.retry_delay_seconds,
+            "config": config.config,
+        }
+
+    # Get effective configuration using integration defaults
+    effective_configs = await integration_defaults_service.get_user_integrations(
+        user_id, user_overrides
+    )
+
+    return {
+        "user_id": user_id,
+        "user_overrides": user_overrides,
+        "effective_configs": effective_configs,
+        "using_integration_defaults": len(user_configs) == 0,
+    }
+
+
+@app.post("/api/v1/users/{user_id}/integration-defaults/reset")
+async def reset_user_to_integration_defaults(
+    user_id: str,
+    db: AsyncSession = Depends(get_db_session_dependency),
+) -> Dict[str, str]:
+    """Reset user to integration defaults by removing all custom configurations."""
+    # Delete all user-specific configurations
+    stmt = select(UserIntegrationConfig).where(UserIntegrationConfig.user_id == user_id)
+
+    result = await db.execute(stmt)
+    configs = result.scalars().all()
+
+    for config in configs:
+        await db.delete(config)
+
+    await db.commit()
+
+    logger.info(
+        "User reset to integration defaults",
+        user_id=user_id,
+        deleted_configs=len(configs),
+    )
+
+    return {
+        "message": f"User {user_id} reset to integration defaults",
+        "deleted_configs": len(configs),
+    }
 
 
 @app.get("/api/v1/users/{user_id}/deliveries", response_model=List[DeliveryLogResponse])

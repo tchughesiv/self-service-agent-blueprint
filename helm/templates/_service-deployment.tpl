@@ -162,6 +162,15 @@ spec:
               name: {{ $fullName }}-integration-secrets
               key: from-name
               optional: true
+        # Integration User Defaults Configuration (auto-enabled based on health checks)
+        {{- if hasKey $context.Values.requestManagement "integrations" }}
+        {{- if hasKey $context.Values.requestManagement.integrations "userDefaults" }}
+        {{- range $integrationType, $config := $context.Values.requestManagement.integrations.userDefaults }}
+        - name: INTEGRATION_DEFAULTS_{{ $integrationType }}_PRIORITY
+          value: {{ $config.priority | default 0 | quote }}
+        {{- end }}
+        {{- end }}
+        {{- end }}
         {{- end }}
         {{- if eq $serviceName "request-manager" }}
         # Service Mesh and Security Configuration

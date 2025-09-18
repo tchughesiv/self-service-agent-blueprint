@@ -415,15 +415,47 @@ requestManagement:
   
   # Integration Configuration
   integrations:
-    email:
-      smtpHost: "smtp.example.com"
-      smtpPort: "587"
-      smtpUseTls: "true"
-      fromEmail: "noreply@selfservice.local"
-      fromName: "Self-Service Agent"
-    slack:
-      enabled: false
-      # Slack credentials loaded from secrets
+    # Service-level configuration
+    services:
+      email:
+        enabled: true
+        smtpHost: "smtp.example.com"
+        smtpPort: "587"
+        smtpUseTls: "true"
+        fromEmail: "noreply@selfservice.local"
+        fromName: "Self-Service Agent"
+      slack:
+        enabled: false
+        # Slack credentials loaded from secrets
+    
+    # User defaults (auto-enabled based on service configuration)
+    userDefaults:
+      SLACK:
+        priority: 1
+        retryCount: 3
+        retryDelaySeconds: 60
+        config:
+          threadReplies: false
+          mentionUser: false
+          includeAgentInfo: true
+      EMAIL:
+        priority: 2
+        retryCount: 3
+        retryDelaySeconds: 60
+        config:
+          includeAgentInfo: true
+      WEBHOOK:
+        # Always disabled by default (requires explicit configuration)
+        priority: 3
+        retryCount: 1
+        retryDelaySeconds: 30
+        config: {}
+      SMS:
+        # Always disabled by default (requires explicit configuration)
+        priority: 4
+        retryCount: 2
+        retryDelaySeconds: 45
+        config: {}
   
   # Database Migration
   dbMigration:

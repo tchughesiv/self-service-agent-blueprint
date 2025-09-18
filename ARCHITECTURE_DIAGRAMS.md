@@ -6,6 +6,7 @@ This document illustrates the two primary flow patterns in the self-service agen
 
 This flow handles inbound events and messages from external systems like Slack, webhooks, and other integrated tools.
 
+**Eventing Mode (Production Configuration):**
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
 │   External      │    │   Integration   │    │   Request       │
@@ -70,11 +71,56 @@ This flow handles inbound events and messages from external systems like Slack, 
                        └─────────────────┘
 ```
 
-### Key Characteristics:
-- **Entry Point**: Integration Dispatcher (Webhook endpoints)
-- **Use Cases**: Slack messages, external webhooks, tool integrations
-- **Flow**: External Event → Handler → Request Manager → AI Processing → Back to Integration
-- **Response**: Delivered back through the same integration channel
+**Direct HTTP Mode (Development Configuration):**
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   External      │    │   Integration   │    │   Request       │
+│   Systems       │───▶│   Dispatcher    │───▶│   Manager       │
+│                 │    │                 │    │                 │
+│ • Slack Events  │    │ • Event Handler │    │ • Normalize     │
+│ • Webhooks      │    │ • Signature     │    │ • Validate      │
+│ • Tool Events   │    │   Verification  │    │ • Direct HTTP   │
+│ • Integrations  │    │ • User Context  │    │   Call to Agent │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+         │                       │                       │
+         │ HTTP Webhook          │ HTTP Request          │ HTTP Request
+         │ POST /slack/events    │ POST /api/v1/...      │ POST /api/v1/...
+         │ POST /slack/commands  │                       │
+         │                       │                       ▼
+         ▼                       ▼                      ┌─────────────────┐
+┌─────────────────┐    ┌─────────────────┐              │   Agent         │
+│   Slack App     │    │   Database      │              │   Service       │
+│   Components    │    │                 │              │                 │
+│                 │    │ • User Lookup   │              │ • AI Processing │
+│ • Message       │    │ • Session Data  │              │ • LLM Calls     │
+│ • Interactive │    │ • Integration   │              │ • Tool Usage    │
+│ • Slash Cmd     │    │   Config        │              │ • Response Gen  │
+└─────────────────┘    └─────────────────┘              └─────────────────┘
+                                                                  │
+                                                                  │ HTTP Response
+                                                                  ▼
+                       ┌─────────────────┐              ┌─────────────────┐
+                       │   Integration   │◀─────────────│   Request       │
+                       │   Dispatcher    │              │   Manager       │
+                       │                 │              │                 │
+                       │ • Route Back    │              │ • Process       │
+                       │   to Original   │              │   Response      │
+                       │   Integration   │              │ • Update Logs   │
+                       │ • Deliver       │              │                 │
+                       └─────────────────┘              └─────────────────┘
+                                │
+                                │ Deliver Response
+                                ▼
+                       ┌─────────────────┐
+                       │   Integration   │
+                       │   Handlers      │
+                       │                 │
+                       │ • SLACK ←───────┼─── Back to Slack
+                       │ • EMAIL         │
+                       │ • WEBHOOK       │
+                       │ • TEST          │
+                       └─────────────────┘
+```
 
 ---
 
@@ -82,6 +128,7 @@ This flow handles inbound events and messages from external systems like Slack, 
 
 This flow handles requests initiated directly by users through command-line tools, APIs, web interfaces, or scripts.
 
+**Eventing Mode (Production Configuration):**
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
 │   External      │    │   Request       │    │   Knative       │
@@ -121,6 +168,73 @@ This flow handles requests initiated directly by users through command-line tool
                        │ • Route to      │    │ • Event Filter  │
                        │   Integration   │    │ • Service       │
                        │ • Handle        │    │   Binding       │
+                       │   Delivery      │    │                 │
+                       └─────────────────┘    └─────────────────┘
+                                │
+                   ┌────────────┴────────────┐
+                   │                         │
+                   ▼ (if integration_type)   ▼ (if polling)
+          ┌─────────────────┐       ┌─────────────────┐
+          │   Integration   │       │   Database      │
+          │   Handlers      │       │   Storage       │
+          │                 │       │                 │
+          │ • SLACK         │       │ • Store Result  │
+          │ • EMAIL         │       │ • Update Status │
+          │ • WEBHOOK       │       │ • Available for │
+          │ • TEST          │       │   API Polling   │
+          └─────────────────┘       └─────────────────┘
+                   │                         │
+                   ▼                         ▼
+          ┌─────────────────┐       ┌─────────────────┐
+          │   Final         │       │   User Polls    │
+          │   Delivery      │       │   for Result    │
+          │                 │       │                 │
+          │ • Slack DM      │       │ • GET /status   │
+          │ • Email Inbox   │       │ • GET /result   │
+          │ • Webhook POST  │       │ • API Response  │
+          │ • Test Output   │       │                 │
+          └─────────────────┘       └─────────────────┘
+```
+
+**Direct HTTP Mode (Development Configuration):**
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   External      │    │   Request       │    │   Agent         │
+│   Clients       │───▶│   Manager       │───▶│   Service       │
+│                 │    │                 │    │                 │
+│ • CLI Tools     │    │ • Normalize     │    │ • AI Processing │
+│ • curl/API      │    │ • Validate      │    │ • LLM Calls     │
+│ • Web UI        │    │ • Direct HTTP   │    │ • Tool Usage    │
+│ • Scripts       │    │   Call to Agent │    │ • Response Gen  │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+         │                       │                       │
+         │ HTTP Request          │ HTTP Request          │ HTTP Response
+         │ POST /api/v1/...      │ POST /api/v1/...      │
+         │                       │                       │
+         ▼                       ▼                       ▼
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Response      │    │   Database      │    │   Request       │
+│                 │    │                 │    │   Manager       │
+│ SYNC:           │    │ • Request Store │    │                 │
+│ • 200 OK        │    │ • Session Data  │    │ • Process       │
+│ • Complete      │    │ • User Config   │    │   Response      │
+│   Result        │    │ • Integration   │    │ • Update Logs   │
+│                 │    │   Settings      │    │                 │
+│ ASYNC:          │    │                 │    │                 │
+│ • 202 Accepted  │    │                 │    │                 │
+│ • request_id    │    │                 │    │                 │
+│ • session_id    │    │                 │    │                 │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+                                │                       │
+                                │                       │ HTTP Response
+                                │                       ▼
+                       ┌─────────────────┐    ┌─────────────────┐
+                       │   Integration   │◀───│   Request       │
+                       │   Dispatcher    │    │   Manager       │
+                       │                 │    │                 │
+                       │ • Route to      │    │ • Process       │
+                       │   Integration   │    │   Response      │
+                       │ • Handle        │    │ • Update Logs   │
                        │   Delivery      │    │                 │
                        └─────────────────┘    └─────────────────┘
                                 │
@@ -200,7 +314,9 @@ This flow handles requests initiated directly by users through command-line tool
 
 Both flows share these core components:
 
-### **Knative Eventing Infrastructure**
+### **Communication Infrastructure**
+
+**Eventing Mode (Production Configuration):**
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
 │   Kafka Broker  │    │   Triggers      │    │   CloudEvents   │
@@ -210,6 +326,18 @@ Both flows share these core components:
 │ • Reliable      │    │ • Service       │    │ • Metadata      │
 │   Delivery      │    │   Routing       │    │ • Tracing       │
 │ • Scalability   │    │ • Filtering     │    │ • Versioning    │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+```
+
+**Direct HTTP Mode (Development Configuration):**
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   HTTP Clients  │    │   Service URLs  │    │   Direct Calls  │
+│                 │    │                 │    │                 │
+│ • FastAPI       │    │ • Request Mgr   │    │ • Synchronous   │
+│ • httpx         │    │ • Agent Service │    │ • Reliable      │
+│ • curl/API      │    │ • Integration   │    │ • Simple        │
+│ • Web UI        │    │   Dispatcher    │    │ • Debuggable   │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
 ```
 
@@ -274,19 +402,54 @@ Both flows share these core components:
 ```
 
 ### **Communication Modes**
+
+**Eventing Mode (Production Configuration):**
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Unified Architecture                     │
+│                    Eventing Architecture                   │
 │                                                             │
 │  ┌─────────────────┐              ┌─────────────────┐      │
 │  │   Eventing      │              │   Direct HTTP   │      │
 │  │   Mode          │              │   Mode          │      │
+│  │   (ACTIVE)      │              │   (DISABLED)    │      │
 │  │                 │              │                 │      │
 │  │ • Knative       │              │ • HTTP Clients  │      │
 │  │   Broker        │              │ • Service URLs  │      │
 │  │ • CloudEvents   │              │ • Direct Calls  │      │
 │  │ • Triggers      │              │ • No Eventing   │      │
 │  │ • Async         │              │ • Sync/Async    │      │
+│  └─────────────────┘              └─────────────────┘      │
+│           │                               │                │
+│           └───────────┬───────────────────┘                │
+│                       │                                    │
+│                       ▼                                    │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │           Unified Request Processor                 │   │
+│  │                                                     │   │
+│  │ • Strategy Pattern                                  │   │
+│  │ • Mode Detection                                    │   │
+│  │ • Session Management                                │   │
+│  │ • Agent Routing                                     │   │
+│  │ • Response Handling                                 │   │
+│  └─────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Direct HTTP Mode (Development Configuration):**
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Direct HTTP Architecture                │
+│                                                             │
+│  ┌─────────────────┐              ┌─────────────────┐      │
+│  │   Direct HTTP   │              │   Eventing      │      │
+│  │   Mode          │              │   Mode          │      │
+│  │   (ACTIVE)      │              │   (DISABLED)    │      │
+│  │                 │              │                 │      │
+│  │ • HTTP Clients  │              │ • Knative       │      │
+│  │ • Service URLs  │              │   Broker        │      │
+│  │ • Direct Calls  │              │ • CloudEvents   │      │
+│  │ • Synchronous   │              │ • Triggers      │      │
+│  │ • Simple        │              │ • Async         │      │
 │  └─────────────────┘              └─────────────────┘      │
 │           │                               │                │
 │           └───────────┬───────────────────┘                │
@@ -356,6 +519,8 @@ Both flows converge at the Agent Service and use the same event-driven architect
 - **Strategy Pattern**: Communication mechanism is abstracted and interchangeable
 - **Environment-Driven**: Mode selection via `EVENTING_ENABLED` environment variable
 - **Consistent API**: Same request/response patterns regardless of communication mode
+- **Production Mode**: Eventing with Knative brokers and triggers for scalability
+- **Development Mode**: Direct HTTP communication for simplicity and debugging
 
 ### **2. Centralized Session Management**
 - **Single Source of Truth**: All session operations handled by Agent Service
