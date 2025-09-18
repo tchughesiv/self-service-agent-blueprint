@@ -670,8 +670,11 @@ class AgentService:
             raise
 
     async def publish_response(self, response: AgentResponse) -> bool:
-        """Publish agent response as CloudEvent."""
+        """Publish agent response as CloudEvent and update database."""
         try:
+            # Update RequestLog in database first (for CLI sync requests)
+            await self._update_request_log(response)
+
             event_data = {
                 "request_id": response.request_id,
                 "session_id": response.session_id,
@@ -709,6 +712,45 @@ class AgentService:
         except Exception as e:
             logger.error("Failed to publish response event", error=str(e))
             return False
+
+    async def _update_request_log(self, response: AgentResponse) -> None:
+        """Update RequestLog in database with response content."""
+        try:
+            from shared_models.models import RequestLog
+            from sqlalchemy import update
+
+            db_manager = get_database_manager()
+            async with db_manager.get_session() as db:
+                # Update the RequestLog with response content
+                stmt = (
+                    update(RequestLog)
+                    .where(RequestLog.request_id == response.request_id)
+                    .values(
+                        response_content=response.content,
+                        response_metadata=response.metadata,
+                        agent_id=response.agent_id,
+                        processing_time_ms=response.processing_time_ms,
+                        completed_at=datetime.now(timezone.utc),
+                    )
+                )
+                await db.execute(stmt)
+                await db.commit()
+
+                logger.info(
+                    "RequestLog updated with response",
+                    request_id=response.request_id,
+                    agent_id=response.agent_id,
+                    content_length=len(response.content),
+                )
+
+        except Exception as e:
+            logger.error(
+                "Failed to update RequestLog",
+                request_id=response.request_id,
+                error=str(e),
+            )
+            # Don't raise the exception - we still want to publish the event
+            # even if database update fails
 
     async def _publish_processing_event(self, request: NormalizedRequest) -> bool:
         """Publish processing started event for user notification."""
