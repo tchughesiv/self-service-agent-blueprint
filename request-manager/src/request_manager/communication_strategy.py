@@ -727,8 +727,6 @@ class UnifiedRequestProcessor:
     ) -> None:
         """Create initial RequestLog entry for tracking."""
         try:
-            from datetime import datetime, timezone
-
             from shared_models.models import RequestLog
 
             # Create initial RequestLog entry with correct field names
