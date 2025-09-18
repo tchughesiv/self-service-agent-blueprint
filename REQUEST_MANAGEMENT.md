@@ -146,7 +146,6 @@ GET  /health                          # Health check
 
 ### Response Events
 - `com.self-service-agent.agent.response-ready`: Agent response ready for delivery
-- `com.self-service-agent.response.delivered`: Response delivered to integration
 
 ### Session Events
 - `com.self-service-agent.session.created`: New session created

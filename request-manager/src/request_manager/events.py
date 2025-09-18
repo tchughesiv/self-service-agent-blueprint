@@ -336,13 +336,12 @@ class EventTypes:
 
     # Request events
     REQUEST_CREATED = "com.self-service-agent.request.created"
+    REQUEST_PROCESSING = "com.self-service-agent.request.processing"
     REQUEST_PROCESSED = "com.self-service-agent.request.processed"
     REQUEST_FAILED = "com.self-service-agent.request.failed"
 
     # Response events
     RESPONSE_CREATED = "com.self-service-agent.agent.response-ready"
-    RESPONSE_DELIVERED = "com.self-service-agent.response.delivered"
-    RESPONSE_FAILED = "com.self-service-agent.response.failed"
 
     # Session events
     SESSION_CREATED = "com.self-service-agent.session.created"

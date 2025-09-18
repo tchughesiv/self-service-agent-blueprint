@@ -71,46 +71,6 @@ class CloudEventBuilder:
 
         return CloudEvent(attributes, response_data)
 
-    def create_delivery_event(
-        self,
-        delivery_data: Dict[str, Any],
-        request_id: str,
-        integration_type: str,
-        user_id: Optional[str] = None,
-    ) -> CloudEvent:
-        """Create a delivery event."""
-        attributes = {
-            **self.base_attributes,
-            "type": "com.self-service-agent.delivery.ready",
-            "id": str(uuid.uuid4()),
-            "time": datetime.now(timezone.utc).isoformat(),
-            "requestid": request_id,
-            "integrationtype": integration_type,
-        }
-
-        if user_id:
-            attributes["userid"] = user_id
-
-        return CloudEvent(attributes, delivery_data)
-
-    def create_error_event(
-        self,
-        error_data: Dict[str, Any],
-        request_id: str,
-        error_type: str = "processing_error",
-    ) -> CloudEvent:
-        """Create an error event."""
-        attributes = {
-            **self.base_attributes,
-            "type": "com.self-service-agent.error.occurred",
-            "id": str(uuid.uuid4()),
-            "time": datetime.now(timezone.utc).isoformat(),
-            "requestid": request_id,
-            "errortype": error_type,
-        }
-
-        return CloudEvent(attributes, error_data)
-
 
 class CloudEventValidator:
     """Validator for CloudEvent processing."""
@@ -131,35 +91,6 @@ class CloudEventValidator:
         """Validate an agent response ready event."""
         required_attributes = ["type", "id", "time", "source", "requestid"]
         required_type = "com.self-service-agent.agent.response-ready"
-
-        return (
-            all(attr in event for attr in required_attributes)
-            and event["type"] == required_type
-        )
-
-    @staticmethod
-    def validate_delivery_event(event: CloudEvent) -> bool:
-        """Validate a delivery ready event."""
-        required_attributes = [
-            "type",
-            "id",
-            "time",
-            "source",
-            "requestid",
-            "integrationtype",
-        ]
-        required_type = "com.self-service-agent.delivery.ready"
-
-        return (
-            all(attr in event for attr in required_attributes)
-            and event["type"] == required_type
-        )
-
-    @staticmethod
-    def validate_error_event(event: CloudEvent) -> bool:
-        """Validate an error event."""
-        required_attributes = ["type", "id", "time", "source", "requestid"]
-        required_type = "com.self-service-agent.error.occurred"
 
         return (
             all(attr in event for attr in required_attributes)
@@ -205,36 +136,6 @@ class CloudEventProcessor:
 
         return event.data
 
-    def process_delivery_event(self, event: CloudEvent) -> Optional[Dict[str, Any]]:
-        """Process a delivery ready event."""
-        if not self.validator.validate_delivery_event(event):
-            logger.error("Invalid delivery event", event_type=event.get("type"))
-            return None
-
-        logger.info(
-            "Processing delivery event",
-            event_id=event["id"],
-            request_id=event["requestid"],
-            integration_type=event["integrationtype"],
-        )
-
-        return event.data
-
-    def process_error_event(self, event: CloudEvent) -> Optional[Dict[str, Any]]:
-        """Process an error event."""
-        if not self.validator.validate_error_event(event):
-            logger.error("Invalid error event", event_type=event.get("type"))
-            return None
-
-        logger.info(
-            "Processing error event",
-            event_id=event["id"],
-            request_id=event["requestid"],
-            error_type=event.get("errortype"),
-        )
-
-        return event.data
-
 
 class CloudEventSender:
     """Sender for CloudEvents to brokers."""
@@ -276,37 +177,6 @@ class CloudEventSender:
             return await self._send_event(event)
         except Exception as e:
             logger.error("Failed to send response event", error=str(e))
-            return False
-
-    async def send_delivery_event(
-        self,
-        delivery_data: Dict[str, Any],
-        request_id: str,
-        integration_type: str,
-        user_id: Optional[str] = None,
-    ) -> bool:
-        """Send a delivery ready event."""
-        try:
-            event = self.builder.create_delivery_event(
-                delivery_data, request_id, integration_type, user_id
-            )
-            return await self._send_event(event)
-        except Exception as e:
-            logger.error("Failed to send delivery event", error=str(e))
-            return False
-
-    async def send_error_event(
-        self,
-        error_data: Dict[str, Any],
-        request_id: str,
-        error_type: str = "processing_error",
-    ) -> bool:
-        """Send an error event."""
-        try:
-            event = self.builder.create_error_event(error_data, request_id, error_type)
-            return await self._send_event(event)
-        except Exception as e:
-            logger.error("Failed to send error event", error=str(e))
             return False
 
     async def _send_event(self, event: CloudEvent) -> bool:
