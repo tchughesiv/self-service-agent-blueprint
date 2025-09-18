@@ -104,6 +104,18 @@ class IntegrationDispatcher:
             slack_channel = request.template_variables.get("slack_channel")
             if slack_channel:
                 context["slack_channel"] = slack_channel
+                logger.info(
+                    "Found Slack channel in template variables",
+                    user_id=user_id,
+                    slack_channel=slack_channel,
+                )
+
+        logger.info(
+            "Preparing integration defaults context",
+            user_id=user_id,
+            context=context,
+            template_variables=request.template_variables if request else None,
+        )
 
         # Get integration defaults for this user
         default_configs = await integration_defaults_service.get_user_integrations(

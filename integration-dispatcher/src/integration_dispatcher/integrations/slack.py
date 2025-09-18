@@ -3,11 +3,14 @@
 import os
 from typing import Any, Dict
 
+import structlog
 from shared_models.models import DeliveryRequest, DeliveryStatus, UserIntegrationConfig
 from slack_sdk.errors import SlackApiError
 from slack_sdk.web.async_client import AsyncWebClient
 
 from .base import BaseIntegrationHandler, IntegrationResult
+
+logger = structlog.get_logger()
 
 
 class SlackIntegrationHandler(BaseIntegrationHandler):
@@ -34,6 +37,12 @@ class SlackIntegrationHandler(BaseIntegrationHandler):
 
         try:
             slack_config = config.config
+
+            logger.info(
+                "Slack integration config received",
+                user_id=request.user_id,
+                config=slack_config,
+            )
 
             # Determine target channel
             channel = slack_config.get("channel_id")

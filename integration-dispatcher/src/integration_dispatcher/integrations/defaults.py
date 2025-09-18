@@ -172,11 +172,11 @@ class IntegrationDefaultsService:
             logger.warning("Test integration health check failed", error=str(e))
             health_status["TEST"] = False
 
-        # Check CLI health (always available)
-        health_status["CLI"] = True
+        # Check CLI health (disabled - no handler available)
+        health_status["CLI"] = False
 
-        # Check TOOL health (always available)
-        health_status["TOOL"] = True
+        # Check TOOL health (disabled - no handler available)
+        health_status["TOOL"] = False
 
         # WEBHOOK and SMS are always disabled by default
         health_status["WEBHOOK"] = False
@@ -261,13 +261,18 @@ class IntegrationDefaultsService:
                 if not channel_id:
                     # For direct messages, we need to get the DM channel for the user
                     # We'll set the user_id in the config so the Slack handler can create/find the DM channel
-                    config["config"]["slack_user_id"] = user_id
-                    logger.debug(
+                    slack_config = dict(config["config"])  # Create a mutable copy
+                    slack_config["slack_user_id"] = user_id
+                    config["config"] = slack_config  # Update the config
+                    logger.info(
                         "Applied Slack user ID for DM lookup",
                         user_id=user_id,
+                        config=slack_config,
                     )
                 else:
-                    config["config"]["channel_id"] = channel_id
+                    slack_config = dict(config["config"])  # Create a mutable copy
+                    slack_config["channel_id"] = channel_id
+                    config["config"] = slack_config  # Update the config
                     logger.debug(
                         "Applied Slack channel context",
                         user_id=user_id,
