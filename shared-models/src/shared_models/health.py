@@ -76,6 +76,18 @@ class HealthChecker:
         for integration_name, handler in integration_handlers.items():
             try:
                 if hasattr(handler, "health_check"):
+                    # Check if integration is configured before running health check
+                    is_configured = await self._is_integration_configured(handler)
+
+                    if not is_configured:
+                        # Integration not configured - this is normal, not an error
+                        logger.debug(
+                            "Integration not configured - skipping health check",
+                            integration=integration_name,
+                        )
+                        continue
+
+                    # Integration is configured - run health check
                     is_healthy = await handler.health_check()
                     if is_healthy:
                         integrations_available.append(integration_name)
@@ -84,6 +96,7 @@ class HealthChecker:
                             integration=integration_name,
                         )
                     else:
+                        # This is an actual failure, not just not configured
                         integration_errors[integration_name] = "Health check failed"
                         logger.warning(
                             "Integration health check failed",
@@ -163,6 +176,43 @@ class HealthChecker:
         )
 
         return result
+
+    async def _is_integration_configured(self, handler: Any) -> bool:
+        """Check if an integration is properly configured.
+
+        This method checks if the integration has the required configuration
+        before running health checks. Returns True if configured, False if not.
+        """
+        try:
+            # Check if handler has a method to check configuration
+            if hasattr(handler, "is_configured"):
+                return await handler.is_configured()
+
+            # For integrations without explicit configuration check,
+            # try to determine if they're configured by checking common attributes
+            if hasattr(handler, "smtp_username") and hasattr(handler, "smtp_password"):
+                # Email integration - check if credentials are provided
+                return bool(handler.smtp_username and handler.smtp_password)
+
+            if hasattr(handler, "bot_token"):
+                # Slack integration - check if bot token is provided
+                return bool(handler.bot_token)
+
+            if hasattr(handler, "webhook_url"):
+                # Webhook integration - check if URL is provided
+                return bool(handler.webhook_url)
+
+            # For other integrations, assume they're configured if they exist
+            # This allows integrations like TEST to always be considered configured
+            return True
+
+        except Exception as e:
+            logger.debug(
+                "Error checking integration configuration",
+                error=str(e),
+            )
+            # If we can't determine configuration status, assume not configured
+            return False
 
 
 # Convenience function for simple health checks

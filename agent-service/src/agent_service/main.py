@@ -164,6 +164,11 @@ class AgentService:
                 resolved_agent_id=agent_id,
             )
 
+            # Handle session management (increment request count) for both eventing and direct HTTP modes
+            await self._handle_session_management(
+                request.session_id, request.request_id
+            )
+
             # Get or create LlamaStack session for this specific agent
             llama_stack_session_id = await self._get_or_create_llama_stack_session(
                 RequestManagerSessionId(request.session_id), AgentId(agent_id)
@@ -885,6 +890,35 @@ class AgentService:
     async def close(self) -> None:
         """Close HTTP client."""
         await self.http_client.aclose()
+
+    async def _handle_session_management(
+        self, session_id: str, request_id: str
+    ) -> None:
+        """Handle session management including request count increment.
+
+        This method is called for both eventing and direct HTTP modes to ensure
+        consistent session management across all communication strategies.
+        """
+        try:
+            # Get database session for session management
+            db_manager = get_database_manager()
+            async with db_manager.get_session() as db:
+                session_manager = SessionManager(db)
+                await session_manager.increment_request_count(session_id, request_id)
+
+                logger.debug(
+                    "Session management completed",
+                    session_id=session_id,
+                    request_id=request_id,
+                )
+        except Exception as e:
+            logger.warning(
+                "Failed to handle session management",
+                session_id=session_id,
+                request_id=request_id,
+                error=str(e),
+            )
+            # Don't raise exception - session management failure shouldn't stop request processing
 
 
 # Global agent service instance

@@ -9,8 +9,6 @@ import structlog
 # sqlalchemy.select removed - no longer needed after removing RequestLog operations
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .session_manager import SessionManager
-
 logger = structlog.get_logger()
 
 
@@ -19,7 +17,6 @@ class UnifiedResponseHandler:
 
     def __init__(self, db: AsyncSession):
         self.db = db
-        self.session_manager = SessionManager(db)
 
     async def process_agent_response(
         self,

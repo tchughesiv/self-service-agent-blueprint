@@ -2,8 +2,7 @@
 
 import os
 from abc import ABC, abstractmethod
-
-# datetime imports removed - no longer needed after removing RequestLog operations
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 import structlog
@@ -67,16 +66,48 @@ class EventingStrategy(CommunicationStrategy):
         self, request, db: AsyncSession
     ) -> Optional[SessionResponse]:
         """Create or get session using direct database access for eventing mode."""
-        from .session_manager import SessionManager
+        import uuid
 
-        session_manager = SessionManager(db)
-        return await session_manager.find_or_create_session(
+        from agent_service.schemas import SessionResponse
+        from shared_models.models import RequestSession, SessionStatus
+        from sqlalchemy import select
+
+        # Try to find existing active session
+        stmt = (
+            select(RequestSession)
+            .where(
+                RequestSession.user_id == request.user_id,
+                RequestSession.integration_type == request.integration_type,
+                RequestSession.status == SessionStatus.ACTIVE.value,
+            )
+            .order_by(RequestSession.last_request_at.desc())
+        )
+
+        result = await db.execute(stmt)
+        existing_session = result.scalar_one_or_none()
+
+        if existing_session:
+            # Update activity timestamp
+            existing_session.last_request_at = datetime.now(timezone.utc)
+            await db.commit()
+            return SessionResponse.from_orm(existing_session)
+
+        # Create new session
+        session = RequestSession(
+            session_id=str(uuid.uuid4()),
             user_id=request.user_id,
             integration_type=request.integration_type,
             channel_id=getattr(request, "channel_id", None),
             thread_id=getattr(request, "thread_id", None),
             integration_metadata=request.metadata,
+            status=SessionStatus.ACTIVE.value,
         )
+
+        db.add(session)
+        await db.commit()
+        await db.refresh(session)
+
+        return SessionResponse.from_orm(session)
 
     async def send_request(self, normalized_request: NormalizedRequest) -> bool:
         """Send request via CloudEvent."""
@@ -164,16 +195,47 @@ class DirectHttpStrategy(CommunicationStrategy):
         session = await self.agent_client.create_session(session_data)
         if not session:
             # Fallback to direct database access if agent client fails
-            from .session_manager import SessionManager
+            import uuid
 
-            session_manager = SessionManager(db)
-            session = await session_manager.find_or_create_session(
+            from shared_models.models import RequestSession, SessionStatus
+            from sqlalchemy import select
+
+            # Try to find existing active session
+            stmt = (
+                select(RequestSession)
+                .where(
+                    RequestSession.user_id == request.user_id,
+                    RequestSession.integration_type == request.integration_type,
+                    RequestSession.status == SessionStatus.ACTIVE.value,
+                )
+                .order_by(RequestSession.last_request_at.desc())
+            )
+
+            result = await db.execute(stmt)
+            existing_session = result.scalar_one_or_none()
+
+            if existing_session:
+                # Update activity timestamp
+                existing_session.last_request_at = datetime.now(timezone.utc)
+                await db.commit()
+                return SessionResponse.from_orm(existing_session)
+
+            # Create new session
+            session = RequestSession(
+                session_id=str(uuid.uuid4()),
                 user_id=request.user_id,
                 integration_type=request.integration_type,
                 channel_id=getattr(request, "channel_id", None),
                 thread_id=getattr(request, "thread_id", None),
                 integration_metadata=request.metadata,
+                status=SessionStatus.ACTIVE.value,
             )
+
+            db.add(session)
+            await db.commit()
+            await db.refresh(session)
+
+            session = SessionResponse.from_orm(session)
 
         return session
 
@@ -294,40 +356,9 @@ class UnifiedRequestProcessor:
             request, session_id, current_agent_id
         )
 
-        # Note: Request logging is now handled by the Agent Service
+        # Note: Request logging and session management is now handled by the Agent Service
         # The Request Manager only manages sessions, not request/response logging
-
-        # Increment request count via agent service
-        logger.debug(
-            "Incrementing request count",
-            session_id=session_id,
-            request_id=normalized_request.request_id,
-        )
-        if self.agent_client:
-            success = await self.agent_client.increment_request_count(
-                session_id, normalized_request.request_id
-            )
-            if not success:
-                logger.error(
-                    "Failed to increment request count via agent service",
-                    session_id=session_id,
-                    request_id=normalized_request.request_id,
-                )
-            else:
-                logger.debug(
-                    "Request count incremented successfully",
-                    session_id=session_id,
-                    request_id=normalized_request.request_id,
-                )
-        else:
-            # Fallback to direct database access for eventing mode
-            # For eventing mode, request count is handled by the agent service
-            # when it processes the CloudEvent
-            logger.debug(
-                "No agent client available, skipping request count increment",
-                session_id=session_id,
-            )
-            pass
+        # In eventing mode, the Agent Service handles its own session management
 
         # Send request using strategy
         logger.debug(
@@ -392,16 +423,7 @@ class UnifiedRequestProcessor:
         # Note: Request logging is now handled by the Agent Service
         # The Request Manager only manages sessions, not request/response logging
 
-        # Increment request count via agent service
-        if self.agent_client:
-            await self.agent_client.increment_request_count(
-                session_id, normalized_request.request_id
-            )
-        else:
-            # Fallback to direct database access for eventing mode
-            # For eventing mode, request count is handled by the agent service
-            # when it processes the CloudEvent
-            pass
+        # Note: Request count is handled by the Agent Service when it processes the CloudEvent
 
         # In direct HTTP mode, process synchronously but return immediately to avoid timeout
         if isinstance(self.strategy, DirectHttpStrategy):
@@ -457,6 +479,8 @@ class UnifiedRequestProcessor:
                 logger.error("Agent client not initialized for background processing")
                 return
 
+            # Note: Session management is now handled by the Agent Service automatically
+
             agent_response = await agent_client.process_request(normalized_request)
             if not agent_response:
                 logger.error("Agent service failed to process request in background")
@@ -511,16 +535,7 @@ class UnifiedRequestProcessor:
         # Note: Request logging is now handled by the Agent Service
         # The Request Manager only manages sessions, not request/response logging
 
-        # Increment request count via agent service
-        if self.agent_client:
-            await self.agent_client.increment_request_count(
-                session_id, normalized_request.request_id
-            )
-        else:
-            # Fallback to direct database access for eventing mode
-            # For eventing mode, request count is handled by the agent service
-            # when it processes the CloudEvent
-            pass
+        # Note: Request count is handled by the Agent Service when it processes the CloudEvent
 
         # Handle different strategies
         if isinstance(self.strategy, EventingStrategy):
@@ -539,6 +554,8 @@ class UnifiedRequestProcessor:
             agent_client = get_agent_client()
             if not agent_client:
                 raise Exception("Agent client not initialized")
+
+            # Note: Session management is now handled by the Agent Service automatically
 
             agent_response = await agent_client.process_request(normalized_request)
             if not agent_response:
