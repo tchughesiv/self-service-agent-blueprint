@@ -17,6 +17,9 @@ image:
   # Overrides the image tag whose default is the chart appVersion.
   tag: "0.0.2"
 
+# Test Integration Configuration
+testIntegrationEnabled: false
+
 # This is to override the chart name.
 # nameOverride: ""
 # fullnameOverride: ""
@@ -367,9 +370,6 @@ requestManagement:
     # Always refresh agent mapping from LlamaStack on each request
     # Set to false for better performance, true for maximum reliability
     alwaysRefreshMapping: true
-
-  # Test Integration Configuration
-  testIntegrationEnabled: false  # Enable/disable TEST integration
 
   # Agent Service
   agentService:

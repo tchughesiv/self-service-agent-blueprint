@@ -206,10 +206,32 @@ class IntegrationDefaultsService:
             logger.warning("No database session provided for integration defaults")
             return []
 
-        # Check if health status changed and refresh if needed
+        # Check if database is in sync with current health status
         current_health = await self._check_integration_health()
-        if current_health != self.last_health_status:
+        current_enabled = set(
+            integration for integration, enabled in current_health.items() if enabled
+        )
+
+        # Get currently enabled integrations from database
+        stmt = select(IntegrationDefaultConfig).where(IntegrationDefaultConfig.enabled)
+        result = await db.execute(stmt)
+        db_configs = result.scalars().all()
+        db_enabled = set(config.integration_type.value for config in db_configs)
+
+        # Only refresh if the enabled integrations don't match
+        if current_enabled != db_enabled:
+            logger.info(
+                "Integration health status mismatch, refreshing database",
+                current_enabled=current_enabled,
+                db_enabled=db_enabled,
+                health_status=current_health,
+            )
             await self._refresh_default_configs(db)
+            self.last_health_status = current_health
+        else:
+            logger.debug(
+                "Integration health status matches database, no refresh needed"
+            )
             self.last_health_status = current_health
 
         # Get defaults from database

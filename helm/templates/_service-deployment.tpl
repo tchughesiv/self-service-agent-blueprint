@@ -166,7 +166,7 @@ spec:
               optional: true
         # Test Integration Configuration
         - name: TEST_INTEGRATION_ENABLED
-          value: {{ $context.Values.testIntegrationEnabled | default "true" | quote }}
+          value: {{ if hasKey $context.Values "testIntegrationEnabled" }}{{ $context.Values.testIntegrationEnabled | quote }}{{ else }}"true"{{ end }}
         # Integration User Defaults Configuration (auto-enabled based on health checks)
         {{- if hasKey $context.Values.requestManagement "integrations" }}
         {{- if hasKey $context.Values.requestManagement.integrations "userDefaults" }}
