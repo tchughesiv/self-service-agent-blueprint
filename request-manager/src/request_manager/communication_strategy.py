@@ -10,16 +10,70 @@ from agent_service.schemas import SessionResponse
 from fastapi import HTTPException, status
 from shared_clients import get_agent_client, get_integration_dispatcher_client
 from shared_models import CloudEventSender, get_database_manager, get_enum_value
-
-# RequestLog removed - Agent Service handles request/response logging
-# sqlalchemy.select removed - no longer needed after removing RequestLog operations
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .normalizer import RequestNormalizer
-from .response_handler import UnifiedResponseHandler
 from .schemas import AgentResponse, NormalizedRequest
 
 logger = structlog.get_logger()
+
+
+class ResponsePollingService:
+    """Service for polling response data from the database.
+
+    This service is specifically designed for the sync simulation use case in eventing mode.
+    It should only be used when:
+
+    1. **Eventing Mode**: When we need to simulate synchronous behavior for clients
+       that expect immediate responses (like CLI tools)
+    2. **Sync Endpoint**: When the `/api/v1/requests/generic/sync` endpoint needs to
+       wait for async CloudEvent processing to complete
+    3. **Database Polling**: When we need to check if the Agent Service has completed
+       processing and stored the response in the RequestLog table
+
+    **When NOT to use:**
+    - For normal async processing (use CloudEvents instead)
+    - For direct HTTP mode (Agent Service returns responses immediately)
+    - For new features (prefer CloudEvent-based communication)
+
+    **Architecture Note:**
+    This is a temporary polling mechanism that bridges the gap between eventing
+    architecture and sync client expectations. In a pure eventing system, clients
+    would receive responses via CloudEvents rather than polling the database.
+    """
+
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def get_response_data(self, request_id: str) -> Optional[Dict[str, Any]]:
+        """Get response data for a completed request.
+
+        Args:
+            request_id: The request ID to look up
+
+        Returns:
+            Response data if the request has been completed by the Agent Service,
+            None if still processing or not found
+        """
+        from shared_models.models import RequestLog
+        from sqlalchemy import select
+
+        stmt = select(RequestLog).where(RequestLog.request_id == request_id)
+        result = await self.db.execute(stmt)
+        request_log = result.scalar_one_or_none()
+
+        if request_log and request_log.response_content:
+            return {
+                "session_id": request_log.session_id,
+                "content": request_log.response_content,
+                "agent_id": request_log.agent_id,
+                "metadata": request_log.response_metadata or {},
+                "processing_time_ms": request_log.processing_time_ms,
+                "requires_followup": False,  # Default for now
+                "followup_actions": [],
+            }
+
+        return None
 
 
 class CommunicationStrategy(ABC):
@@ -633,11 +687,11 @@ class UnifiedRequestProcessor:
 
         while attempt < max_attempts:
             try:
-                # Use the response handler to get the response data
+                # Use the response polling service to get the response data
                 db_manager = get_database_manager()
                 async with db_manager.get_session() as db:
-                    response_handler = UnifiedResponseHandler(db)
-                    response_data = await response_handler.get_response_data(request_id)
+                    polling_service = ResponsePollingService(db)
+                    response_data = await polling_service.get_response_data(request_id)
 
                     if response_data:
                         # Response is ready
