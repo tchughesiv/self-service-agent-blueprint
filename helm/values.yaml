@@ -424,7 +424,7 @@ requestManagement:
     # Service-level configuration
     services:
       email:
-        enabled: true
+        enabled: false
         smtpHost: "smtp.example.com"
         smtpPort: "587"
         smtpUseTls: "true"

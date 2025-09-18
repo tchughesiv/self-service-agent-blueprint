@@ -25,7 +25,7 @@ async def main():
     # Run the interactive chat loop
     await chat_client.chat_loop(
         initial_message="please introduce yourself and tell me how you can help",
-        debug=True,  # Enable debug output
+        debug=False,  # Enable debug output
     )
 
 
