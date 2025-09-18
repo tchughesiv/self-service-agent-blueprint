@@ -38,16 +38,21 @@ class SlackIntegrationHandler(BaseIntegrationHandler):
             # Determine target channel
             channel = slack_config.get("channel_id")
             if not channel:
-                # Try to find user's DM channel
+                # Try to find user's DM channel using user_email
                 user_email = slack_config.get("user_email")
                 if user_email:
                     channel = await self._get_user_dm_channel(user_email)
                 else:
-                    return IntegrationResult(
-                        success=False,
-                        status=DeliveryStatus.FAILED,
-                        message="No channel_id or user_email configured",
-                    )
+                    # Try to use slack_user_id for DM channel
+                    slack_user_id = slack_config.get("slack_user_id")
+                    if slack_user_id:
+                        channel = await self._get_user_dm_channel_by_id(slack_user_id)
+                    else:
+                        return IntegrationResult(
+                            success=False,
+                            status=DeliveryStatus.FAILED,
+                            message="No channel_id, user_email, or slack_user_id configured",
+                        )
 
             # Build message blocks
             blocks = self._build_message_blocks(
@@ -102,11 +107,12 @@ class SlackIntegrationHandler(BaseIntegrationHandler):
 
     async def validate_config(self, config: Dict[str, Any]) -> bool:
         """Validate Slack configuration."""
-        # Must have either channel_id or user_email
+        # Must have either channel_id, user_email, or slack_user_id
         has_channel = bool(config.get("channel_id"))
         has_user_email = bool(config.get("user_email"))
+        has_slack_user_id = bool(config.get("slack_user_id"))
 
-        if not (has_channel or has_user_email):
+        if not (has_channel or has_user_email or has_slack_user_id):
             return False
 
         # Validate channel_id format if provided
@@ -162,13 +168,16 @@ class SlackIntegrationHandler(BaseIntegrationHandler):
 
     def get_required_config_fields(self) -> list[str]:
         """Required Slack configuration fields."""
-        return []  # Either channel_id or user_email is required, but not both
+        return (
+            []
+        )  # Either channel_id, user_email, or slack_user_id is required, but not all
 
     def get_optional_config_fields(self) -> list[str]:
         """Optional Slack configuration fields."""
         return [
             "channel_id",
             "user_email",
+            "slack_user_id",
             "workspace_id",
             "thread_replies",
             "mention_user",
@@ -195,6 +204,19 @@ class SlackIntegrationHandler(BaseIntegrationHandler):
 
         except Exception as e:
             raise Exception(f"Failed to get DM channel: {str(e)}")
+
+    async def _get_user_dm_channel_by_id(self, user_id: str) -> str:
+        """Get or create DM channel with user by user ID."""
+        try:
+            # Open DM channel directly with user ID
+            dm_response = await self.client.conversations_open(users=[user_id])
+            if not dm_response["ok"]:
+                raise Exception("Failed to open DM channel")
+
+            return dm_response["channel"]["id"]
+
+        except Exception as e:
+            raise Exception(f"Failed to get DM channel for user {user_id}: {str(e)}")
 
     def _build_message_blocks(
         self,

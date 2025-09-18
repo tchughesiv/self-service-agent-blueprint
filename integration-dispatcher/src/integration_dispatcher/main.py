@@ -4,7 +4,7 @@ import json
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -67,7 +67,7 @@ class IntegrationDispatcher:
         self.template_engine = TemplateEngine()
 
     async def _get_user_integration_configs(
-        self, user_id: str, db: AsyncSession
+        self, user_id: str, db: AsyncSession, request: Optional[DeliveryRequest] = None
     ) -> List[UserIntegrationConfig]:
         """Get user integration configurations using smart defaults with overrides."""
         # First, try to get user-specific configurations from database
@@ -97,9 +97,17 @@ class IntegrationDispatcher:
             "No user-specific configs found, using smart defaults", user_id=user_id
         )
 
+        # Prepare context from delivery request
+        context = {}
+        if request and request.template_variables:
+            # Look for Slack channel information in template variables
+            slack_channel = request.template_variables.get("slack_channel")
+            if slack_channel:
+                context["slack_channel"] = slack_channel
+
         # Get integration defaults for this user
         default_configs = await integration_defaults_service.get_user_integrations(
-            user_id, db=db
+            user_id, db=db, context=context
         )
 
         # Convert integration defaults to UserIntegrationConfig objects
@@ -144,7 +152,7 @@ class IntegrationDispatcher:
         )
 
         # Get user's integration configurations using smart defaults
-        configs = await self._get_user_integration_configs(request.user_id, db)
+        configs = await self._get_user_integration_configs(request.user_id, db, request)
 
         logger.info(
             "Retrieved user integration configs",

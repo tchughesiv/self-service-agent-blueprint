@@ -189,6 +189,7 @@ class IntegrationDefaultsService:
         user_id: str,
         user_overrides: Optional[Dict[str, Any]] = None,
         db: Optional[AsyncSession] = None,
+        context: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         """Get integration configurations for a user using integration defaults with overrides.
 
@@ -196,6 +197,7 @@ class IntegrationDefaultsService:
             user_id: User identifier
             user_overrides: Optional user-specific overrides
             db: Database session for persisting default configs
+            context: Optional context information (e.g., channel_id for Slack)
 
         Returns:
             List of integration configurations
@@ -248,6 +250,29 @@ class IntegrationDefaultsService:
                     if "config" in user_override:
                         # Merge config dictionaries
                         config["config"].update(user_override["config"])
+
+            # Apply context-specific configuration
+            if default_config.integration_type.value == "SLACK":
+                # For Slack, include channel information from context or use user ID for DM
+                channel_id = None
+                if context:
+                    channel_id = context.get("slack_channel")
+
+                if not channel_id:
+                    # For direct messages, we need to get the DM channel for the user
+                    # We'll set the user_id in the config so the Slack handler can create/find the DM channel
+                    config["config"]["slack_user_id"] = user_id
+                    logger.debug(
+                        "Applied Slack user ID for DM lookup",
+                        user_id=user_id,
+                    )
+                else:
+                    config["config"]["channel_id"] = channel_id
+                    logger.debug(
+                        "Applied Slack channel context",
+                        user_id=user_id,
+                        channel_id=channel_id,
+                    )
 
             # Only include enabled integrations
             if config["enabled"]:
