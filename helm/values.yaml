@@ -368,6 +368,9 @@ requestManagement:
     # Set to false for better performance, true for maximum reliability
     alwaysRefreshMapping: true
 
+  # Test Integration Configuration
+  testIntegrationEnabled: false  # Enable/disable TEST integration
+
   # Agent Service
   agentService:
     replicas: 1
@@ -430,8 +433,6 @@ requestManagement:
       slack:
         enabled: false
         # Slack credentials loaded from secrets
-      test:
-        enabled: false  # Enable/disable TEST integration
     
     # User defaults (auto-enabled based on service configuration)
     userDefaults:

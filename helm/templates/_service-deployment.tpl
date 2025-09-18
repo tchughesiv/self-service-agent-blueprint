@@ -104,6 +104,8 @@ spec:
           value: {{ if hasKey $context.Values "agent" }}{{ $context.Values.agent.defaultAgentId | default "routing-agent" | quote }}{{ else }}"routing-agent"{{ end }}
         - name: AGENT_TIMEOUT
           value: {{ if hasKey $context.Values "agent" }}{{ $context.Values.agent.timeout | default "120" | quote }}{{ else }}"120"{{ end }}
+        - name: ALWAYS_REFRESH_AGENT_MAPPING
+          value: {{ if hasKey $context.Values "agent" }}{{ $context.Values.agent.alwaysRefreshMapping | default "true" | quote }}{{ else }}"true"{{ end }}
         {{- end }}
         {{- if eq $serviceName "integration-dispatcher" }}
         # Integration-specific environment variables (optional - loaded from secrets)
@@ -164,7 +166,7 @@ spec:
               optional: true
         # Test Integration Configuration
         - name: TEST_INTEGRATION_ENABLED
-          value: {{ if hasKey $context.Values.requestManagement.integrations.services "test" }}{{ $context.Values.requestManagement.integrations.services.test.enabled | default "true" | quote }}{{ else }}"true"{{ end }}
+          value: {{ $context.Values.testIntegrationEnabled | default "true" | quote }}
         # Integration User Defaults Configuration (auto-enabled based on health checks)
         {{- if hasKey $context.Values.requestManagement "integrations" }}
         {{- if hasKey $context.Values.requestManagement.integrations "userDefaults" }}

@@ -67,6 +67,14 @@ class TestIntegrationHandler(BaseIntegrationHandler):
 
     async def health_check(self) -> bool:
         """Test integration health check - configurable via environment."""
+        import structlog
+
+        logger = structlog.get_logger()
+        logger.info(
+            "TEST integration health check",
+            enabled=self.enabled,
+            env_value=os.getenv("TEST_INTEGRATION_ENABLED", "not_set"),
+        )
         return self.enabled
 
     def get_required_config_fields(self) -> list[str]:
