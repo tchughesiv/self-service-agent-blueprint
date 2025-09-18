@@ -9,13 +9,14 @@ import structlog
 from agent_service.schemas import SessionResponse
 from fastapi import HTTPException, status
 from shared_clients import get_agent_client, get_integration_dispatcher_client
-from shared_models import CloudEventSender, get_enum_value
+from shared_models import CloudEventSender, get_database_manager, get_enum_value
 
 # RequestLog removed - Agent Service handles request/response logging
 # sqlalchemy.select removed - no longer needed after removing RequestLog operations
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .normalizer import RequestNormalizer
+from .response_handler import UnifiedResponseHandler
 from .schemas import AgentResponse, NormalizedRequest
 
 logger = structlog.get_logger()
@@ -539,14 +540,20 @@ class UnifiedRequestProcessor:
 
         # Handle different strategies
         if isinstance(self.strategy, EventingStrategy):
-            # Eventing mode: sync requests not supported - use async instead
-            logger.warning(
-                "Sync requests not supported in eventing mode",
+            # Eventing mode: simulate sync behavior by doing async + polling
+            logger.info(
+                "Simulating sync behavior in eventing mode",
                 request_id=normalized_request.request_id,
             )
-            raise HTTPException(
-                status_code=status.HTTP_501_NOT_IMPLEMENTED,
-                detail="Sync requests not supported in eventing mode - use async requests instead",
+
+            # Send async request
+            success = await self.strategy.send_request(normalized_request)
+            if not success:
+                raise Exception("Failed to send request")
+
+            # Poll for response
+            return await self._poll_for_response_sync(
+                normalized_request.request_id, timeout
             )
 
         elif isinstance(self.strategy, DirectHttpStrategy):
@@ -599,3 +606,89 @@ class UnifiedRequestProcessor:
             "status": "completed",
             "response": response_data,
         }
+
+    async def _poll_for_response_sync(
+        self, request_id: str, timeout: int
+    ) -> Dict[str, Any]:
+        """
+        Poll for response to an async request in eventing mode to simulate sync behavior.
+
+        Args:
+            request_id: The request ID to poll for
+            timeout: Maximum time to wait in seconds
+
+        Returns:
+            The response data in sync format
+        """
+        import asyncio
+
+        max_attempts = timeout  # Poll every second for timeout seconds
+        attempt = 0
+
+        logger.info(
+            "Polling for response in eventing mode",
+            request_id=request_id,
+            timeout=timeout,
+        )
+
+        while attempt < max_attempts:
+            try:
+                # Use the response handler to get the response data
+                db_manager = get_database_manager()
+                async with db_manager.get_session() as db:
+                    response_handler = UnifiedResponseHandler(db)
+                    response_data = await response_handler.get_response_data(request_id)
+
+                    if response_data:
+                        # Response is ready
+                        logger.info(
+                            "Response found in database",
+                            request_id=request_id,
+                            attempt=attempt + 1,
+                        )
+
+                        return {
+                            "request_id": request_id,
+                            "session_id": response_data.get("session_id"),
+                            "status": "completed",
+                            "response": {
+                                "content": response_data.get("content"),
+                                "agent_id": response_data.get("agent_id"),
+                                "metadata": response_data.get("metadata", {}),
+                                "processing_time_ms": response_data.get(
+                                    "processing_time_ms"
+                                ),
+                                "requires_followup": response_data.get(
+                                    "requires_followup", False
+                                ),
+                                "followup_actions": response_data.get(
+                                    "followup_actions", []
+                                ),
+                            },
+                        }
+
+                    # No response yet, wait and try again
+                    await asyncio.sleep(1)
+                    attempt += 1
+
+            except Exception as e:
+                logger.warning(
+                    "Error polling for response",
+                    request_id=request_id,
+                    attempt=attempt + 1,
+                    error=str(e),
+                )
+                await asyncio.sleep(1)
+                attempt += 1
+
+        # Timeout reached
+        logger.error(
+            "Timeout waiting for response",
+            request_id=request_id,
+            timeout=timeout,
+        )
+
+        raise HTTPException(
+            status_code=status.HTTP_408_REQUEST_TIMEOUT,
+            detail=f"Request timed out after {timeout} seconds",
+        )
