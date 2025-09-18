@@ -38,6 +38,7 @@ def upgrade() -> None:
                 "DISCORD",
                 "TEST",
                 name="integrationtype",
+                create_type=False,
             ),
             nullable=False,
         ),
