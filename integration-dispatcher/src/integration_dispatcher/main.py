@@ -90,6 +90,24 @@ class IntegrationDispatcher:
                 user_id=user_id,
                 configs_found=len(db_configs),
             )
+
+            # For Slack configs, ensure they have channel information
+            for config in db_configs:
+                if config.integration_type.value == "SLACK":
+                    # Check if Slack config has channel info
+                    has_channel = bool(config.config.get("channel_id"))
+                    has_user_email = bool(config.config.get("user_email"))
+                    has_slack_user_id = bool(config.config.get("slack_user_id"))
+
+                    if not (has_channel or has_user_email or has_slack_user_id):
+                        # Add slack_user_id as fallback
+                        config.config["slack_user_id"] = user_id
+                        logger.info(
+                            "Added slack_user_id to existing Slack config",
+                            user_id=user_id,
+                            config=config.config,
+                        )
+
             return db_configs
 
         # Otherwise, use smart defaults
