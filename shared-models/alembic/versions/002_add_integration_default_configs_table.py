@@ -20,38 +20,29 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade database schema."""
-    # Create integration_default_configs table
-    op.create_table(
-        "integration_default_configs",
-        sa.Column("id", sa.Integer(), nullable=False),
-        sa.Column(
-            "integration_type",
-            sa.Enum(
-                "SLACK",
-                "WEB",
-                "CLI",
-                "TOOL",
-                "EMAIL",
-                "SMS",
-                "WEBHOOK",
-                "TEAMS",
-                "DISCORD",
-                "TEST",
-                name="integrationtype",
-                create_type=False,
-            ),
-            nullable=False,
-        ),
-        sa.Column("enabled", sa.Boolean(), nullable=False),
-        sa.Column("config", sa.JSON(), nullable=False),
-        sa.Column("priority", sa.Integer(), nullable=False),
-        sa.Column("retry_count", sa.Integer(), nullable=False),
-        sa.Column("retry_delay_seconds", sa.Integer(), nullable=False),
-        sa.Column("created_by", sa.String(length=255), nullable=True),
-        sa.Column("created_at", sa.TIMESTAMP(timezone=True), nullable=False),
-        sa.Column("updated_at", sa.TIMESTAMP(timezone=True), nullable=False),
-        sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("integration_type", name="uq_integration_default_type"),
+    # Create integration_default_configs table using raw SQL
+    # The integrationtype enum already exists from migration 001
+    connection = op.get_bind()
+
+    # Create the table using raw SQL to avoid ENUM creation issues
+    connection.execute(
+        sa.text(
+            """
+        CREATE TABLE integration_default_configs (
+            id SERIAL PRIMARY KEY,
+            integration_type integrationtype NOT NULL,
+            enabled BOOLEAN NOT NULL,
+            config JSONB NOT NULL,
+            priority INTEGER NOT NULL,
+            retry_count INTEGER NOT NULL,
+            retry_delay_seconds INTEGER NOT NULL,
+            created_by VARCHAR(255),
+            created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+            CONSTRAINT uq_integration_default_type UNIQUE (integration_type)
+        )
+    """
+        )
     )
 
 
