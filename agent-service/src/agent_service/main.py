@@ -673,7 +673,13 @@ class AgentService:
         """Publish agent response as CloudEvent and update database."""
         try:
             # Update RequestLog in database first (for CLI sync requests)
+            logger.info(
+                "Updating RequestLog in database", request_id=response.request_id
+            )
             await self._update_request_log(response)
+            logger.info(
+                "RequestLog updated successfully", request_id=response.request_id
+            )
 
             event_data = {
                 "request_id": response.request_id,
@@ -716,11 +722,14 @@ class AgentService:
     async def _update_request_log(self, response: AgentResponse) -> None:
         """Update RequestLog in database with response content."""
         try:
+            logger.info("Starting RequestLog update", request_id=response.request_id)
             from shared_models.models import RequestLog
             from sqlalchemy import update
 
             db_manager = get_database_manager()
+            logger.info("Got database manager", request_id=response.request_id)
             async with db_manager.get_session() as db:
+                logger.info("Got database session", request_id=response.request_id)
                 # Update the RequestLog with response content
                 stmt = (
                     update(RequestLog)
@@ -733,8 +742,14 @@ class AgentService:
                         completed_at=datetime.now(timezone.utc),
                     )
                 )
+                logger.info(
+                    "Executing update statement", request_id=response.request_id
+                )
                 await db.execute(stmt)
                 await db.commit()
+                logger.info(
+                    "Database commit successful", request_id=response.request_id
+                )
 
                 logger.info(
                     "RequestLog updated with response",
@@ -748,6 +763,7 @@ class AgentService:
                 "Failed to update RequestLog",
                 request_id=response.request_id,
                 error=str(e),
+                error_type=type(e).__name__,
             )
             # Don't raise the exception - we still want to publish the event
             # even if database update fails
@@ -990,6 +1006,10 @@ async def handle_cloudevent(request: Request) -> Dict[str, Any]:
         if headers.get("ce-type") == "com.self-service-agent.request.created":
             return await _handle_request_event(headers, body, _agent_service)
 
+        # Handle database update events
+        if headers.get("ce-type") == "com.self-service-agent.request.database-update":
+            return await _handle_database_update_event(headers, body, _agent_service)
+
         logger.warning("Unhandled CloudEvent type", event_type=headers.get("ce-type"))
         return {"status": "ignored", "reason": "unhandled event type"}
 
@@ -1070,6 +1090,59 @@ async def _handle_request_event(
 
     except Exception as e:
         logger.error("Failed to handle request event", error=str(e))
+        raise
+
+
+async def _handle_database_update_event(
+    headers: Dict[str, str], body: bytes, agent_service: AgentService
+) -> Dict[str, Any]:
+    """Handle database update event from Request Manager."""
+    try:
+        event_data = json.loads(body)
+
+        request_id = event_data.get("request_id")
+        session_id = event_data.get("session_id")
+        agent_id = event_data.get("agent_id")
+        content = event_data.get("content")
+        metadata = event_data.get("metadata", {})
+        processing_time_ms = event_data.get("processing_time_ms")
+
+        if not all([request_id, session_id, agent_id, content]):
+            raise ValueError("Missing required fields in database update event")
+
+        # Create AgentResponse object for database update
+        response = AgentResponse(
+            request_id=request_id,
+            session_id=session_id,
+            agent_id=agent_id,
+            content=content,
+            metadata=metadata,
+            processing_time_ms=processing_time_ms,
+            response_type="message",
+            requires_followup=False,
+            followup_actions=[],
+            created_at=datetime.now(timezone.utc),
+        )
+
+        # Update database using the existing method
+        await agent_service._update_request_log(response)
+
+        logger.info(
+            "Database updated via event from Request Manager",
+            request_id=request_id,
+            session_id=session_id,
+            agent_id=agent_id,
+        )
+
+        return {
+            "status": "updated",
+            "request_id": request_id,
+            "session_id": session_id,
+            "agent_id": agent_id,
+        }
+
+    except Exception as e:
+        logger.error("Failed to handle database update event", error=str(e))
         raise
 
 

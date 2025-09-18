@@ -157,6 +157,31 @@ class CloudEventPublisher:
 
         return await self._publish_event(event)
 
+    async def publish_database_update_event(self, update_data: Dict[str, Any]) -> bool:
+        """Publish database update event to Agent Service."""
+        # If eventing is disabled, return success without publishing
+        if not self.config.eventing_enabled:
+            logger.info(
+                "Eventing disabled - skipping database update event publication",
+                request_id=update_data.get("request_id"),
+            )
+            return True
+
+        event = CloudEvent(
+            {
+                "specversion": "1.0",
+                "type": EventTypes.DATABASE_UPDATE_REQUESTED,
+                "source": self.config.source,
+                "id": str(uuid.uuid4()),
+                "time": datetime.now(timezone.utc).isoformat(),
+                "subject": f"request/{update_data.get('request_id')}",
+                "datacontenttype": "application/json",
+            },
+            update_data,
+        )
+
+        return await self._publish_event(event)
+
     async def publish_session_event(
         self,
         session_id: str,
@@ -351,6 +376,9 @@ class EventTypes:
     # Agent events
     AGENT_ROUTED = "com.self-service-agent.agent.routed"
     AGENT_RESPONSE_READY = "com.self-service-agent.agent.response-ready"
+
+    # Database update events
+    DATABASE_UPDATE_REQUESTED = "com.self-service-agent.request.database-update"
 
 
 # Global event publisher instance

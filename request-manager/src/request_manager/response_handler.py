@@ -1,6 +1,6 @@
 """Shared response handling logic for both eventing and direct HTTP modes."""
 
-from datetime import datetime, timezone
+# Removed unused datetime imports since we're now using events instead of direct database updates
 from typing import Any, Dict, Optional
 
 import structlog
@@ -54,21 +54,14 @@ class UnifiedResponseHandler:
             agent_id=agent_id,
         )
 
-        # Update request log with response
-        await self._update_request_log(
+        # Send database update event to Agent Service
+        await self._send_database_update_event(
             request_id=request_id,
-            agent_id=agent_id,
-            content=content,
-            metadata=metadata,
-            processing_time_ms=processing_time_ms,
-        )
-
-        # Update session with response metadata
-        await self._update_session_context(
             session_id=session_id,
             agent_id=agent_id,
             content=content,
             metadata=metadata,
+            processing_time_ms=processing_time_ms,
         )
 
         logger.info(
@@ -89,6 +82,49 @@ class UnifiedResponseHandler:
             "followup_actions": followup_actions or [],
         }
 
+    async def _send_database_update_event(
+        self,
+        request_id: str,
+        session_id: str,
+        agent_id: str,
+        content: str,
+        metadata: Optional[Dict[str, Any]] = None,
+        processing_time_ms: Optional[int] = None,
+    ) -> None:
+        """Send database update event to Agent Service."""
+        try:
+            from .events import get_event_publisher
+
+            event_publisher = get_event_publisher()
+            if not event_publisher:
+                logger.error("Event publisher not available for database update event")
+                return
+
+            event_data = {
+                "request_id": request_id,
+                "session_id": session_id,
+                "agent_id": agent_id,
+                "content": content,
+                "metadata": metadata or {},
+                "processing_time_ms": processing_time_ms,
+            }
+
+            await event_publisher.publish_database_update_event(event_data)
+
+            logger.info(
+                "Database update event sent to Agent Service",
+                request_id=request_id,
+                session_id=session_id,
+                agent_id=agent_id,
+            )
+
+        except Exception as e:
+            logger.error(
+                "Failed to send database update event",
+                request_id=request_id,
+                error=str(e),
+            )
+
     async def _check_existing_response(self, request_id: str) -> Optional[RequestLog]:
         """Check if a request already has a response."""
         stmt = select(RequestLog).where(
@@ -97,47 +133,6 @@ class UnifiedResponseHandler:
         )
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
-
-    async def _update_request_log(
-        self,
-        request_id: str,
-        agent_id: str,
-        content: str,
-        metadata: Optional[Dict[str, Any]] = None,
-        processing_time_ms: Optional[int] = None,
-    ) -> None:
-        """Update the request log with response information."""
-        stmt = select(RequestLog).where(RequestLog.request_id == request_id)
-        result = await self.db.execute(stmt)
-        request_log = result.scalar_one_or_none()
-
-        if request_log:
-            request_log.response_content = content
-            request_log.response_metadata = metadata or {}
-            request_log.agent_id = agent_id
-            request_log.processing_time_ms = processing_time_ms
-            request_log.completed_at = datetime.now(timezone.utc)
-
-            await self.db.commit()
-        else:
-            logger.warning("Request log not found for response", request_id=request_id)
-
-    async def _update_session_context(
-        self,
-        session_id: str,
-        agent_id: str,
-        content: str,
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> None:
-        """Update session context with response information."""
-        # This could include updating conversation context, user context, etc.
-        # For now, we'll just log the update
-        logger.debug(
-            "Session context updated with response",
-            session_id=session_id,
-            agent_id=agent_id,
-            has_metadata=bool(metadata),
-        )
 
     async def get_response_data(self, request_id: str) -> Optional[Dict[str, Any]]:
         """Get response data for a request."""
