@@ -739,7 +739,7 @@ class UnifiedRequestProcessor:
                 integration_type=normalized_request.integration_type,
                 content=normalized_request.content,
                 request_type=normalized_request.request_type,
-                metadata=normalized_request.metadata,
+                metadata=normalized_request.integration_context,  # Use integration_context instead of metadata
                 status="processing",  # Initial status
                 created_at=datetime.now(timezone.utc),
                 updated_at=datetime.now(timezone.utc),
