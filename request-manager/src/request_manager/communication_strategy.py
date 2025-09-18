@@ -385,35 +385,11 @@ class UnifiedRequestProcessor:
             user_id=request.user_id,
             request_type=request.request_type,
         )
-        normalizer = RequestNormalizer()
 
-        # Delegate session management to the communication strategy
-        logger.debug("Creating or getting session", user_id=request.user_id)
-        session = await self.strategy.create_or_get_session(request, db)
-
-        # Check if session creation failed
-        if not session:
-            logger.error("Failed to create or find session", user_id=request.user_id)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to create session",
-            )
-
-        logger.info(
-            "Session created/found successfully",
-            session_id=session.session_id,
-            user_id=request.user_id,
+        # Common request preparation
+        normalized_request, session_id, current_agent_id = await self._prepare_request(
+            request, db
         )
-
-        # Normalize the request
-        session_id, current_agent_id = self._extract_session_data(session)
-        normalized_request = normalizer.normalize_request(
-            request, session_id, current_agent_id
-        )
-
-        # Note: Request logging and session management is now handled by the Agent Service
-        # The Request Manager only manages sessions, not request/response logging
-        # In eventing mode, the Agent Service handles its own session management
 
         # Send request using strategy
         logger.debug(
@@ -456,29 +432,10 @@ class UnifiedRequestProcessor:
         self, request, db: AsyncSession, timeout: int = 120
     ) -> Dict[str, Any]:
         """Process a request asynchronously but deliver response in direct HTTP mode."""
-        normalizer = RequestNormalizer()
-
-        # Delegate session management to the communication strategy
-        session = await self.strategy.create_or_get_session(request, db)
-
-        # Check if session creation failed
-        if not session:
-            logger.error("Failed to create or find session", user_id=request.user_id)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to create session",
-            )
-
-        # Normalize the request
-        session_id, current_agent_id = self._extract_session_data(session)
-        normalized_request = normalizer.normalize_request(
-            request, session_id, current_agent_id
+        # Common request preparation
+        normalized_request, session_id, current_agent_id = await self._prepare_request(
+            request, db
         )
-
-        # Note: Request logging is now handled by the Agent Service
-        # The Request Manager only manages sessions, not request/response logging
-
-        # Note: Request count is handled by the Agent Service when it processes the CloudEvent
 
         # In direct HTTP mode, process synchronously but return immediately to avoid timeout
         if isinstance(self.strategy, DirectHttpStrategy):
@@ -566,31 +523,10 @@ class UnifiedRequestProcessor:
         self, request, db: AsyncSession, timeout: int = 120
     ) -> Dict[str, Any]:
         """Process a request synchronously and wait for response."""
-        # datetime imports removed - no longer needed after removing RequestLog operations
-
-        normalizer = RequestNormalizer()
-
-        # Delegate session management to the communication strategy
-        session = await self.strategy.create_or_get_session(request, db)
-
-        # Check if session creation failed
-        if not session:
-            logger.error("Failed to create or find session", user_id=request.user_id)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to create session",
-            )
-
-        # Normalize the request
-        session_id, current_agent_id = self._extract_session_data(session)
-        normalized_request = normalizer.normalize_request(
-            request, session_id, current_agent_id
+        # Common request preparation
+        normalized_request, session_id, current_agent_id = await self._prepare_request(
+            request, db
         )
-
-        # Note: Request logging is now handled by the Agent Service
-        # The Request Manager only manages sessions, not request/response logging
-
-        # Note: Request count is handled by the Agent Service when it processes the CloudEvent
 
         # Handle different strategies
         if isinstance(self.strategy, EventingStrategy):
@@ -746,3 +682,82 @@ class UnifiedRequestProcessor:
             status_code=status.HTTP_408_REQUEST_TIMEOUT,
             detail=f"Request timed out after {timeout} seconds",
         )
+
+    async def _prepare_request(
+        self, request, db: AsyncSession
+    ) -> tuple[NormalizedRequest, str, str]:
+        """Common request preparation logic: session management, normalization, and RequestLog creation.
+
+        Returns:
+            tuple: (normalized_request, session_id, current_agent_id)
+        """
+        normalizer = RequestNormalizer()
+
+        # Delegate session management to the communication strategy
+        logger.debug("Creating or getting session", user_id=request.user_id)
+        session = await self.strategy.create_or_get_session(request, db)
+
+        # Check if session creation failed
+        if not session:
+            logger.error("Failed to create or find session", user_id=request.user_id)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create session",
+            )
+
+        logger.info(
+            "Session created/found successfully",
+            session_id=session.session_id,
+            user_id=request.user_id,
+        )
+
+        # Normalize the request
+        session_id, current_agent_id = self._extract_session_data(session)
+        normalized_request = normalizer.normalize_request(
+            request, session_id, current_agent_id
+        )
+
+        # Create initial RequestLog entry for tracking
+        await self._create_request_log_entry(normalized_request, db)
+
+        return normalized_request, session_id, current_agent_id
+
+    async def _create_request_log_entry(
+        self, normalized_request: NormalizedRequest, db: AsyncSession
+    ) -> None:
+        """Create initial RequestLog entry for tracking."""
+        try:
+            from datetime import datetime, timezone
+
+            from shared_models.models import RequestLog
+
+            # Create initial RequestLog entry
+            request_log = RequestLog(
+                request_id=normalized_request.request_id,
+                session_id=normalized_request.session_id,
+                user_id=normalized_request.user_id,
+                integration_type=normalized_request.integration_type,
+                content=normalized_request.content,
+                request_type=normalized_request.request_type,
+                metadata=normalized_request.metadata,
+                status="processing",  # Initial status
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            )
+
+            db.add(request_log)
+            await db.commit()
+
+            logger.debug(
+                "RequestLog entry created",
+                request_id=normalized_request.request_id,
+                session_id=normalized_request.session_id,
+            )
+
+        except Exception as e:
+            logger.warning(
+                "Failed to create RequestLog entry",
+                request_id=normalized_request.request_id,
+                error=str(e),
+            )
+            # Don't raise exception - RequestLog creation failure shouldn't stop request processing
