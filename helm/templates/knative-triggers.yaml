@@ -32,7 +32,7 @@ spec:
   filter:
     attributes:
       type: com.self-service-agent.agent.response-ready
-      source: https://request-manager.local
+      source: request-manager
   subscriber:
     uri: http://{{ include "self-service-agent.fullname" . }}-integration-dispatcher.{{ .Release.Namespace }}.svc.cluster.local
   delivery:
@@ -75,6 +75,7 @@ spec:
   filter:
     attributes:
       type: com.self-service-agent.agent.response-ready
+      source: agent-service
   subscriber:
     uri: http://{{ include "self-service-agent.fullname" . }}-request-manager.{{ .Release.Namespace }}.svc.cluster.local/api/v1/events/cloudevents
   delivery:
