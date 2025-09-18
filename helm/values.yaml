@@ -456,6 +456,24 @@ requestManagement:
         retryCount: 2
         retryDelaySeconds: 45
         config: {}
+      TEST:
+        # Auto-enabled based on health check
+        priority: 5
+        retryCount: 1
+        retryDelaySeconds: 10
+        config: {}
+      CLI:
+        # Auto-enabled based on health check
+        priority: 6
+        retryCount: 1
+        retryDelaySeconds: 5
+        config: {}
+      TOOL:
+        # Auto-enabled based on health check
+        priority: 7
+        retryCount: 1
+        retryDelaySeconds: 5
+        config: {}
   
   # Database Migration
   dbMigration:

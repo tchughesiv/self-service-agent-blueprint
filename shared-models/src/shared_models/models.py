@@ -171,6 +171,27 @@ class UserIntegrationConfig(Base, TimestampMixin):
     )
 
 
+class IntegrationDefaultConfig(Base, TimestampMixin):
+    """Default integration configurations for new users."""
+
+    __tablename__ = "integration_default_configs"
+
+    id = Column(Integer, primary_key=True)
+    integration_type = Column(SQLEnum(IntegrationType), nullable=False, unique=True)
+    enabled = Column(Boolean, default=True, nullable=False)
+
+    # Integration-specific configuration
+    config = Column(JSON, nullable=False, default=dict)
+
+    # Delivery preferences
+    priority = Column(Integer, default=0, nullable=False)  # Higher = more important
+    retry_count = Column(Integer, default=3, nullable=False)
+    retry_delay_seconds = Column(Integer, default=60, nullable=False)
+
+    # Metadata
+    created_by = Column(String(255), default="system")  # System-generated defaults
+
+
 class IntegrationTemplate(Base, TimestampMixin):
     """Templates for different integration types."""
 

@@ -99,22 +99,35 @@ class IntegrationDispatcher:
 
         # Get integration defaults for this user
         default_configs = await integration_defaults_service.get_user_integrations(
-            user_id
+            user_id, db=db
         )
 
         # Convert integration defaults to UserIntegrationConfig objects
         config_objects = []
         for config_data in default_configs:
-            config = UserIntegrationConfig(
-                user_id=user_id,
-                integration_type=config_data["integration_type"],
-                enabled=config_data["enabled"],
-                priority=config_data["priority"],
-                retry_count=config_data["retry_count"],
-                retry_delay_seconds=config_data["retry_delay_seconds"],
-                config=config_data["config"],
-            )
-            config_objects.append(config)
+            # If the config has an ID, it's already persisted in the database
+            if "id" in config_data:
+                # Load the existing config from database
+                from sqlalchemy import select
+
+                stmt = select(UserIntegrationConfig).where(
+                    UserIntegrationConfig.id == config_data["id"]
+                )
+                result = await db.execute(stmt)
+                config = result.scalar_one()
+                config_objects.append(config)
+            else:
+                # Create a new config object (fallback)
+                config = UserIntegrationConfig(
+                    user_id=user_id,
+                    integration_type=config_data["integration_type"],
+                    enabled=config_data["enabled"],
+                    priority=config_data["priority"],
+                    retry_count=config_data["retry_count"],
+                    retry_delay_seconds=config_data["retry_delay_seconds"],
+                    config=config_data["config"],
+                )
+                config_objects.append(config)
 
         return config_objects
 
@@ -352,6 +365,16 @@ async def lifespan(app: FastAPI):
         logger.info("Database migration verified and ready")
     except Exception as e:
         logger.error("Failed to verify database migration", error=str(e))
+        raise
+
+    # Initialize integration defaults
+    logger.info("Initializing integration defaults...")
+    try:
+        async with db_manager.get_session() as db:
+            await integration_defaults_service.initialize_defaults(db)
+        logger.info("Integration defaults initialized successfully")
+    except Exception as e:
+        logger.error("Failed to initialize integration defaults", error=str(e))
         raise
 
     # Database migration is sufficient for startup validation

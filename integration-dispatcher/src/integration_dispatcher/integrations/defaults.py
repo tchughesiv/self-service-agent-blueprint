@@ -4,7 +4,9 @@ import os
 from typing import Any, Dict, List, Optional
 
 import structlog
-from shared_models.models import IntegrationType
+from shared_models.models import IntegrationDefaultConfig, IntegrationType
+from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = structlog.get_logger()
 
@@ -15,6 +17,7 @@ class IntegrationDefaultsService:
     def __init__(self):
         """Initialize integration defaults service."""
         self.default_integrations = self._load_default_integrations()
+        self.last_health_status = {}
 
         logger.info(
             "Integration defaults service initialized",
@@ -64,6 +67,20 @@ class IntegrationDefaultsService:
                 "retry_delay_seconds": 10,
                 "config": {},
             },
+            "CLI": {
+                "enabled": False,  # Will be updated by health check
+                "priority": 6,
+                "retry_count": 1,
+                "retry_delay_seconds": 5,
+                "config": {},
+            },
+            "TOOL": {
+                "enabled": False,  # Will be updated by health check
+                "priority": 7,
+                "retry_count": 1,
+                "retry_delay_seconds": 5,
+                "config": {},
+            },
         }
 
         # Override with environment variables if available
@@ -89,39 +106,133 @@ class IntegrationDefaultsService:
 
         return defaults
 
+    async def initialize_defaults(self, db: AsyncSession) -> None:
+        """Initialize default configs in the database on startup."""
+        await self._refresh_default_configs(db)
+        logger.info("Integration defaults initialized in database")
+
+    async def _refresh_default_configs(self, db: AsyncSession) -> None:
+        """Refresh default configs in database based on current health status."""
+        # Clear existing defaults
+        await db.execute(delete(IntegrationDefaultConfig))
+
+        # Check current health status
+        health_status = await self._check_integration_health()
+
+        # Insert new defaults
+        for integration_type, config in self.default_integrations.items():
+            enabled = health_status.get(integration_type, False)
+            default_config = IntegrationDefaultConfig(
+                integration_type=IntegrationType(integration_type),
+                enabled=enabled,
+                priority=config["priority"],
+                retry_count=config["retry_count"],
+                retry_delay_seconds=config["retry_delay_seconds"],
+                config=config["config"],
+                created_by="system",
+            )
+            db.add(default_config)
+
+        await db.commit()
+        logger.info(
+            "Integration defaults refreshed in database", health_status=health_status
+        )
+
+    async def _check_integration_health(self) -> Dict[str, bool]:
+        """Check health status of all integrations."""
+        health_status = {}
+
+        # Check Slack health
+        try:
+            from .slack import SlackIntegrationHandler
+
+            slack_handler = SlackIntegrationHandler()
+            health_status["SLACK"] = await slack_handler.health_check()
+        except Exception as e:
+            logger.warning("Slack integration health check failed", error=str(e))
+            health_status["SLACK"] = False
+
+        # Check Email health
+        try:
+            from .email import EmailIntegrationHandler
+
+            email_handler = EmailIntegrationHandler()
+            health_status["EMAIL"] = await email_handler.health_check()
+        except Exception as e:
+            logger.warning("Email integration health check failed", error=str(e))
+            health_status["EMAIL"] = False
+
+        # Check Test health
+        try:
+            from .test import TestIntegrationHandler
+
+            test_handler = TestIntegrationHandler()
+            health_status["TEST"] = await test_handler.health_check()
+        except Exception as e:
+            logger.warning("Test integration health check failed", error=str(e))
+            health_status["TEST"] = False
+
+        # Check CLI health (always available)
+        health_status["CLI"] = True
+
+        # Check TOOL health (always available)
+        health_status["TOOL"] = True
+
+        # WEBHOOK and SMS are always disabled by default
+        health_status["WEBHOOK"] = False
+        health_status["SMS"] = False
+
+        return health_status
+
     async def get_user_integrations(
-        self, user_id: str, user_overrides: Optional[Dict[str, Any]] = None
+        self,
+        user_id: str,
+        user_overrides: Optional[Dict[str, Any]] = None,
+        db: Optional[AsyncSession] = None,
     ) -> List[Dict[str, Any]]:
         """Get integration configurations for a user using integration defaults with overrides.
 
         Args:
             user_id: User identifier
             user_overrides: Optional user-specific overrides
+            db: Database session for persisting default configs
 
         Returns:
             List of integration configurations
         """
-        # Update integration health status before returning defaults
-        await self._update_integration_health()
+        if not db:
+            logger.warning("No database session provided for integration defaults")
+            return []
 
-        # Start with default configurations
+        # Check if health status changed and refresh if needed
+        current_health = await self._check_integration_health()
+        if current_health != self.last_health_status:
+            await self._refresh_default_configs(db)
+            self.last_health_status = current_health
+
+        # Get defaults from database
+        stmt = select(IntegrationDefaultConfig).where(IntegrationDefaultConfig.enabled)
+        result = await db.execute(stmt)
+        default_configs = result.scalars().all()
+
+        # Convert to user integration format
         integrations = []
-
-        for integration_type, default_config in self.default_integrations.items():
-            # Create integration config from defaults
+        for default_config in default_configs:
             config = {
                 "user_id": user_id,
-                "integration_type": IntegrationType(integration_type),
-                "enabled": default_config["enabled"],
-                "priority": default_config["priority"],
-                "retry_count": default_config["retry_count"],
-                "retry_delay_seconds": default_config["retry_delay_seconds"],
-                "config": default_config["config"].copy(),
+                "integration_type": default_config.integration_type,
+                "enabled": default_config.enabled,
+                "priority": default_config.priority,
+                "retry_count": default_config.retry_count,
+                "retry_delay_seconds": default_config.retry_delay_seconds,
+                "config": default_config.config.copy(),
             }
 
             # Apply user overrides if provided
             if user_overrides:
-                user_override = user_overrides.get(integration_type)
+                user_override = user_overrides.get(
+                    default_config.integration_type.value
+                )
                 if user_override:
                     # Apply overrides
                     if "enabled" in user_override:
@@ -140,6 +251,21 @@ class IntegrationDefaultsService:
 
             # Only include enabled integrations
             if config["enabled"]:
+                # Create a temporary user config in the database
+                from shared_models.models import UserIntegrationConfig
+
+                temp_config = UserIntegrationConfig(
+                    user_id=user_id,
+                    integration_type=config["integration_type"],
+                    enabled=config["enabled"],
+                    priority=config["priority"],
+                    retry_count=config["retry_count"],
+                    retry_delay_seconds=config["retry_delay_seconds"],
+                    config=config["config"],
+                )
+                db.add(temp_config)
+                await db.flush()  # Flush to get the ID without committing
+                config["id"] = temp_config.id
                 integrations.append(config)
 
         logger.info(
@@ -187,43 +313,3 @@ class IntegrationDefaultsService:
             True if enabled by default, False otherwise
         """
         return self.default_integrations.get(integration_type, {}).get("enabled", False)
-
-    async def _update_integration_health(self) -> None:
-        """Update integration enabled status based on health checks."""
-        # Import here to avoid circular imports
-        from .email import EmailIntegrationHandler
-        from .slack import SlackIntegrationHandler
-        from .test import TestIntegrationHandler
-
-        # Check Slack health
-        try:
-            slack_handler = SlackIntegrationHandler()
-            slack_healthy = await slack_handler.health_check()
-            self.default_integrations["SLACK"]["enabled"] = slack_healthy
-
-            logger.info("Slack integration health check", healthy=slack_healthy)
-        except Exception as e:
-            logger.warning("Slack integration health check failed", error=str(e))
-            self.default_integrations["SLACK"]["enabled"] = False
-
-        # Check Email health
-        try:
-            email_handler = EmailIntegrationHandler()
-            email_healthy = await email_handler.health_check()
-            self.default_integrations["EMAIL"]["enabled"] = email_healthy
-
-            logger.info("Email integration health check", healthy=email_healthy)
-        except Exception as e:
-            logger.warning("Email integration health check failed", error=str(e))
-            self.default_integrations["EMAIL"]["enabled"] = False
-
-        # Check Test health
-        try:
-            test_handler = TestIntegrationHandler()
-            test_healthy = await test_handler.health_check()
-            self.default_integrations["TEST"]["enabled"] = test_healthy
-
-            logger.info("Test integration health check", healthy=test_healthy)
-        except Exception as e:
-            logger.warning("Test integration health check failed", error=str(e))
-            self.default_integrations["TEST"]["enabled"] = False
