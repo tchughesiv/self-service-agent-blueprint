@@ -731,18 +731,26 @@ class UnifiedRequestProcessor:
 
             from shared_models.models import RequestLog
 
-            # Create initial RequestLog entry
+            # Create initial RequestLog entry with correct field names
             request_log = RequestLog(
                 request_id=normalized_request.request_id,
                 session_id=normalized_request.session_id,
-                user_id=normalized_request.user_id,
-                integration_type=normalized_request.integration_type,
-                content=normalized_request.content,
                 request_type=normalized_request.request_type,
-                metadata=normalized_request.integration_context,  # Use integration_context instead of metadata
-                status="processing",  # Initial status
-                created_at=datetime.now(timezone.utc),
-                updated_at=datetime.now(timezone.utc),
+                request_content=normalized_request.content,
+                normalized_request={
+                    "user_id": normalized_request.user_id,
+                    "integration_type": normalized_request.integration_type,
+                    "content": normalized_request.content,
+                    "request_type": normalized_request.request_type,
+                    "integration_context": normalized_request.integration_context,
+                },
+                agent_id=None,  # Will be set by Agent Service
+                processing_time_ms=None,  # Will be set by Agent Service
+                response_content=None,  # Will be set by Agent Service
+                response_metadata=None,  # Will be set by Agent Service
+                cloudevent_id=None,  # Will be set when CloudEvent is sent
+                cloudevent_type=None,  # Will be set when CloudEvent is sent
+                completed_at=None,  # Will be set by Agent Service
             )
 
             db.add(request_log)
