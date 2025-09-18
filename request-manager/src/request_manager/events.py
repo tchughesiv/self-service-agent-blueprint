@@ -117,7 +117,7 @@ class CloudEventPublisher:
     async def publish_response_event(
         self,
         agent_response: AgentResponse,
-        event_type: str = "com.self-service-agent.response.created",
+        event_type: str = "com.self-service-agent.agent.response-ready",
     ) -> bool:
         """Publish an agent response as a CloudEvent."""
         # If eventing is disabled, return success without publishing
@@ -340,7 +340,7 @@ class EventTypes:
     REQUEST_FAILED = "com.self-service-agent.request.failed"
 
     # Response events
-    RESPONSE_CREATED = "com.self-service-agent.response.created"
+    RESPONSE_CREATED = "com.self-service-agent.agent.response-ready"
     RESPONSE_DELIVERED = "com.self-service-agent.response.delivered"
     RESPONSE_FAILED = "com.self-service-agent.response.failed"
 

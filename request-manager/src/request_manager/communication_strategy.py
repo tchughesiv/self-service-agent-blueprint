@@ -55,6 +55,12 @@ class EventingStrategy(CommunicationStrategy):
         broker_url = os.getenv("BROKER_URL", "http://knative-broker:8080")
         self.event_sender = CloudEventSender(broker_url, "request-manager")
 
+        # Configurable polling strategy
+        self.poll_intervals = [
+            float(x)
+            for x in os.getenv("POLL_INTERVALS", "0.5,1.0,2.0,3.0,5.0").split(",")
+        ]
+
     async def create_or_get_session(
         self, request, db: AsyncSession
     ) -> Optional[SessionResponse]:
@@ -94,11 +100,15 @@ class EventingStrategy(CommunicationStrategy):
     async def wait_for_response(
         self, request_id: str, timeout: int, db: AsyncSession
     ) -> Optional[Dict[str, Any]]:
-        """Wait for response by polling database (eventing mode)."""
+        """Wait for response by polling database (eventing mode) with optimized polling."""
+        import asyncio
         from datetime import datetime, timedelta
 
         start_time = datetime.now()
         end_time = start_time + timedelta(seconds=timeout)
+
+        # Optimized polling strategy: start fast, then slow down
+        current_interval_index = 0
 
         logger.debug(
             "Starting to wait for response",
@@ -108,43 +118,41 @@ class EventingStrategy(CommunicationStrategy):
 
         while datetime.now() < end_time:
             try:
-                # Use a fresh database session for each poll to avoid session issues
-                from shared_models import get_database_manager
+                # Use the existing database session instead of creating new ones
+                stmt = select(RequestLog).where(RequestLog.request_id == request_id)
+                result = await db.execute(stmt)
+                request_log = result.scalar_one_or_none()
 
-                async with get_database_manager().get_session() as fresh_db:
-                    stmt = select(RequestLog).where(RequestLog.request_id == request_id)
-                    result = await fresh_db.execute(stmt)
-                    request_log = result.scalar_one_or_none()
+                if request_log and request_log.response_content:
+                    logger.info(
+                        "Response received via eventing",
+                        request_id=request_id,
+                        elapsed_seconds=(datetime.now() - start_time).total_seconds(),
+                    )
+                    return {
+                        "agent_id": request_log.agent_id,
+                        "content": request_log.response_content,
+                        "metadata": request_log.response_metadata or {},
+                        "processing_time_ms": request_log.processing_time_ms,
+                        "completed_at": (
+                            request_log.completed_at.isoformat()
+                            if request_log.completed_at
+                            else None
+                        ),
+                    }
 
-                    if request_log and request_log.response_content:
-                        logger.info(
-                            "Response received via eventing",
-                            request_id=request_id,
-                            elapsed_seconds=(
-                                datetime.now() - start_time
-                            ).total_seconds(),
-                        )
-                        return {
-                            "agent_id": request_log.agent_id,
-                            "content": request_log.response_content,
-                            "metadata": request_log.response_metadata or {},
-                            "processing_time_ms": request_log.processing_time_ms,
-                            "completed_at": (
-                                request_log.completed_at.isoformat()
-                                if request_log.completed_at
-                                else None
-                            ),
-                        }
-
-                    # Log progress every 5 seconds
-                    elapsed = (datetime.now() - start_time).total_seconds()
-                    if int(elapsed) % 5 == 0 and elapsed > 0:
-                        logger.debug(
-                            "Still waiting for response",
-                            request_id=request_id,
-                            elapsed_seconds=elapsed,
-                            has_request_log=request_log is not None,
-                        )
+                # Log progress every 10 seconds instead of every 5
+                elapsed = (datetime.now() - start_time).total_seconds()
+                if int(elapsed) % 10 == 0 and elapsed > 0:
+                    logger.debug(
+                        "Still waiting for response",
+                        request_id=request_id,
+                        elapsed_seconds=elapsed,
+                        has_request_log=request_log is not None,
+                        current_poll_interval=self.poll_intervals[
+                            current_interval_index
+                        ],
+                    )
 
             except Exception as e:
                 logger.warning(
@@ -153,10 +161,13 @@ class EventingStrategy(CommunicationStrategy):
                     error=str(e),
                 )
 
-            # Wait before next poll
-            import asyncio
+            # Progressive polling: start fast, then slow down
+            current_interval = self.poll_intervals[current_interval_index]
+            await asyncio.sleep(current_interval)
 
-            await asyncio.sleep(1.0)  # Increased from 0.5 to 1.0 seconds
+            # Move to next interval (but don't exceed the last one)
+            if current_interval_index < len(self.poll_intervals) - 1:
+                current_interval_index += 1
 
         logger.warning(
             "Timeout waiting for response via eventing", request_id=request_id
@@ -225,28 +236,43 @@ class DirectHttpStrategy(CommunicationStrategy):
         return session
 
     async def send_request(self, normalized_request: NormalizedRequest) -> bool:
-        """Send request via direct HTTP."""
+        """
+        Send request via direct HTTP.
+
+        Note: In direct HTTP mode, this method just validates the client is ready.
+        The actual request processing happens synchronously in the main flow.
+        """
         if not self.agent_client:
             logger.error("Agent client not initialized")
             return False
 
         logger.info(
-            "Request sent via direct HTTP",
+            "Direct HTTP mode: Request will be processed synchronously",
             request_id=normalized_request.request_id,
             session_id=normalized_request.session_id,
         )
-        return True  # Request will be processed synchronously
+        return True  # Client is ready, request will be processed synchronously
 
     async def wait_for_response(
         self, request_id: str, timeout: int, db: AsyncSession
     ) -> Optional[Dict[str, Any]]:
-        """Process request synchronously and return response."""
-        # This method should not be called in direct HTTP mode
-        # as the request is processed synchronously in the main flow
-        logger.warning(
-            "wait_for_response called in direct HTTP mode - this should not happen"
+        """
+        Wait for response in direct HTTP mode.
+
+        Note: This method should not be called in direct HTTP mode as requests
+        are processed synchronously. If called, it indicates a bug in the
+        request processing flow.
+        """
+        logger.error(
+            "BUG: wait_for_response called in direct HTTP mode",
+            request_id=request_id,
+            strategy="DirectHttpStrategy",
+            explanation="Direct HTTP mode processes requests synchronously, so this method should never be called",
         )
-        return None
+        raise RuntimeError(
+            "wait_for_response should not be called in direct HTTP mode. "
+            "This indicates a bug in the request processing flow."
+        )
 
     async def deliver_response(self, agent_response: AgentResponse) -> bool:
         """Deliver response via direct HTTP."""
@@ -524,46 +550,6 @@ class UnifiedRequestProcessor:
             request_log.agent_id = agent_response.agent_id
             request_log.processing_time_ms = agent_response.processing_time_ms
             request_log.completed_at = datetime.now(timezone.utc)
-
-            # Update session with current agent (if not already set)
-            if self.agent_client:
-                current_session = await self.agent_client.get_session(
-                    normalized_request.session_id
-                )
-                if current_session and not current_session.current_agent_id:
-                    # Convert agent UUID to agent name for session storage
-                    agent_name = agent_response.agent_id  # Use agent_id directly
-
-                    if agent_name:
-                        # Update session with the agent name via agent service
-                        await self.agent_client.update_session(
-                            session_id=normalized_request.session_id,
-                            session_update={"current_agent_id": agent_name},
-                        )
-            else:
-                # Fallback to direct database access for eventing mode
-                from .session_manager import SessionManager
-
-                session_manager = SessionManager(db)
-                current_session = await session_manager.get_session(
-                    normalized_request.session_id
-                )
-                if current_session and not current_session.current_agent_id:
-                    # Convert agent UUID to agent name for session storage
-                    agent_name = agent_response.agent_id  # Use agent_id directly
-
-                    if agent_name:
-                        # Update session with the agent name
-                        await session_manager.update_session(
-                            session_id=normalized_request.session_id,
-                            agent_id=agent_name,
-                        )
-                    logger.info(
-                        "Updated session with current agent",
-                        session_id=normalized_request.session_id,
-                        agent_name=agent_name,
-                        agent_uuid=agent_response.agent_id,
-                    )
 
             await db.commit()
 

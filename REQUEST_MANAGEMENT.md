@@ -145,7 +145,6 @@ GET  /health                          # Health check
 - `com.self-service-agent.request.failed`: Request processing failed
 
 ### Response Events
-- `com.self-service-agent.response.created`: Agent response generated
 - `com.self-service-agent.agent.response-ready`: Agent response ready for delivery
 - `com.self-service-agent.response.delivered`: Response delivered to integration
 

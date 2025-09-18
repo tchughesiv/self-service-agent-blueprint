@@ -686,7 +686,7 @@ class AgentService:
                 "created_at": response.created_at.isoformat(),
             }
 
-            # Use shared CloudEvent builder
+            # Use shared CloudEvent builder with correct event type
             builder = CloudEventBuilder("agent-service")
             event = builder.create_response_event(
                 event_data,
