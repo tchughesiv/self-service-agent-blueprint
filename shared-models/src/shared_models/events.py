@@ -103,7 +103,7 @@ class CloudEventProcessor:
 
     def __init__(self, service_name: str):
         self.service_name = service_name
-        self.builder = CloudEventBuilder(f"https://{service_name}.local", service_name)
+        self.builder = CloudEventBuilder(service_name, service_name)
         self.validator = CloudEventValidator()
 
     def process_request_event(self, event: CloudEvent) -> Optional[Dict[str, Any]]:
@@ -143,7 +143,7 @@ class CloudEventSender:
     def __init__(self, broker_url: str, service_name: str):
         self.broker_url = broker_url
         self.service_name = service_name
-        self.builder = CloudEventBuilder(f"https://{service_name}.local", service_name)
+        self.builder = CloudEventBuilder(service_name, service_name)
 
     async def send_request_event(
         self,

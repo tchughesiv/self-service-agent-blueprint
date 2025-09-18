@@ -148,7 +148,7 @@ class RequestManagerClient(ServiceClient):
 
     def __init__(self, base_url: Optional[str] = None, timeout: float = 30.0):
         url = base_url or os.getenv(
-            "REQUEST_MANAGER_URL", "http://self-service-agent-request-manager"
+            "REQUEST_MANAGER_URL", "http://self-service-agent-request-manager:80"
         )
         super().__init__(url, timeout)
 

@@ -32,7 +32,7 @@ spec:
   filter:
     attributes:
       type: com.self-service-agent.agent.response-ready
-      source: request-manager
+      source: https://request-manager.local
   subscriber:
     uri: http://{{ include "self-service-agent.fullname" . }}-integration-dispatcher.{{ .Release.Namespace }}.svc.cluster.local
   delivery:
