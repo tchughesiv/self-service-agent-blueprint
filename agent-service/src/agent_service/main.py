@@ -511,6 +511,28 @@ class AgentService:
                     request_id=request.request_id,
                 )
 
+        # Always update session with current agent ID to ensure session metadata is accurate
+        try:
+            session_manager = SessionManager(self.db_session)
+            await session_manager.update_session(
+                session_id=request.session_id,
+                agent_id=agent_response.agent_id,
+            )
+            logger.debug(
+                "Updated session with current agent",
+                session_id=request.session_id,
+                agent_id=agent_response.agent_id,
+                request_id=request.request_id,
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to update session with current agent",
+                session_id=request.session_id,
+                agent_id=agent_response.agent_id,
+                request_id=request.request_id,
+                error=str(e),
+            )
+
         return agent_response
 
     async def _determine_agent(self, request: NormalizedRequest) -> str:
