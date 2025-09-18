@@ -364,6 +364,9 @@ requestManagement:
     defaultAgentId: "routing-agent"
     # Agent response timeout in seconds
     timeout: 120
+    # Always refresh agent mapping from LlamaStack on each request
+    # Set to false for better performance, true for maximum reliability
+    alwaysRefreshMapping: true
 
   # Agent Service
   agentService:
@@ -427,6 +430,8 @@ requestManagement:
       slack:
         enabled: false
         # Slack credentials loaded from secrets
+      test:
+        enabled: false  # Enable/disable TEST integration
     
     # User defaults (auto-enabled based on service configuration)
     userDefaults:

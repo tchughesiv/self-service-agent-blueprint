@@ -162,6 +162,9 @@ spec:
               name: {{ $fullName }}-integration-secrets
               key: from-name
               optional: true
+        # Test Integration Configuration
+        - name: TEST_INTEGRATION_ENABLED
+          value: {{ if hasKey $context.Values.requestManagement.integrations.services "test" }}{{ $context.Values.requestManagement.integrations.services.test.enabled | default "true" | quote }}{{ else }}"true"{{ end }}
         # Integration User Defaults Configuration (auto-enabled based on health checks)
         {{- if hasKey $context.Values.requestManagement "integrations" }}
         {{- if hasKey $context.Values.requestManagement.integrations "userDefaults" }}

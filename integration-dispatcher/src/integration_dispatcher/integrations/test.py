@@ -1,6 +1,7 @@
 """Test integration handler for E2E testing."""
 
 import json
+import os
 from typing import Any, Dict
 
 from shared_models.models import DeliveryRequest, DeliveryStatus, UserIntegrationConfig
@@ -13,6 +14,7 @@ class TestIntegrationHandler(BaseIntegrationHandler):
 
     def __init__(self):
         super().__init__()
+        self.enabled = os.getenv("TEST_INTEGRATION_ENABLED", "true").lower() == "true"
 
     async def deliver(
         self,
@@ -64,8 +66,8 @@ class TestIntegrationHandler(BaseIntegrationHandler):
         return True
 
     async def health_check(self) -> bool:
-        """Test integration is always healthy."""
-        return True
+        """Test integration health check - configurable via environment."""
+        return self.enabled
 
     def get_required_config_fields(self) -> list[str]:
         """No required fields for test integration."""

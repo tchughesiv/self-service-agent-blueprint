@@ -56,6 +56,9 @@ class AgentConfig:
 
         self.default_agent_id = os.getenv("DEFAULT_AGENT_ID", "routing-agent")
         self.timeout = float(os.getenv("AGENT_TIMEOUT", "120"))
+        self.always_refresh_mapping = (
+            os.getenv("ALWAYS_REFRESH_AGENT_MAPPING", "true").lower() == "true"
+        )
 
 
 # NormalizedRequest is now imported from shared_models.models
@@ -620,9 +623,15 @@ class AgentService:
         # Use routing agent for all requests unless a specific target agent is provided
         agent_name = self.config.default_agent_id
 
-        # Always refresh agent mapping to ensure we have the latest agents from LlamaStack
-        logger.debug("Refreshing agent mapping for request", agent_name=agent_name)
-        await self._build_agent_mapping()
+        # Refresh agent mapping based on configuration
+        if self.always_refresh_mapping:
+            logger.debug("Refreshing agent mapping for request", agent_name=agent_name)
+            await self._build_agent_mapping()
+        elif len(self.agent_mapping.get_all_names()) == 0:
+            logger.debug(
+                "Refreshing empty agent mapping for request", agent_name=agent_name
+            )
+            await self._build_agent_mapping()
 
         # Resolve agent name to ID using simple conversion
         logger.debug(
