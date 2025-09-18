@@ -4,8 +4,9 @@
 from typing import Any, Dict, Optional
 
 import structlog
-from shared_models.models import RequestLog
-from sqlalchemy import select
+
+# RequestLog removed - Agent Service handles request/response logging
+# sqlalchemy.select removed - no longer needed after removing RequestLog operations
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .session_manager import SessionManager
@@ -110,32 +111,26 @@ class UnifiedResponseHandler:
                 error=str(e),
             )
 
-    async def _check_existing_response(self, request_id: str) -> Optional[RequestLog]:
-        """Check if a request already has a response."""
-        stmt = select(RequestLog).where(
-            RequestLog.request_id == request_id,
-            RequestLog.response_content.is_not(None),
+    async def _check_existing_response(self, request_id: str) -> Optional[None]:
+        """Check if a request already has a response.
+
+        Note: This method is deprecated as request/response logging
+        is now handled by the Agent Service.
+        """
+        logger.warning(
+            "Duplicate checking not supported - Agent Service handles request management",
+            request_id=request_id,
         )
-        result = await self.db.execute(stmt)
-        return result.scalar_one_or_none()
+        return None
 
     async def get_response_data(self, request_id: str) -> Optional[Dict[str, Any]]:
-        """Get response data for a request."""
-        stmt = select(RequestLog).where(RequestLog.request_id == request_id)
-        result = await self.db.execute(stmt)
-        request_log = result.scalar_one_or_none()
+        """Get response data for a request.
 
-        if not request_log or not request_log.response_content:
-            return None
-
-        return {
-            "agent_id": request_log.agent_id,
-            "content": request_log.response_content,
-            "metadata": request_log.response_metadata or {},
-            "processing_time_ms": request_log.processing_time_ms,
-            "completed_at": (
-                request_log.completed_at.isoformat()
-                if request_log.completed_at
-                else None
-            ),
-        }
+        Note: This method is deprecated as request/response logging
+        is now handled by the Agent Service.
+        """
+        logger.warning(
+            "Response data retrieval not supported - Agent Service handles request management",
+            request_id=request_id,
+        )
+        return None

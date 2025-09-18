@@ -2,7 +2,8 @@
 
 import os
 from abc import ABC, abstractmethod
-from datetime import datetime, timezone
+
+# datetime imports removed - no longer needed after removing RequestLog operations
 from typing import Any, Dict, Optional
 
 import structlog
@@ -10,8 +11,9 @@ from agent_service.schemas import SessionResponse
 from fastapi import HTTPException, status
 from shared_clients import get_agent_client, get_integration_dispatcher_client
 from shared_models import CloudEventSender, get_enum_value
-from shared_models.models import RequestLog
-from sqlalchemy import select
+
+# RequestLog removed - Agent Service handles request/response logging
+# sqlalchemy.select removed - no longer needed after removing RequestLog operations
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .normalizer import RequestNormalizer
@@ -100,79 +102,19 @@ class EventingStrategy(CommunicationStrategy):
     async def wait_for_response(
         self, request_id: str, timeout: int, db: AsyncSession
     ) -> Optional[Dict[str, Any]]:
-        """Wait for response by polling database (eventing mode) with optimized polling."""
-        import asyncio
-        from datetime import datetime, timedelta
+        """Wait for response via CloudEvents (eventing mode).
 
-        start_time = datetime.now()
-        end_time = start_time + timedelta(seconds=timeout)
-
-        # Optimized polling strategy: start fast, then slow down
-        current_interval_index = 0
-
-        logger.debug(
-            "Starting to wait for response",
-            request_id=request_id,
-            timeout=timeout,
-        )
-
-        while datetime.now() < end_time:
-            try:
-                # Use the existing database session instead of creating new ones
-                stmt = select(RequestLog).where(RequestLog.request_id == request_id)
-                result = await db.execute(stmt)
-                request_log = result.scalar_one_or_none()
-
-                if request_log and request_log.response_content:
-                    logger.info(
-                        "Response received via eventing",
-                        request_id=request_id,
-                        elapsed_seconds=(datetime.now() - start_time).total_seconds(),
-                    )
-                    return {
-                        "agent_id": request_log.agent_id,
-                        "content": request_log.response_content,
-                        "metadata": request_log.response_metadata or {},
-                        "processing_time_ms": request_log.processing_time_ms,
-                        "completed_at": (
-                            request_log.completed_at.isoformat()
-                            if request_log.completed_at
-                            else None
-                        ),
-                    }
-
-                # Log progress every 10 seconds instead of every 5
-                elapsed = (datetime.now() - start_time).total_seconds()
-                if int(elapsed) % 10 == 0 and elapsed > 0:
-                    logger.debug(
-                        "Still waiting for response",
-                        request_id=request_id,
-                        elapsed_seconds=elapsed,
-                        has_request_log=request_log is not None,
-                        current_poll_interval=self.poll_intervals[
-                            current_interval_index
-                        ],
-                    )
-
-            except Exception as e:
-                logger.warning(
-                    "Error polling for response",
-                    request_id=request_id,
-                    error=str(e),
-                )
-
-            # Progressive polling: start fast, then slow down
-            current_interval = self.poll_intervals[current_interval_index]
-            await asyncio.sleep(current_interval)
-
-            # Move to next interval (but don't exceed the last one)
-            if current_interval_index < len(self.poll_intervals) - 1:
-                current_interval_index += 1
-
+        Note: In eventing mode, responses come via CloudEvents, not database polling.
+        This method should not be used in eventing mode.
+        """
         logger.warning(
-            "Timeout waiting for response via eventing", request_id=request_id
+            "Database polling not supported in eventing mode - use CloudEvents instead",
+            request_id=request_id,
         )
-        return None
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="Sync requests not supported in eventing mode - use async requests instead",
+        )
 
     async def deliver_response(self, agent_response: AgentResponse) -> bool:
         """Deliver response via CloudEvent."""
@@ -352,18 +294,8 @@ class UnifiedRequestProcessor:
             request, session_id, current_agent_id
         )
 
-        # Log the request
-        request_log = RequestLog(
-            request_id=normalized_request.request_id,
-            session_id=session_id,
-            request_type=request.request_type,
-            request_content=request.content,
-            normalized_request=normalized_request.model_dump(mode="json"),
-            agent_id=normalized_request.target_agent_id,
-        )
-
-        db.add(request_log)
-        await db.commit()
+        # Note: Request logging is now handled by the Agent Service
+        # The Request Manager only manages sessions, not request/response logging
 
         # Increment request count via agent service
         logger.debug(
@@ -457,18 +389,8 @@ class UnifiedRequestProcessor:
             request, session_id, current_agent_id
         )
 
-        # Log the request
-        request_log = RequestLog(
-            request_id=normalized_request.request_id,
-            session_id=session_id,
-            request_type=request.request_type,
-            request_content=request.content,
-            normalized_request=normalized_request.model_dump(mode="json"),
-            agent_id=normalized_request.target_agent_id,
-        )
-
-        db.add(request_log)
-        await db.commit()
+        # Note: Request logging is now handled by the Agent Service
+        # The Request Manager only manages sessions, not request/response logging
 
         # Increment request count via agent service
         if self.agent_client:
@@ -487,9 +409,7 @@ class UnifiedRequestProcessor:
             import asyncio
 
             asyncio.create_task(
-                self._process_and_deliver_background(
-                    normalized_request, request_log, db
-                )
+                self._process_and_deliver_background(normalized_request, db)
             )
 
             logger.info(
@@ -528,9 +448,7 @@ class UnifiedRequestProcessor:
                 "message": "Request has been queued for processing",
             }
 
-    async def _process_and_deliver_background(
-        self, normalized_request, request_log, db
-    ):
+    async def _process_and_deliver_background(self, normalized_request, db):
         """Process request in background and deliver response."""
         try:
             # Process the request
@@ -544,14 +462,7 @@ class UnifiedRequestProcessor:
                 logger.error("Agent service failed to process request in background")
                 return
 
-            # Update request log with response
-            request_log.response_content = agent_response.content
-            request_log.response_metadata = agent_response.metadata
-            request_log.agent_id = agent_response.agent_id
-            request_log.processing_time_ms = agent_response.processing_time_ms
-            request_log.completed_at = datetime.now(timezone.utc)
-
-            await db.commit()
+            # Note: Request logging is now handled by the Agent Service
 
             # Deliver response via integration dispatcher
             delivery_success = await self.strategy.deliver_response(agent_response)
@@ -576,7 +487,7 @@ class UnifiedRequestProcessor:
         self, request, db: AsyncSession, timeout: int = 120
     ) -> Dict[str, Any]:
         """Process a request synchronously and wait for response."""
-        from datetime import datetime, timezone
+        # datetime imports removed - no longer needed after removing RequestLog operations
 
         normalizer = RequestNormalizer()
 
@@ -597,18 +508,8 @@ class UnifiedRequestProcessor:
             request, session_id, current_agent_id
         )
 
-        # Log the request
-        request_log = RequestLog(
-            request_id=normalized_request.request_id,
-            session_id=session_id,
-            request_type=request.request_type,
-            request_content=request.content,
-            normalized_request=normalized_request.model_dump(mode="json"),
-            agent_id=normalized_request.target_agent_id,
-        )
-
-        db.add(request_log)
-        await db.commit()
+        # Note: Request logging is now handled by the Agent Service
+        # The Request Manager only manages sessions, not request/response logging
 
         # Increment request count via agent service
         if self.agent_client:
@@ -623,17 +524,15 @@ class UnifiedRequestProcessor:
 
         # Handle different strategies
         if isinstance(self.strategy, EventingStrategy):
-            # Eventing mode: send event and wait for response
-            success = await self.strategy.send_request(normalized_request)
-            if not success:
-                raise Exception("Failed to send request event")
-
-            response_data = await self.strategy.wait_for_response(
-                normalized_request.request_id, timeout, db
+            # Eventing mode: sync requests not supported - use async instead
+            logger.warning(
+                "Sync requests not supported in eventing mode",
+                request_id=normalized_request.request_id,
             )
-
-            if not response_data:
-                raise Exception("Timeout waiting for response")
+            raise HTTPException(
+                status_code=status.HTTP_501_NOT_IMPLEMENTED,
+                detail="Sync requests not supported in eventing mode - use async requests instead",
+            )
 
         elif isinstance(self.strategy, DirectHttpStrategy):
             # Direct HTTP mode: process synchronously
@@ -648,14 +547,7 @@ class UnifiedRequestProcessor:
             # NOTE: Agent routing is now handled by the Agent Service
             # No additional routing logic needed in Request Manager
 
-            # Update request log with response
-            request_log.response_content = agent_response.content
-            request_log.response_metadata = agent_response.metadata
-            request_log.agent_id = agent_response.agent_id
-            request_log.processing_time_ms = agent_response.processing_time_ms
-            request_log.completed_at = datetime.now(timezone.utc)
-
-            await db.commit()
+            # Note: Request logging is now handled by the Agent Service
 
             # For sync requests, return response directly; for async requests, deliver via integration dispatcher
             if normalized_request.request_type.upper() != "SYNC":

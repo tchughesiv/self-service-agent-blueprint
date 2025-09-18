@@ -27,8 +27,6 @@ from shared_models import (
 from shared_models.models import (
     ErrorResponse,
     ProcessedEvent,
-    RequestLog,
-    RequestSession,
 )
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -399,58 +397,15 @@ async def get_request_status(
     db: AsyncSession = Depends(get_db_session_dependency),
     current_user: Optional[Dict[str, Any]] = Depends(get_current_user),
 ) -> Dict[str, Any]:
-    """Get request status and response by request ID."""
-    # Find the request log
-    stmt = select(RequestLog).where(RequestLog.request_id == request_id)
-    result = await db.execute(stmt)
-    request_log = result.scalar_one_or_none()
+    """Get request status and response by request ID.
 
-    if not request_log:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Request not found"
-        )
-
-    # Check if user has access to this request (via session)
-    session_stmt = select(RequestSession).where(
-        RequestSession.session_id == request_log.session_id
+    Note: Request logging is now handled by the Agent Service.
+    This endpoint is deprecated and should be redirected to the Agent Service.
+    """
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="Request status endpoint moved to Agent Service - use Agent Service API instead",
     )
-    session_result = await db.execute(session_stmt)
-    session = session_result.scalar_one_or_none()
-
-    if not session:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
-        )
-
-    # Verify user access (if authentication is enabled)
-    if current_user and current_user.get("user_id") != session.user_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Access denied"
-        )
-
-    # Return request status
-    response_data = {
-        "request_id": request_log.request_id,
-        "session_id": request_log.session_id,
-        "status": "completed" if request_log.response_content else "processing",
-        "created_at": (
-            request_log.created_at.isoformat() if request_log.created_at else None
-        ),
-        "completed_at": (
-            request_log.completed_at.isoformat() if request_log.completed_at else None
-        ),
-    }
-
-    # Include response content if available
-    if request_log.response_content:
-        response_data["response"] = {
-            "content": request_log.response_content,
-            "agent_id": request_log.agent_id,
-            "metadata": request_log.response_metadata or {},
-            "processing_time_ms": request_log.processing_time_ms,
-        }
-
-    return response_data
 
 
 @app.post("/api/v1/requests/slack")
@@ -740,67 +695,19 @@ async def _process_request_async_with_delivery(
 async def _wait_for_response(
     request_id: str, timeout: int, db: AsyncSession
 ) -> Dict[str, Any]:
-    """Wait for agent response by polling the database."""
-    import asyncio
-    from datetime import datetime, timedelta
+    """Wait for agent response via CloudEvents.
 
-    from shared_models.models import RequestLog
-    from sqlalchemy import select
-
-    start_time = datetime.now()
-    end_time = start_time + timedelta(seconds=timeout)
-
-    while datetime.now() < end_time:
-        # Use a fresh query with explicit session refresh to see committed changes
-        await db.rollback()  # Clear any pending transaction
-
-        # Check if response has been received
-        stmt = select(RequestLog).where(RequestLog.request_id == request_id)
-        result = await db.execute(stmt)
-        request_log = result.scalar_one_or_none()
-
-        if request_log:
-            logger.debug(
-                "Polling database for response",
-                request_id=request_id,
-                has_response_content=bool(request_log.response_content),
-                response_content_length=(
-                    len(request_log.response_content)
-                    if request_log.response_content
-                    else 0
-                ),
-                completed_at=request_log.completed_at,
-            )
-
-            if request_log.response_content:
-                logger.info(
-                    "Response received for synchronous request",
-                    request_id=request_id,
-                    elapsed_seconds=(datetime.now() - start_time).total_seconds(),
-                )
-                return {
-                    "agent_id": request_log.agent_id,
-                    "content": request_log.response_content,
-                    "metadata": request_log.response_metadata or {},
-                    "processing_time_ms": request_log.processing_time_ms,
-                    "completed_at": (
-                        request_log.completed_at.isoformat()
-                        if request_log.completed_at
-                        else None
-                    ),
-                }
-        else:
-            logger.debug(
-                "Request log not found yet",
-                request_id=request_id,
-                elapsed_seconds=(datetime.now() - start_time).total_seconds(),
-            )
-
-        # Wait before polling again
-        await asyncio.sleep(1)
-
-    # Timeout reached
-    raise asyncio.TimeoutError(f"No response received within {timeout} seconds")
+    Note: Database polling is no longer supported in eventing mode.
+    This function should not be used - responses come via CloudEvents.
+    """
+    logger.warning(
+        "Database polling not supported in eventing mode",
+        request_id=request_id,
+    )
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="Sync requests not supported in eventing mode - use async requests instead",
+    )
 
 
 async def _handle_agent_response_event(
@@ -1082,104 +989,12 @@ def _create_introduction_request(original_request, session):
 async def _resend_original_request_to_routed_agent(
     db: AsyncSession, original_request_id: str, session_id: str, routed_agent: str
 ) -> None:
-    """Re-send the original user request to the newly routed agent."""
-    try:
-        # Get the original request details and session info
-        stmt = select(RequestLog).where(RequestLog.request_id == original_request_id)
-        result = await db.execute(stmt)
-        original_request = result.scalar_one_or_none()
+    """Re-send the original user request to the newly routed agent.
 
-        if not original_request:
-            logger.error(
-                "Could not find original request to re-send",
-                original_request_id=original_request_id,
-            )
-            return
-
-        # Get session info to get user_id
-        session_stmt = select(RequestSession).where(
-            RequestSession.session_id == session_id
-        )
-        session_result = await db.execute(session_stmt)
-        session = session_result.scalar_one_or_none()
-
-        if not session:
-            logger.error(
-                "Could not find session for re-sending request",
-                session_id=session_id,
-            )
-            return
-
-        # Create a new request with the same content but targeting the routed agent
-        normalizer = RequestNormalizer()
-
-        # Create a dummy request object with the original content
-        class RoutedRequest:
-            def __init__(self, content: str, user_id: str):
-                self.content = content
-                self.user_id = user_id
-                self.timestamp = datetime.now(timezone.utc)
-
-        dummy_request = RoutedRequest(
-            content=original_request.request_content, user_id=session.user_id
-        )
-
-        # Use introduction message for routed agents (like chat.py does)
-        # Pass session info to ensure we have the correct integration_type
-        routed_request = _create_introduction_request(dummy_request, session)
-
-        # Normalize the request targeting the routed agent
-        normalized_request = normalizer.normalize_request(
-            routed_request, session_id, routed_agent
-        )
-
-        logger.info(
-            "Sending introduction request to routed agent",
-            original_request_id=original_request_id,
-            new_request_id=normalized_request.request_id,
-            session_id=session_id,
-            routed_agent=routed_agent,
-            original_content=original_request.request_content,
-            introduction_content=routed_request.content,
-        )
-
-        # Log the re-sent request
-        request_log = RequestLog(
-            request_id=normalized_request.request_id,
-            session_id=session_id,
-            request_type="ROUTED_REQUEST",
-            request_content=routed_request.content,
-            normalized_request=normalized_request.model_dump(mode="json"),
-            agent_id=normalized_request.target_agent_id,
-        )
-
-        db.add(request_log)
-        await db.commit()
-
-        # Send request event to broker (same as normal request processing)
-        broker_url = os.getenv("BROKER_URL", "http://knative-broker:8080")
-        event_sender = CloudEventSender(broker_url, "request-manager")
-
-        # Create request event data
-        request_event_data = normalized_request.model_dump(mode="json")
-        success = await event_sender.send_request_event(
-            request_event_data,
-            normalized_request.request_id,
-            normalized_request.user_id,
-            normalized_request.session_id,
-        )
-
-        if not success:
-            logger.error(
-                "Failed to publish routed request event",
-                request_id=normalized_request.request_id,
-            )
-
-    except Exception as e:
-        logger.error(
-            "Failed to re-send original request to routed agent",
-            original_request_id=original_request_id,
-            session_id=session_id,
-            routed_agent=routed_agent,
-            error=str(e),
-        )
+    Note: This function is deprecated as request management is now handled by the Agent Service.
+    """
+    logger.warning(
+        "Request re-sending not supported - Agent Service handles request management",
+        original_request_id=original_request_id,
+        routed_agent=routed_agent,
+    )

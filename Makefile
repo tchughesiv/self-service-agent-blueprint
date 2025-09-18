@@ -294,7 +294,7 @@ push-mcp-snow-image:
 
 # Code quality
 .PHONY: lint
-lint:
+lint: format
 	@echo "Running comprehensive linting on entire codebase..."
 	@echo "1. Running flake8 for code style and basic issues..."
 	uv run flake8 .
