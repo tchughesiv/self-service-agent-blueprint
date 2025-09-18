@@ -257,6 +257,12 @@ class IntegrationDefaultsService:
                 channel_id = None
                 if context:
                     channel_id = context.get("slack_channel")
+                    logger.info(
+                        "Found Slack channel in context",
+                        user_id=user_id,
+                        channel_id=channel_id,
+                        context=context,
+                    )
 
                 if not channel_id:
                     # For direct messages, we need to get the DM channel for the user
@@ -265,7 +271,7 @@ class IntegrationDefaultsService:
                     slack_config["slack_user_id"] = user_id
                     config["config"] = slack_config  # Update the config
                     logger.info(
-                        "Applied Slack user ID for DM lookup",
+                        "Applied Slack user ID for DM lookup (no channel in context)",
                         user_id=user_id,
                         config=slack_config,
                     )
@@ -273,10 +279,11 @@ class IntegrationDefaultsService:
                     slack_config = dict(config["config"])  # Create a mutable copy
                     slack_config["channel_id"] = channel_id
                     config["config"] = slack_config  # Update the config
-                    logger.debug(
+                    logger.info(
                         "Applied Slack channel context",
                         user_id=user_id,
                         channel_id=channel_id,
+                        config=slack_config,
                     )
 
             # Only include enabled integrations
