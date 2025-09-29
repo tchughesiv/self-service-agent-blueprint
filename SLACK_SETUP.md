@@ -29,7 +29,7 @@ The Slack integration provides two-way communication between users and the AI ag
 kubectl get route -n ${NAMESPACE:-default} | grep integration-dispatcher
 ```
 
-The URL will be: `https://self-service-agent-integration-dispatcher-${NAMESPACE}.${DOMAIN}`
+The URL will be: `https://ssa-integration-dispatcher-${NAMESPACE}.${DOMAIN}`
 
 ### Step 3: Configure Request URLs
 

@@ -254,14 +254,23 @@ define PRINT_INTEGRATION_DISPATCHER_URL
 		EXTERNAL_HOST=$$(kubectl get route $(INGRESS_PREFIX)-integration-dispatcher -n $(NAMESPACE) -o jsonpath='{.spec.host}'); \
 		echo "  OpenAPI Schema: https://$$EXTERNAL_HOST/openapi.json"; \
 		echo "  Health: https://$$EXTERNAL_HOST/health"; \
+		echo "  Slack Events: https://$$EXTERNAL_HOST/slack/events"; \
+		echo "  Slack Interactive: https://$$EXTERNAL_HOST/slack/interactive"; \
+		echo "  Slack Commands: https://$$EXTERNAL_HOST/slack/commands"; \
 	elif kubectl get ingress $(INGRESS_PREFIX)-integration-dispatcher -n $(NAMESPACE) >/dev/null 2>&1; then \
 		EXTERNAL_HOST=$$(kubectl get ingress $(INGRESS_PREFIX)-integration-dispatcher -n $(NAMESPACE) -o jsonpath='{.spec.rules[0].host}'); \
 		echo "  OpenAPI Schema: https://$$EXTERNAL_HOST/openapi.json"; \
 		echo "  Health: https://$$EXTERNAL_HOST/health"; \
+		echo "  Slack Events: https://$$EXTERNAL_HOST/slack/events"; \
+		echo "  Slack Interactive: https://$$EXTERNAL_HOST/slack/interactive"; \
+		echo "  Slack Commands: https://$$EXTERNAL_HOST/slack/commands"; \
 	else \
 		echo "  External access not configured - using cluster-internal URLs:"; \
 		echo "  OpenAPI Schema: http://$(MAIN_CHART_NAME)-integration-dispatcher.$(NAMESPACE).svc.cluster.local/openapi.json"; \
 		echo "  Health: http://$(MAIN_CHART_NAME)-integration-dispatcher.$(NAMESPACE).svc.cluster.local/health"; \
+		echo "  Slack Events: http://$(MAIN_CHART_NAME)-integration-dispatcher.$(NAMESPACE).svc.cluster.local/slack/events"; \
+		echo "  Slack Interactive: http://$(MAIN_CHART_NAME)-integration-dispatcher.$(NAMESPACE).svc.cluster.local/slack/interactive"; \
+		echo "  Slack Commands: http://$(MAIN_CHART_NAME)-integration-dispatcher.$(NAMESPACE).svc.cluster.local/slack/commands"; \
 	fi
 endef
 

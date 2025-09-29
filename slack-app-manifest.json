@@ -21,7 +21,7 @@
         "description": "Interact with the self-service agent",
         "usage_hint": "[your request or question]",
         "should_escape": false,
-        "url": "https://self-service-agent-integration-dispatcher-${NAMESPACE}.${DOMAIN}/slack/commands"
+        "url": "https://ssa-integration-dispatcher-${NAMESPACE}.${DOMAIN}/slack/commands"
       }
     ]
   },
@@ -45,7 +45,7 @@
   },
   "settings": {
     "event_subscriptions": {
-      "request_url": "https://self-service-agent-integration-dispatcher-${NAMESPACE}.${DOMAIN}/slack/events",
+      "request_url": "https://ssa-integration-dispatcher-${NAMESPACE}.${DOMAIN}/slack/events",
       "bot_events": [
         "message.im",
         "app_mention",
@@ -54,7 +54,7 @@
     },
     "interactivity": {
       "is_enabled": true,
-      "request_url": "https://self-service-agent-integration-dispatcher-${NAMESPACE}.${DOMAIN}/slack/interactive"
+      "request_url": "https://ssa-integration-dispatcher-${NAMESPACE}.${DOMAIN}/slack/interactive"
     },
     "org_deploy_enabled": false,
     "socket_mode_enabled": false,
