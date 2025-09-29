@@ -5,6 +5,7 @@ from pathlib import Path
 import httpx
 from llama_stack_client.lib.agents.agent import AgentUtils
 from llama_stack_client.types.shared.agent_config import ToolConfig, Toolgroup
+from llama_stack_client.types.shared_params.sampling_params import SamplingParams
 
 from .manager import Manager
 
@@ -35,6 +36,37 @@ def tool_config(agent) -> ToolConfig | None:
     if not agent.get("tool_choice"):
         return None
     return ToolConfig(tool_choice=agent["tool_choice"])
+
+
+def sampling_params(agent) -> SamplingParams | None:
+    """Extract and format sampling parameters from agent config using proper SamplingParams type."""
+    if not agent.get("sampling_params"):
+        return None
+
+    sampling_config = agent["sampling_params"]
+
+    # Strategy is required for SamplingParams, so check first
+    if "strategy" not in sampling_config:
+        return None
+
+    # Build the sampling parameters structure using proper SamplingParams type
+    sampling_params_dict: SamplingParams = {"strategy": sampling_config["strategy"]}
+
+    # Handle max_tokens
+    if "max_tokens" in sampling_config:
+        sampling_params_dict["max_tokens"] = sampling_config["max_tokens"]
+
+    # Handle repetition_penalty if present
+    if "repetition_penalty" in sampling_config:
+        sampling_params_dict["repetition_penalty"] = sampling_config[
+            "repetition_penalty"
+        ]
+
+    # Handle stop tokens if present
+    if "stop" in sampling_config:
+        sampling_params_dict["stop"] = sampling_config["stop"]
+
+    return sampling_params_dict
 
 
 class AgentManager(Manager):
@@ -84,11 +116,6 @@ class AgentManager(Manager):
             self.create_agent(agent)
 
     def create_agent(self, agent: dict):
-        # Build sampling_params from config if provided
-        sampling_params = None
-        if agent.get("sampling_params"):
-            sampling_params = agent["sampling_params"]
-
         # Get the model name
         model = self.model(agent)
 
@@ -111,7 +138,7 @@ class AgentManager(Manager):
             input_shields=agent["input_shields"],
             output_shields=agent["output_shields"],
             enable_session_persistence=agent["enable_session_persistence"],
-            sampling_params=sampling_params,
+            sampling_params=sampling_params(agent),
         )
         agent_config["name"] = agent["name"]
 
