@@ -9,6 +9,7 @@ VERSION ?= 0.0.2
 CONTAINER_TOOL ?= podman
 REGISTRY ?= quay.io/ecosystem-appeng
 PYTHON_VERSION ?= 3.12
+ARCH ?= linux/amd64
 AGENT_IMG ?= $(REGISTRY)/self-service-agent:$(VERSION)
 REQUEST_MGR_IMG ?= $(REGISTRY)/self-service-agent-request-manager:$(VERSION)
 AGENT_SERVICE_IMG ?= $(REGISTRY)/self-service-agent-service:$(VERSION)
@@ -196,14 +197,14 @@ help:
 # Build function: $(call build_image,IMAGE_NAME,DESCRIPTION,CONTAINERFILE_PATH,BUILD_CONTEXT)
 define build_image
 	@echo "Building $(2): $(1)"
-	$(CONTAINER_TOOL) build -t $(1) --platform=linux/amd64 $(if $(3),-f $(3),) $(4)
+	$(CONTAINER_TOOL) build -t $(1) --platform=$(ARCH) $(if $(3),-f $(3),) $(4)
 	@echo "Successfully built $(1)"
 endef
 
 # Template build function: $(call build_template_image,IMAGE_NAME,DESCRIPTION,SERVICE_NAME,MODULE_NAME,BUILD_CONTEXT)
 define build_template_image
 	@echo "Building $(2) using template: $(1)"
-	$(CONTAINER_TOOL) build -t $(1) --platform=linux/amd64 \
+	$(CONTAINER_TOOL) build -t $(1) --platform=$(ARCH) \
 		-f Containerfile.services-template \
 		--build-arg SERVICE_NAME=$(3) \
 		--build-arg MODULE_NAME=$(4) \
@@ -214,7 +215,7 @@ endef
 # MCP template build function: $(call build_mcp_image,IMAGE_NAME,DESCRIPTION,SERVICE_NAME,MODULE_NAME)
 define build_mcp_image
 	@echo "Building $(2) using MCP template: $(1)"
-	$(CONTAINER_TOOL) build -t $(1) --platform=linux/amd64 \
+	$(CONTAINER_TOOL) build -t $(1) --platform=$(ARCH) \
 		-f Containerfile.mcp-template \
 		--build-arg SERVICE_NAME=$(3) \
 		--build-arg MODULE_NAME=$(4) \
@@ -308,7 +309,7 @@ build-mcp-snow-image: check-lockfile-mcp-snow
 .PHONY: build-mock-eventing-image
 build-mock-eventing-image: check-lockfile-mock-eventing check-lockfile-shared-models
 	@echo "Building mock eventing service image using services template: $(MOCK_EVENTING_IMG)"
-	$(CONTAINER_TOOL) build -t $(MOCK_EVENTING_IMG) --platform=linux/amd64 \
+	$(CONTAINER_TOOL) build -t $(MOCK_EVENTING_IMG) --platform=$(ARCH) \
 		-f Containerfile.services-template \
 		--build-arg SERVICE_NAME=mock-eventing-service \
 		--build-arg MODULE_NAME=mock_eventing_service.main \

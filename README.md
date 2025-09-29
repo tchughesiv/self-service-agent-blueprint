@@ -131,6 +131,12 @@ make build-mcp-emp-info-image   # Build employee info MCP image
 make build-mcp-snow-image       # Build ServiceNow MCP image
 ```
 
+If you need to build images for ARM architecture, try:
+```bash
+make build-all-images REGISTRY=quay.io/<user> ARCH="linux/arm64"
+```
+In this case you also speficy to use some registry (not mandatory).
+
 #### Pushing Images
 
 ```bash
