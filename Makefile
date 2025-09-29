@@ -33,6 +33,7 @@ endif
 
 MAIN_CHART_NAME := self-service-agent
 TOLERATIONS_TEMPLATE=[{"key":"$(1)","effect":"NoSchedule","operator":"Exists"}]
+INGRESS_PREFIX := ssa
 
 # Slack Configuration - only when ENABLE_SLACK set to true
 ifeq ($(ENABLE_SLACK),true)
@@ -231,12 +232,12 @@ endef
 define PRINT_REQUEST_MANAGER_URL
 	@echo "--- Your Request Manager URLs are: ---"
 	@sleep 10
-	@if kubectl get route $(MAIN_CHART_NAME)-request-manager -n $(NAMESPACE) >/dev/null 2>&1; then \
-		EXTERNAL_HOST=$$(kubectl get route $(MAIN_CHART_NAME)-request-manager -n $(NAMESPACE) -o jsonpath='{.spec.host}'); \
+	@if kubectl get route $(INGRESS_PREFIX)-request-manager -n $(NAMESPACE) >/dev/null 2>&1; then \
+		EXTERNAL_HOST=$$(kubectl get route $(INGRESS_PREFIX)-request-manager -n $(NAMESPACE) -o jsonpath='{.spec.host}'); \
 		echo "  OpenAPI Schema: https://$$EXTERNAL_HOST/openapi.json"; \
 		echo "  Health: https://$$EXTERNAL_HOST/health"; \
-	elif kubectl get ingress $(MAIN_CHART_NAME)-request-manager -n $(NAMESPACE) >/dev/null 2>&1; then \
-		EXTERNAL_HOST=$$(kubectl get ingress $(MAIN_CHART_NAME)-request-manager -n $(NAMESPACE) -o jsonpath='{.spec.rules[0].host}'); \
+	elif kubectl get ingress $(INGRESS_PREFIX)-request-manager -n $(NAMESPACE) >/dev/null 2>&1; then \
+		EXTERNAL_HOST=$$(kubectl get ingress $(INGRESS_PREFIX)-request-manager -n $(NAMESPACE) -o jsonpath='{.spec.rules[0].host}'); \
 		echo "  OpenAPI Schema: https://$$EXTERNAL_HOST/openapi.json"; \
 		echo "  Health: https://$$EXTERNAL_HOST/health"; \
 	else \
@@ -249,12 +250,12 @@ endef
 define PRINT_INTEGRATION_DISPATCHER_URL
 	@echo "--- Your Integration Dispatcher URLs are: ---"
 	@sleep 10
-	@if kubectl get route $(MAIN_CHART_NAME)-integration-dispatcher -n $(NAMESPACE) >/dev/null 2>&1; then \
-		EXTERNAL_HOST=$$(kubectl get route $(MAIN_CHART_NAME)-integration-dispatcher -n $(NAMESPACE) -o jsonpath='{.spec.host}'); \
+	@if kubectl get route $(INGRESS_PREFIX)-integration-dispatcher -n $(NAMESPACE) >/dev/null 2>&1; then \
+		EXTERNAL_HOST=$$(kubectl get route $(INGRESS_PREFIX)-integration-dispatcher -n $(NAMESPACE) -o jsonpath='{.spec.host}'); \
 		echo "  OpenAPI Schema: https://$$EXTERNAL_HOST/openapi.json"; \
 		echo "  Health: https://$$EXTERNAL_HOST/health"; \
-	elif kubectl get ingress $(MAIN_CHART_NAME)-integration-dispatcher -n $(NAMESPACE) >/dev/null 2>&1; then \
-		EXTERNAL_HOST=$$(kubectl get ingress $(MAIN_CHART_NAME)-integration-dispatcher -n $(NAMESPACE) -o jsonpath='{.spec.rules[0].host}'); \
+	elif kubectl get ingress $(INGRESS_PREFIX)-integration-dispatcher -n $(NAMESPACE) >/dev/null 2>&1; then \
+		EXTERNAL_HOST=$$(kubectl get ingress $(INGRESS_PREFIX)-integration-dispatcher -n $(NAMESPACE) -o jsonpath='{.spec.rules[0].host}'); \
 		echo "  OpenAPI Schema: https://$$EXTERNAL_HOST/openapi.json"; \
 		echo "  Health: https://$$EXTERNAL_HOST/health"; \
 	else \
