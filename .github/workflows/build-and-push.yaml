@@ -50,6 +50,12 @@ jobs:
           username: ${{ secrets.QUAY_USERNAME }}
           password: ${{ secrets.QUAY_PASSWORD }}
 
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.6.17"
+          python-version: "3.12"
+
       - name: Build all Images
         run: |
           IFS=' ' read -ra VERSIONS <<< "${{ steps.version.outputs.versions }}"
