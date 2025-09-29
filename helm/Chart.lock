@@ -9,7 +9,7 @@ dependencies:
   repository: https://rh-ai-quickstart.github.io/ai-architecture-charts
   version: 0.2.18
 - name: mcp-servers
-  repository: https://rh-ai-quickstart.github.io/ai-architecture-charts
+  repository: file://charts/mcp-servers
   version: 0.1.0
-digest: sha256:67c33bf8764ad105d1120e6ec37d6c28f102a1fd7d22041dbfeca8c639b7b9dc
-generated: "2025-09-04T12:25:44.110990126+02:00"
+digest: sha256:2f8cffc0204889a80651534be30f72c8667b27d657ffe6fb6b50ebb288254f09
+generated: "2025-09-29T09:40:14.28420106-04:00"
