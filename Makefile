@@ -290,11 +290,11 @@ build-integration-dispatcher-image: check-lockfile-integration-dispatcher check-
 
 .PHONY: build-mcp-emp-info-image
 build-mcp-emp-info-image: check-lockfile-mcp-emp-info
-	$(call build_mcp_image,$(MCP_EMP_INFO_IMG),employee info MCP image,mcp-servers/employee-info,employee_info.main)
+	$(call build_mcp_image,$(MCP_EMP_INFO_IMG),employee info MCP image,mcp-servers/employee-info,employee_info.server)
 
 .PHONY: build-mcp-snow-image
 build-mcp-snow-image: check-lockfile-mcp-snow
-	$(call build_mcp_image,$(MCP_SNOW_IMG),snow MCP image,mcp-servers/snow,snow.main)
+	$(call build_mcp_image,$(MCP_SNOW_IMG),snow MCP image,mcp-servers/snow,snow.server)
 
 .PHONY: build-mock-eventing-image
 build-mock-eventing-image: check-lockfile-mock-eventing check-lockfile-shared-models
@@ -736,7 +736,9 @@ define helm_install_common
 		$(if $(filter true,$(SLACK_ENABLED)),--set security.slack.signingSecret=$(SLACK_SIGNING_SECRET) --set security.slack.botToken=$(SLACK_BOT_TOKEN),) \
 		--set image.registry=$(REGISTRY) \
 		--set mcp-servers.mcp-servers.self-service-agent-employee-info.imageRepository=$(REGISTRY)/self-service-agent-employee-info-mcp \
+		--set mcp-servers.mcp-servers.self-service-agent-employee-info.imageTag=$(VERSION) \
 		--set mcp-servers.mcp-servers.self-service-agent-snow.imageRepository=$(REGISTRY)/self-service-agent-snow-mcp \
+		--set mcp-servers.mcp-servers.self-service-agent-snow.imageTag=$(VERSION) \
 		$(REQUEST_MANAGEMENT_ARGS) \
 		$(LOG_LEVEL_ARGS) \
 		$(if $(filter-out "",$(2)),$(2),) \

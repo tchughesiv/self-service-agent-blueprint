@@ -7,7 +7,6 @@ ARG MODULE_NAME
 FROM registry.access.redhat.com/ubi9/python-312:latest as builder
 
 USER root
-RUN dnf update -y && dnf clean all
 RUN pip3 install --no-cache-dir uv
 
 WORKDIR /app
@@ -32,7 +31,7 @@ COPY ${SERVICE_NAME}/pyproject.toml ./
 
 # Set environment variables
 ENV PATH="/app/.venv/bin:$PATH"
-ENV PYTHONPATH="/app/src"
+ENV PYTHONPATH="/app/src:$PYTHONPATH"
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
@@ -43,7 +42,7 @@ ENV MODULE_NAME=${MODULE_NAME}
 USER 1001
 
 # Expose port (MCP servers typically use different ports)
-EXPOSE 8080
+EXPOSE 8000
 
 # Run the MCP server
-CMD python -m $MODULE_NAME
+CMD python src/$(echo $MODULE_NAME | sed 's/\./\//').py
