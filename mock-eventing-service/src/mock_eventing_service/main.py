@@ -207,7 +207,7 @@ async def initialize_default_subscriptions():
     try:
         # Get the service name from environment
         service_name = os.getenv("SERVICE_NAME", "self-service-agent")
-        namespace = os.getenv("NAMESPACE", "tommy")
+        namespace = os.getenv("NAMESPACE", "default")
 
         # Default subscriptions that should always exist
         default_subscriptions = [

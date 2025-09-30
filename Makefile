@@ -752,8 +752,15 @@ define helm_install_common
 		$(LOG_LEVEL_ARGS) \
 		$(if $(filter-out "",$(2)),$(2),) \
 		$(EXTRA_HELM_ARGS)
-	@echo "Waiting for services to deploy $(1)..."
-	@eval $(3)
+	@echo "Waiting for main chart deployment..."
+	@kubectl rollout status deploy/$(MAIN_CHART_NAME) -n $(NAMESPACE) --timeout 10m
+	@echo "Waiting for request manager deployment..."
+	@kubectl rollout status deploy/$(MAIN_CHART_NAME)-request-manager -n $(NAMESPACE) --timeout 10m
+	@echo "Waiting for integration dispatcher deployment..."
+	@kubectl rollout status deploy/$(MAIN_CHART_NAME)-integration-dispatcher -n $(NAMESPACE) --timeout 10m
+	@echo "Waiting for agent service deployment..."
+	@kubectl rollout status deploy/$(MAIN_CHART_NAME)-agent-service -n $(NAMESPACE) --timeout 10m
+	$(if $(filter true,$(3)),@echo "Waiting for mock eventing deployment..." && kubectl rollout status deploy/$(MAIN_CHART_NAME)-mock-eventing -n $(NAMESPACE) --timeout 5m,)
 	@echo "$(MAIN_CHART_NAME) $(1) installed successfully"
 	$(PRINT_REQUEST_MANAGER_URL)
 	$(PRINT_INTEGRATION_DISPATCHER_URL)
@@ -764,7 +771,7 @@ endef
 helm-install-dev: namespace helm-depend
 	$(call helm_install_common,"with direct HTTP communication - development",\
 		"",\
-		"kubectl rollout status deploy/$(MAIN_CHART_NAME) -n $(NAMESPACE) --timeout 10m")
+		false)
 
 # Install with mock eventing service (testing/CI mode)
 .PHONY: helm-install-test
@@ -772,14 +779,14 @@ helm-install-test: namespace helm-depend
 	$(call helm_install_common,"with mock eventing service - testing/CI",\
 		--set requestManagement.knative.mockEventing.enabled=true \
 		--set testIntegrationEnabled=true,\
-		"kubectl rollout status deploy/$(MAIN_CHART_NAME) -n $(NAMESPACE) --timeout 10m && kubectl rollout status deploy/$(MAIN_CHART_NAME)-mock-eventing -n $(NAMESPACE) --timeout 5m")
+		true)
 
 # Install with full Knative eventing (production mode)
 .PHONY: helm-install-prod
 helm-install-prod: namespace helm-depend
 	$(call helm_install_common,"with full Knative eventing - production",\
 		--set requestManagement.knative.eventing.enabled=true,\
-		"kubectl rollout status deploy/$(MAIN_CHART_NAME) -n $(NAMESPACE) --timeout 20m")
+		false)
 
 # Uninstall the deployment and clean up
 .PHONY: helm-uninstall
