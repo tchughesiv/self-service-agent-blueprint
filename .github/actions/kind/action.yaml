@@ -28,13 +28,6 @@ runs:
       run: bash ./scripts/ci/kind-with-registry.sh
       shell: bash
 
-    - name: Helm install Toolhive CRDs
-      run: |
-        helm repo add toolhive https://stacklok.github.io/toolhive
-        helm repo update
-        helm install toolhive-crds toolhive/toolhive-operator-crds --version 0.0.24
-      shell: bash
-
     - name: Helm Depend
       run: make helm-depend
       shell: bash
