@@ -909,34 +909,34 @@ class AgentService:
 
             # Get database session for responses session manager
             db_manager = get_database_manager()
-            db = db_manager.get_session()
 
-            # Create responses session manager
-            session_manager = ResponsesSessionManager(
-                user_id=request.user_id,
-                db=db,
-            )
+            async with db_manager.get_session() as db:
+                # Create responses session manager
+                session_manager = ResponsesSessionManager(
+                    db_session=db,
+                    user_id=request.user_id,
+                )
 
-            # Process the message using responses mode
-            response_content = await session_manager.handle_responses_message(
-                text=request.content,
-                request_manager_session_id=request.session_id,
-            )
+                # Process the message using responses mode
+                response_content = await session_manager.handle_responses_message(
+                    text=request.content,
+                    request_manager_session_id=request.session_id,
+                )
 
-            # Return response in AgentResponse format
-            return AgentResponse(
-                request_id=request.request_id,
-                session_id=request.session_id,
-                user_id=request.user_id,
-                agent_id=session_manager.current_agent_name or "responses",
-                content=response_content,
-                response_type="message",
-                metadata={},
-                processing_time_ms=0,  # TODO: Calculate actual processing time
-                requires_followup=False,
-                followup_actions=[],
-                created_at=datetime.now(timezone.utc),
-            )
+                # Return response in AgentResponse format
+                return AgentResponse(
+                    request_id=request.request_id,
+                    session_id=request.session_id,
+                    user_id=request.user_id,
+                    agent_id=session_manager.current_agent_name or "responses",
+                    content=response_content,
+                    response_type="message",
+                    metadata={},
+                    processing_time_ms=0,  # TODO: Calculate actual processing time
+                    requires_followup=False,
+                    followup_actions=[],
+                    created_at=datetime.now(timezone.utc),
+                )
 
         except Exception as e:
             logger.error(
@@ -1189,18 +1189,7 @@ async def handle_direct_request(request: Request, stream: bool = False):
         )
 
         # Create a normalized request for processing
-        from shared_models.models import NormalizedRequest
-
-        normalized_request = NormalizedRequest(
-            request_id=request_data.get("request_id"),
-            session_id=request_data.get("session_id"),
-            user_id=request_data.get("user_id"),
-            content=request_data.get("content", ""),
-            integration_type=request_data.get("integration_type", "CLI"),
-            request_type=request_data.get("request_type", "message"),
-            target_agent_id=request_data.get("target_agent_id"),
-            metadata=request_data.get("metadata", {}),
-        )
+        normalized_request = _create_normalized_request_from_data(request_data)
 
         if stream:
             # Return streaming response
@@ -1303,6 +1292,28 @@ async def handle_cloudevent(request: Request) -> Dict[str, Any]:
         )
 
 
+def _create_normalized_request_from_data(
+    request_data: Dict[str, Any],
+) -> NormalizedRequest:
+    """Create a NormalizedRequest from request data with proper defaults."""
+    return NormalizedRequest(
+        request_id=request_data.get("request_id", "unknown"),
+        session_id=request_data.get("session_id", "unknown"),
+        user_id=request_data.get("user_id", "unknown"),
+        integration_type=request_data.get("integration_type", "CLI"),
+        request_type=request_data.get("request_type", "general"),
+        content=request_data.get("content", ""),
+        integration_context=request_data.get("integration_context", {}),
+        user_context=request_data.get("user_context", {}),
+        target_agent_id=request_data.get("target_agent_id"),
+        requires_routing=request_data.get("requires_routing", True),
+        use_responses=request_data.get("use_responses", False),
+        created_at=datetime.fromisoformat(
+            request_data.get("created_at", datetime.now().isoformat())
+        ),
+    )
+
+
 async def _handle_request_event_from_data(
     event_data: Dict[str, Any], agent_service: AgentService
 ) -> Dict[str, Any]:
@@ -1313,21 +1324,7 @@ async def _handle_request_event_from_data(
 
         # Parse normalized request with proper error handling
         try:
-            request = NormalizedRequest(
-                request_id=request_data.get("request_id", "unknown"),
-                session_id=request_data.get("session_id", "unknown"),
-                user_id=request_data.get("user_id", "unknown"),
-                integration_type=request_data.get("integration_type", "CLI"),
-                request_type=request_data.get("request_type", "general"),
-                content=request_data.get("content", ""),
-                integration_context=request_data.get("integration_context", {}),
-                user_context=request_data.get("user_context", {}),
-                target_agent_id=request_data.get("target_agent_id"),
-                requires_routing=request_data.get("requires_routing", True),
-                created_at=datetime.fromisoformat(
-                    request_data.get("created_at", datetime.now().isoformat())
-                ),
-            )
+            request = _create_normalized_request_from_data(request_data)
 
             logger.debug(
                 "Created NormalizedRequest",
@@ -1415,28 +1412,28 @@ async def _handle_responses_request_event_from_data(
 
         # Get database session
         db_manager = get_database_manager()
-        db = db_manager.get_session()
 
-        # Create responses session manager
-        session_manager = ResponsesSessionManager(
-            user_id=user_id,
-            db=db,
-            user_email=user_email,
-        )
+        async with db_manager.get_session() as db:
+            # Create responses session manager
+            session_manager = ResponsesSessionManager(
+                db_session=db,
+                user_id=user_id,
+                user_email=user_email,
+            )
 
-        # Process the message using responses mode
-        response_content = await session_manager.handle_responses_message(
-            text=message,
-            request_manager_session_id=request_manager_session_id,
-            session_name=session_name,
-        )
+            # Process the message using responses mode
+            response_content = await session_manager.handle_responses_message(
+                text=message,
+                request_manager_session_id=request_manager_session_id,
+                session_name=session_name,
+            )
 
-        # Get current agent name for response metadata
-        current_agent_name = session_manager.current_agent_name or "responses"
-        current_thread_id = session_manager.get_current_thread_id()
+            # Get current agent name for response metadata
+            current_agent_name = session_manager.current_agent_name or "responses"
+            current_thread_id = session_manager.get_current_thread_id()
 
-        # Clean up the session manager
-        await session_manager.close()
+            # Clean up the session manager
+            await session_manager.close()
 
         # Return response in the expected format
         return {

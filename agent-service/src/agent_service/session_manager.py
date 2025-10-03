@@ -169,6 +169,7 @@ class ResponsesSessionManager(BaseSessionManager):
         self.conversation_session = None
         self.agent_manager = None
         self.agents = []
+        self.request_manager_session_id = None
 
         self._initialize_conversation_state()
 
@@ -202,6 +203,10 @@ class ResponsesSessionManager(BaseSessionManager):
             return "Error: Responses mode not available"
 
         try:
+            # Store the request manager session ID for database updates
+            if request_manager_session_id:
+                self.request_manager_session_id = request_manager_session_id
+
             logger.debug(
                 f"Handling responses message - user_id: {self.user_id}, message_preview: {text[:100]}, request_manager_session_id: {request_manager_session_id}, session_name: {session_name}, has_current_session: {bool(self.current_session)}, current_agent: {self.current_agent_name}"
             )
@@ -331,7 +336,9 @@ class ResponsesSessionManager(BaseSessionManager):
             )
 
             await self._update_database_session_state(
-                self.ROUTING_AGENT_NAME, session.thread_id
+                self.ROUTING_AGENT_NAME,
+                session.thread_id,
+                self.request_manager_session_id,
             )
 
             logger.info(
@@ -422,7 +429,10 @@ class ResponsesSessionManager(BaseSessionManager):
 
         # Extract parameters from kwargs
         resume_thread_id = kwargs.get("resume_thread_id")
-        authoritative_user_id = kwargs.get("authoritative_user_id", self.user_email)
+        # Use user_id as authoritative_user_id for employee lookup, fallback to user_email if available
+        authoritative_user_id = kwargs.get(
+            "authoritative_user_id", self.user_id or self.user_email
+        )
 
         # Use provided thread_id for resumption or generate a new one
         if resume_thread_id:
@@ -702,7 +712,9 @@ class ResponsesSessionManager(BaseSessionManager):
                 thread_id=session.thread_id,
             )
 
-            await self._update_database_session_state(agent_name, session.thread_id)
+            await self._update_database_session_state(
+                agent_name, session.thread_id, self.request_manager_session_id
+            )
 
             # Send the message to the new agent
             logger.debug(
@@ -735,7 +747,9 @@ class ResponsesSessionManager(BaseSessionManager):
             )
             return f"Error: {str(e)}"
 
-    async def _update_database_session_state(self, agent_name: str, thread_id: str):
+    async def _update_database_session_state(
+        self, agent_name: str, thread_id: str, session_id: str = None
+    ):
         """Update the database with current session state."""
         try:
             logger.debug(
@@ -743,17 +757,23 @@ class ResponsesSessionManager(BaseSessionManager):
                 user_id=self.user_id,
                 agent_name=agent_name,
                 thread_id=thread_id,
+                session_id=session_id,
             )
 
-            # Find the user's active session
-            stmt = (
-                select(RequestSession)
-                .where(
-                    RequestSession.user_id == self.user_id,
-                    RequestSession.status == SessionStatus.ACTIVE.value,
+            # Find the specific session if session_id provided, otherwise find user's most recent active session
+            if session_id:
+                stmt = select(RequestSession).where(
+                    RequestSession.session_id == session_id
                 )
-                .order_by(RequestSession.last_request_at.desc())
-            )
+            else:
+                stmt = (
+                    select(RequestSession)
+                    .where(
+                        RequestSession.user_id == self.user_id,
+                        RequestSession.status == SessionStatus.ACTIVE.value,
+                    )
+                    .order_by(RequestSession.last_request_at.desc())
+                )
 
             result = await self.db_session.execute(stmt)
             session = result.scalar_one_or_none()
