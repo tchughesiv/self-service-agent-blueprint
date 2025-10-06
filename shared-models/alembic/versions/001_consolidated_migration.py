@@ -107,7 +107,7 @@ def upgrade() -> None:
             # Additional fields from migration 003
             sa.Column("external_session_id", sa.String(length=255), nullable=True),
             sa.Column("current_agent_id", sa.String(length=255), nullable=True),
-            sa.Column("llama_stack_session_id", sa.String(length=255), nullable=True),
+            sa.Column("conversation_thread_id", sa.String(length=255), nullable=True),
             sa.Column("user_context", sa.JSON(), nullable=True),
             sa.Column("conversation_context", sa.JSON(), nullable=True),
             sa.Column("last_request_id", sa.String(length=36), nullable=True),
