@@ -31,6 +31,9 @@ class LoggingConfig:
 
     def configure_basic_logging(self) -> None:
         """Configure basic Python logging."""
+        # Explicitly set root logger level to ensure it takes effect
+        logging.getLogger().setLevel(self.log_level)
+
         logging.basicConfig(
             level=self.log_level,
             format="%(message)s",

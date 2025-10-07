@@ -7,6 +7,11 @@ from datetime import datetime, timezone
 from typing import Any, Dict, NewType, Optional
 
 import httpx
+from asset_manager.token_counter import (
+    count_tokens_from_messages,
+    count_tokens_from_response,
+    estimate_tokens_from_text,
+)
 from cloudevents.http import CloudEvent, to_structured
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from llama_stack_client import LlamaStackClient
@@ -118,6 +123,66 @@ class AgentService:
         reset_commands = ["reset", "clear", "restart", "new session"]
         return content_lower in reset_commands
 
+    async def _store_tokens_and_create_response(
+        self,
+        request: NormalizedRequest,
+        input_tokens: int,
+        output_tokens: int,
+        model: str,
+        agent_id: str,
+        content: str,
+        response_type: str = "message",
+        metadata: dict = None,
+        processing_time_ms: int = 0,
+        requires_followup: bool = False,
+        followup_actions: list = None,
+    ) -> AgentResponse:
+        """Store token usage and create AgentResponse with token information."""
+        from shared_models import get_database_manager
+
+        from .session_token_counter import SessionTokenCounter
+
+        # Store token usage in session database if we have valid counts
+        if input_tokens > 0 or output_tokens > 0:
+            db_manager = get_database_manager()
+            async with db_manager.get_session() as db:
+                token_counter = SessionTokenCounter(db, request.session_id)
+                await token_counter.add_tokens(
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    model=model,
+                    request_id=request.request_id,
+                    agent_id=agent_id,
+                )
+
+        # Create AgentResponse with token information
+        return AgentResponse(
+            request_id=request.request_id,
+            session_id=request.session_id,
+            user_id=request.user_id,
+            agent_id=agent_id,
+            content=content,
+            response_type=response_type,
+            metadata=metadata or {},
+            processing_time_ms=processing_time_ms,
+            requires_followup=requires_followup,
+            followup_actions=followup_actions or [],
+            created_at=datetime.now(timezone.utc),
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=input_tokens + output_tokens,
+            model=model,
+        )
+
+    def _is_tokens_command(self, content: str) -> bool:
+        """Check if the content is a tokens command."""
+        if not content:
+            return False
+
+        content_lower = content.strip().lower()
+        tokens_commands = ["**tokens**", "tokens", "token stats", "usage stats"]
+        return content_lower in tokens_commands
+
     async def _handle_reset_command(self, request: NormalizedRequest) -> AgentResponse:
         """Handle reset command by clearing the session."""
         try:
@@ -170,6 +235,74 @@ class AgentService:
                 agent_id="system",
                 content="Failed to reset session. Please try again.",
                 response_type="message",
+                metadata={},
+                processing_time_ms=0,
+                requires_followup=False,
+                followup_actions=[],
+                created_at=datetime.now(timezone.utc),
+            )
+
+    async def _handle_tokens_command(self, request: NormalizedRequest) -> AgentResponse:
+        """Handle tokens command by fetching session-scoped token statistics."""
+        try:
+            from shared_models import get_database_manager
+
+            from .session_token_counter import SessionTokenCounter
+
+            # Get database session for token counting
+            db_manager = get_database_manager()
+
+            async with db_manager.get_session() as db:
+                # Get session-scoped token statistics
+                token_counter = SessionTokenCounter(db, request.session_id)
+                stats = await token_counter.get_session_stats()
+
+                # Format the response similar to the original chat.py
+                token_summary = f"TOKEN_SUMMARY:INPUT:{stats.total_input_tokens}:OUTPUT:{stats.total_output_tokens}:TOTAL:{stats.total_tokens}:CALLS:{stats.call_count}:MAX_SINGLE_INPUT:{stats.max_input_tokens}:MAX_SINGLE_OUTPUT:{stats.max_output_tokens}:MAX_SINGLE_TOTAL:{stats.max_total_tokens}"
+
+                logger.info(
+                    "Session token statistics retrieved",
+                    request_id=request.request_id,
+                    session_id=request.session_id,
+                    total_tokens=stats.total_tokens,
+                    call_count=stats.call_count,
+                )
+
+            return AgentResponse(
+                request_id=request.request_id,
+                session_id=request.session_id,
+                user_id=request.user_id,
+                agent_id="system",
+                content=token_summary,
+                response_type="tokens",
+                metadata={
+                    "total_input_tokens": stats.total_input_tokens,
+                    "total_output_tokens": stats.total_output_tokens,
+                    "total_tokens": stats.total_tokens,
+                    "call_count": stats.call_count,
+                    "max_input_tokens": stats.max_input_tokens,
+                    "max_output_tokens": stats.max_output_tokens,
+                    "max_total_tokens": stats.max_total_tokens,
+                },
+                processing_time_ms=0,
+                requires_followup=False,
+                followup_actions=[],
+                created_at=datetime.now(timezone.utc),
+            )
+
+        except Exception as e:
+            logger.error(
+                "Failed to get token statistics",
+                error=str(e),
+                request_id=request.request_id,
+            )
+            return AgentResponse(
+                request_id=request.request_id,
+                session_id=request.session_id,
+                user_id=request.user_id,
+                agent_id="system",
+                content="Failed to retrieve token statistics. Please try again.",
+                response_type="error",
                 metadata={},
                 processing_time_ms=0,
                 requires_followup=False,
@@ -379,12 +512,14 @@ class AgentService:
         self, request: NormalizedRequest, skip_routing: bool = False
     ) -> AgentResponse:
         """Core request processing logic shared between process_request and _process_request_direct."""
-        start_time = datetime.now(timezone.utc)
-
         try:
-            # Check for reset command first (works for all integrations)
+            # Check for reset command first
             if not skip_routing and self._is_reset_command(request.content):
                 return await self._handle_reset_command(request)
+
+            # Check for tokens command
+            if not skip_routing and self._is_tokens_command(request.content):
+                return await self._handle_tokens_command(request)
 
             # Publish processing started event for user notification (only for main requests)
             if not skip_routing:
@@ -399,135 +534,8 @@ class AgentService:
                 )
                 return await self._handle_responses_mode_request(request)
 
-            # Determine which agent to use for traditional agent mode
-            agent_id = await self._determine_agent(request)
-            logger.info(
-                "Agent determined for request",
-                request_id=request.request_id,
-                target_agent_id=request.target_agent_id,
-                resolved_agent_id=agent_id,
-            )
-
-            # Handle session management (increment request count) for both eventing and direct HTTP modes
-            await self._handle_session_management(
-                request.session_id, request.request_id
-            )
-
-            # Get or create LlamaStack session for this specific agent
-            llama_stack_session_id = await self._get_or_create_llama_stack_session(
-                RequestManagerSessionId(request.session_id), AgentId(agent_id)
-            )
-
-            # Send message to agent
-            messages = [{"role": "user", "content": request.content}]
-
-            # Get full agent configuration to ensure all settings are applied
-            agent = self.client.agents.retrieve(agent_id)
-            agent_config = agent.agent_config
-
-            # Debug logging for agent configuration
-            logger.info(
-                "Agent configuration retrieved",
-                agent_id=agent_id,
-                agent_name=agent.name if hasattr(agent, "name") else "unknown",
-                toolgroups=(
-                    agent_config.toolgroups
-                    if hasattr(agent_config, "toolgroups")
-                    else None
-                ),
-                tool_choice=(
-                    getattr(agent_config.tool_config, "tool_choice", None)
-                    if hasattr(agent_config, "tool_config") and agent_config.tool_config
-                    else None
-                ),
-                sampling_params=(
-                    agent_config.sampling_params
-                    if hasattr(agent_config, "sampling_params")
-                    else None
-                ),
-            )
-
-            # Use streaming agent turns (required by LlamaStack)
-            turn_params = {
-                "agent_id": agent_id,
-                "session_id": llama_stack_session_id,
-                "messages": messages,
-                "stream": True,  # Enable streaming
-            }
-
-            # Pass only the supported turn.create parameters
-            if agent_config.toolgroups:
-                logger.info(
-                    "Adding toolgroups to turn params",
-                    agent_id=agent_id,
-                    toolgroups=agent_config.toolgroups,
-                )
-                turn_params["toolgroups"] = agent_config.toolgroups
-            else:
-                logger.info(
-                    "No toolgroups found for agent",
-                    agent_id=agent_id,
-                )
-
-            response_stream = self.client.agents.turn.create(**turn_params)
-
-            # Use shared stream processor
-            from shared_clients.stream_processor import LlamaStackStreamProcessor
-
-            stream_result = await LlamaStackStreamProcessor.process_stream(
-                response_stream,
-                collect_content=True,
-            )
-
-            content = stream_result["content"]
-            tool_calls_made = stream_result["tool_calls_made"]
-            errors = stream_result["errors"]
-            chunk_count = stream_result["chunk_count"]
-
-            if errors:
-                logger.error("Stream processing errors", errors=errors)
-
-            # If no content collected, provide error message instead of stream object
-            if not content:
-                content = f"No response content received from agent (processed {chunk_count} chunks). This may indicate the agent didn't complete its turn or the stream format has changed."
-                logger.warning(
-                    "No content collected from stream",
-                    chunk_count=chunk_count,
-                    message="Check if agent completed its turn successfully",
-                )
-
-            # Log tool calls for monitoring (Strategy 3 only)
-            if tool_calls_made:
-                logger.info(
-                    "Tools called during agent processing",
-                    agent_id=agent_id,
-                    tool_calls=tool_calls_made,
-                )
-
-            # Calculate processing time
-            processing_time = int(
-                (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
-            )
-
-            # Create initial response
-            agent_response = AgentResponse(
-                request_id=request.request_id,
-                session_id=request.session_id,
-                user_id=request.user_id,  # Include user_id from the request
-                agent_id=agent_id,
-                content=content,
-                processing_time_ms=processing_time,
-                created_at=datetime.now(timezone.utc),
-            )
-
-            # Handle agent routing detection if needed (only for main requests)
-            if not skip_routing:
-                final_response = await self._handle_agent_routing(
-                    agent_response, request
-                )
-                return final_response
-            else:
-                return agent_response
+            # Handle traditional agent mode request
+            return await self._handle_traditional_mode_request(request, skip_routing)
 
         except Exception as e:
             logger.error(
@@ -900,10 +908,205 @@ class AgentService:
             db=None,  # Will create its own database session
         )
 
+    async def _process_with_llamastack(
+        self, agent_id: str, messages: list, session_id: str
+    ) -> dict:
+        """Process request with LlamaStack and return stream result."""
+        # Get full agent configuration to ensure all settings are applied
+        agent = self.client.agents.retrieve(agent_id)
+        agent_config = agent.agent_config
+
+        # Simplified agent configuration logging
+        logger.info(
+            "Agent configuration retrieved",
+            agent_id=agent_id,
+            agent_name=getattr(agent, "name", "unknown"),
+        )
+
+        # Use streaming agent turns (required by LlamaStack)
+        turn_params = {
+            "agent_id": agent_id,
+            "session_id": await self._get_or_create_llama_stack_session(
+                RequestManagerSessionId(session_id), AgentId(agent_id)
+            ),
+            "messages": messages,
+            "stream": True,  # Enable streaming
+        }
+
+        # Add toolgroups if available
+        if agent_config.toolgroups:
+            logger.info(
+                "Adding toolgroups to turn params",
+                agent_id=agent_id,
+                toolgroups=agent_config.toolgroups,
+            )
+            turn_params["toolgroups"] = agent_config.toolgroups
+        else:
+            logger.info("No toolgroups found for agent", agent_id=agent_id)
+
+        response_stream = self.client.agents.turn.create(**turn_params)
+
+        # Use shared stream processor
+        from shared_clients.stream_processor import LlamaStackStreamProcessor
+
+        stream_result = await LlamaStackStreamProcessor.process_stream(
+            response_stream,
+            collect_content=True,
+        )
+
+        # Extract content and metadata from stream
+        content = stream_result["content"]
+        tool_calls_made = stream_result["tool_calls_made"]
+        errors = stream_result["errors"]
+        chunk_count = stream_result["chunk_count"]
+        token_usage = stream_result.get("token_usage", {})
+        final_response = stream_result.get("final_response")
+
+        if errors:
+            logger.error("Stream processing errors", errors=errors)
+
+        # If no content collected, provide error message instead of stream object
+        if not content:
+            content = f"No response content received from agent (processed {chunk_count} chunks). This may indicate the agent didn't complete its turn or the stream format has changed."
+            logger.warning(
+                "No content collected from stream",
+                chunk_count=chunk_count,
+                message="Check if agent completed its turn successfully",
+            )
+
+        # Log tool calls for monitoring (Strategy 3 only)
+        if tool_calls_made:
+            logger.info(
+                "Tools called during agent processing",
+                agent_id=agent_id,
+                tool_calls=tool_calls_made,
+            )
+
+        return {
+            "content": content,
+            "tool_calls_made": tool_calls_made,
+            "chunk_count": chunk_count,
+            "errors": errors,
+            "token_usage": token_usage,
+            "final_response": final_response,
+        }
+
+    async def _extract_and_store_tokens(
+        self,
+        final_response,
+        token_usage: dict,
+        messages: list,
+        request: NormalizedRequest,
+    ) -> tuple[int, int]:
+        """Extract token counts and return input_tokens, output_tokens."""
+        input_tokens = 0
+        output_tokens = 0
+
+        # Try to extract token usage from the final response object
+        if final_response:
+            input_tokens, output_tokens = count_tokens_from_response(
+                response=final_response,
+                model=token_usage.get("model"),
+                context=f"request-{request.request_id}",
+                input_messages=messages,
+            )
+
+            # Fallback to stream data if no tokens found in response object
+            if input_tokens == 0 and output_tokens == 0:
+                if token_usage.get("input_tokens") or token_usage.get("output_tokens"):
+                    input_tokens = token_usage.get("input_tokens", 0)
+                    output_tokens = token_usage.get("output_tokens", 0)
+        else:
+            # Use stream data if no final response object available
+            if token_usage.get("input_tokens") or token_usage.get("output_tokens"):
+                input_tokens = token_usage.get("input_tokens", 0)
+                output_tokens = token_usage.get("output_tokens", 0)
+
+        return input_tokens, output_tokens
+
+    async def _handle_traditional_mode_request(
+        self, request: NormalizedRequest, skip_routing: bool = False
+    ) -> AgentResponse:
+        """Handle traditional agent mode requests with LlamaStack streaming."""
+        start_time = datetime.now(timezone.utc)
+
+        try:
+            # Determine which agent to use for traditional agent mode
+            agent_id = await self._determine_agent(request)
+            logger.info(
+                "Agent determined for request",
+                request_id=request.request_id,
+                target_agent_id=request.target_agent_id,
+                resolved_agent_id=agent_id,
+            )
+
+            # Handle session management (increment request count) for both eventing and direct HTTP modes
+            await self._handle_session_management(
+                request.session_id, request.request_id
+            )
+
+            # Send message to agent
+            messages = [{"role": "user", "content": request.content}]
+
+            # Process with LlamaStack
+            stream_result = await self._process_with_llamastack(
+                agent_id=agent_id,
+                messages=messages,
+                session_id=request.session_id,
+            )
+
+            # Calculate processing time
+            processing_time = int(
+                (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
+            )
+
+            # Extract token usage
+            input_tokens, output_tokens = await self._extract_and_store_tokens(
+                stream_result["final_response"],
+                stream_result["token_usage"],
+                messages,
+                request,
+            )
+
+            # Store token usage and create response
+            agent_response = await self._store_tokens_and_create_response(
+                request=request,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                model=stream_result["token_usage"].get("model"),
+                agent_id=agent_id,
+                content=stream_result["content"],
+                response_type="message",
+                metadata={
+                    "tool_calls_made": stream_result["tool_calls_made"],
+                    "chunk_count": stream_result["chunk_count"],
+                    "errors": stream_result["errors"],
+                },
+                processing_time_ms=processing_time,
+            )
+
+            # Handle agent routing detection if needed (only for main requests)
+            if not skip_routing:
+                final_response = await self._handle_agent_routing(
+                    agent_response, request
+                )
+                return final_response
+            else:
+                return agent_response
+
+        except Exception as e:
+            logger.error(
+                "Failed to process traditional mode request",
+                error=str(e),
+                request_id=request.request_id,
+            )
+            raise
+
     async def _handle_responses_mode_request(
         self, request: NormalizedRequest
     ) -> AgentResponse:
         """Handle responses mode requests using LangGraph session manager."""
+        start_time = datetime.now(timezone.utc)
         try:
             from shared_models import get_database_manager
 
@@ -923,19 +1126,29 @@ class AgentService:
                     request_manager_session_id=request.session_id,
                 )
 
-                # Return response in AgentResponse format
-                return AgentResponse(
-                    request_id=request.request_id,
-                    session_id=request.session_id,
-                    user_id=request.user_id,
+                # Calculate processing time
+                processing_time = int(
+                    (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
+                )
+
+                # Extract and store token usage for responses mode
+                # Use asset_manager token counting functions directly for responses mode
+                # Calculate tokens directly using asset_manager functions
+                input_messages = [{"role": "user", "content": request.content}]
+                input_tokens = count_tokens_from_messages(input_messages)
+                output_tokens = estimate_tokens_from_text(response_content)
+
+                # Store token usage and create response
+                return await self._store_tokens_and_create_response(
+                    request=request,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    model=None,  # Model not available from LangGraph responses
                     agent_id=session_manager.current_agent_name or "responses",
                     content=response_content,
                     response_type="message",
                     metadata={},
-                    processing_time_ms=0,  # TODO: Calculate actual processing time
-                    requires_followup=False,
-                    followup_actions=[],
-                    created_at=datetime.now(timezone.utc),
+                    processing_time_ms=processing_time,
                 )
 
         except Exception as e:
@@ -1359,6 +1572,7 @@ async def _handle_request_event_from_data(
         if agent_service.config.eventing_enabled:
             logger.debug("Eventing enabled - publishing response")
             success = await agent_service.publish_response(response)
+
         else:
             logger.debug("Skipping response event publishing - eventing disabled")
 
@@ -1393,6 +1607,7 @@ async def _handle_responses_request_event_from_data(
     event_data: Dict[str, Any], agent_service: AgentService
 ) -> Dict[str, Any]:
     """Handle responses request CloudEvent using pre-parsed event data."""
+    start_time = datetime.now(timezone.utc)
     try:
         # Extract event data using common utility
         request_data = CloudEventHandler.extract_event_data(event_data)
@@ -1446,7 +1661,9 @@ async def _handle_responses_request_event_from_data(
                     "session_type": "responses_api",
                     "thread_id": current_thread_id,
                 },
-                "processing_time_ms": 0,  # TODO: Calculate actual processing time
+                "processing_time_ms": int(
+                    (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
+                ),
                 "requires_followup": False,
                 "followup_actions": [],
             },
