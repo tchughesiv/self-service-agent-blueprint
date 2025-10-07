@@ -243,49 +243,45 @@ define push_image
 	@echo "Successfully pushed $(1)"
 endef
 
-define PRINT_REQUEST_MANAGER_URL
-	@echo "--- Your Request Manager URLs are: ---"
-	@sleep 10
-	@if kubectl get route $(INGRESS_PREFIX)-request-manager -n $(NAMESPACE) >/dev/null 2>&1; then \
-		EXTERNAL_HOST=$$(kubectl get route $(INGRESS_PREFIX)-request-manager -n $(NAMESPACE) -o jsonpath='{.spec.host}'); \
-		echo "  OpenAPI Schema: https://$$EXTERNAL_HOST/openapi.json"; \
-		echo "  Health: https://$$EXTERNAL_HOST/health"; \
-	elif kubectl get ingress $(INGRESS_PREFIX)-request-manager -n $(NAMESPACE) >/dev/null 2>&1; then \
-		EXTERNAL_HOST=$$(kubectl get ingress $(INGRESS_PREFIX)-request-manager -n $(NAMESPACE) -o jsonpath='{.spec.rules[0].host}'); \
-		echo "  OpenAPI Schema: https://$$EXTERNAL_HOST/openapi.json"; \
-		echo "  Health: https://$$EXTERNAL_HOST/health"; \
-	else \
-		echo "  External access not configured - using cluster-internal URLs:"; \
-		echo "  OpenAPI Schema: http://$(MAIN_CHART_NAME)-request-manager.$(NAMESPACE).svc.cluster.local/openapi.json"; \
-		echo "  Health: http://$(MAIN_CHART_NAME)-request-manager.$(NAMESPACE).svc.cluster.local/health"; \
+# Generic function to get external host for a service
+define GET_EXTERNAL_HOST
+	if kubectl get route $(1) -n $(NAMESPACE) >/dev/null 2>&1; then \
+		kubectl get route $(1) -n $(NAMESPACE) -o jsonpath='{.spec.host}'; \
+	elif kubectl get ingress $(1) -n $(NAMESPACE) >/dev/null 2>&1; then \
+		kubectl get ingress $(1) -n $(NAMESPACE) -o jsonpath='{.spec.rules[0].host}'; \
 	fi
 endef
 
-define PRINT_INTEGRATION_DISPATCHER_URL
-	@echo "--- Your Integration Dispatcher URLs are: ---"
+# Generic function to print service URLs
+define PRINT_SERVICE_URLS
+	@echo "--- Your $(1) URLs are: ---"
 	@sleep 10
-	@if kubectl get route $(INGRESS_PREFIX)-integration-dispatcher -n $(NAMESPACE) >/dev/null 2>&1; then \
-		EXTERNAL_HOST=$$(kubectl get route $(INGRESS_PREFIX)-integration-dispatcher -n $(NAMESPACE) -o jsonpath='{.spec.host}'); \
-		echo "  OpenAPI Schema: https://$$EXTERNAL_HOST/openapi.json"; \
+	@EXTERNAL_HOST=$$($(call GET_EXTERNAL_HOST,$(2))); \
+	if [ -n "$$EXTERNAL_HOST" ]; then \
+		echo "  OpenAPI Schema: https://$$EXTERNAL_HOST/docs"; \
 		echo "  Health: https://$$EXTERNAL_HOST/health"; \
-		echo "  Slack Events: https://$$EXTERNAL_HOST/slack/events"; \
-		echo "  Slack Interactive: https://$$EXTERNAL_HOST/slack/interactive"; \
-		echo "  Slack Commands: https://$$EXTERNAL_HOST/slack/commands"; \
-	elif kubectl get ingress $(INGRESS_PREFIX)-integration-dispatcher -n $(NAMESPACE) >/dev/null 2>&1; then \
-		EXTERNAL_HOST=$$(kubectl get ingress $(INGRESS_PREFIX)-integration-dispatcher -n $(NAMESPACE) -o jsonpath='{.spec.rules[0].host}'); \
-		echo "  OpenAPI Schema: https://$$EXTERNAL_HOST/openapi.json"; \
-		echo "  Health: https://$$EXTERNAL_HOST/health"; \
-		echo "  Slack Events: https://$$EXTERNAL_HOST/slack/events"; \
-		echo "  Slack Interactive: https://$$EXTERNAL_HOST/slack/interactive"; \
-		echo "  Slack Commands: https://$$EXTERNAL_HOST/slack/commands"; \
+		$(3) \
 	else \
 		echo "  External access not configured - using cluster-internal URLs:"; \
-		echo "  OpenAPI Schema: http://$(MAIN_CHART_NAME)-integration-dispatcher.$(NAMESPACE).svc.cluster.local/openapi.json"; \
-		echo "  Health: http://$(MAIN_CHART_NAME)-integration-dispatcher.$(NAMESPACE).svc.cluster.local/health"; \
+		echo "  OpenAPI Schema: http://$(MAIN_CHART_NAME)-$(4).$(NAMESPACE).svc.cluster.local/docs"; \
+		echo "  Health: http://$(MAIN_CHART_NAME)-$(4).$(NAMESPACE).svc.cluster.local/health"; \
+		$(5) \
+	fi
+endef
+
+define PRINT_REQUEST_MANAGER_URL
+	$(call PRINT_SERVICE_URLS,Request Manager,$(INGRESS_PREFIX)-request-manager,,request-manager,)
+endef
+
+define PRINT_INTEGRATION_DISPATCHER_URL
+	$(call PRINT_SERVICE_URLS,Integration Dispatcher,$(INGRESS_PREFIX)-integration-dispatcher, \
+		echo "  Slack Events: https://$$EXTERNAL_HOST/slack/events"; \
+		echo "  Slack Interactive: https://$$EXTERNAL_HOST/slack/interactive"; \
+		echo "  Slack Commands: https://$$EXTERNAL_HOST/slack/commands";, \
+		integration-dispatcher, \
 		echo "  Slack Events: http://$(MAIN_CHART_NAME)-integration-dispatcher.$(NAMESPACE).svc.cluster.local/slack/events"; \
 		echo "  Slack Interactive: http://$(MAIN_CHART_NAME)-integration-dispatcher.$(NAMESPACE).svc.cluster.local/slack/interactive"; \
-		echo "  Slack Commands: http://$(MAIN_CHART_NAME)-integration-dispatcher.$(NAMESPACE).svc.cluster.local/slack/commands"; \
-	fi
+		echo "  Slack Commands: http://$(MAIN_CHART_NAME)-integration-dispatcher.$(NAMESPACE).svc.cluster.local/slack/commands";)
 endef
 
 # Build container images
