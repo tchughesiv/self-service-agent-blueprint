@@ -337,40 +337,10 @@ def upgrade() -> None:
         sa.UniqueConstraint("integration_type", name="uq_integration_default_type"),
     )
 
-    # Create session_token_usage table for token tracking
-    op.create_table(
-        "session_token_usage",
-        sa.Column("id", sa.Integer(), nullable=False),
-        sa.Column("session_id", sa.String(length=36), nullable=False),
-        sa.Column("input_tokens", sa.Integer(), nullable=False, default=0),
-        sa.Column("output_tokens", sa.Integer(), nullable=False, default=0),
-        sa.Column("total_tokens", sa.Integer(), nullable=False, default=0),
-        sa.Column("model", sa.String(length=255), nullable=True),
-        sa.Column("request_id", sa.String(length=36), nullable=False),
-        sa.Column("agent_id", sa.String(length=255), nullable=True),
-        sa.Column("created_at", postgresql.TIMESTAMP(timezone=True), nullable=False),
-        sa.Column("updated_at", postgresql.TIMESTAMP(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(
-            ["session_id"],
-            ["request_sessions.session_id"],
-            name=op.f("fk_session_token_usage_session_id_request_sessions"),
-        ),
-        sa.PrimaryKeyConstraint("id", name=op.f("pk_session_token_usage")),
-    )
-
-    # Create indexes for session_token_usage table
-    op.create_index(
-        "ix_session_token_usage_session_id", "session_token_usage", ["session_id"]
-    )
-    op.create_index(
-        "ix_session_token_usage_request_id", "session_token_usage", ["request_id"]
-    )
-
 
 def downgrade() -> None:
     """Downgrade database schema."""
     # Drop tables in reverse order
-    op.drop_table("session_token_usage")
     op.drop_table("integration_default_configs")
     op.drop_table("processed_events")
     op.drop_table("delivery_logs")

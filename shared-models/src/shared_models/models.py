@@ -140,33 +140,6 @@ class RequestLog(Base, TimestampMixin):
     session = relationship("RequestSession", back_populates="request_logs")
 
 
-class SessionTokenUsage(Base, TimestampMixin):
-    """Token usage tracking per session."""
-
-    __tablename__ = "session_token_usage"
-
-    id = Column(Integer, primary_key=True)
-    session_id = Column(
-        String(36),
-        ForeignKey("request_sessions.session_id"),
-        nullable=False,
-        index=True,
-    )
-
-    # Token usage details
-    input_tokens = Column(Integer, nullable=False, default=0)
-    output_tokens = Column(Integer, nullable=False, default=0)
-    total_tokens = Column(Integer, nullable=False, default=0)
-    model = Column(String(255))
-
-    # Request context
-    request_id = Column(String(36), nullable=False, index=True)
-    agent_id = Column(String(255))
-
-    # Relationships
-    session = relationship("RequestSession")
-
-
 # Integration Dispatcher Models
 class UserIntegrationConfig(Base, TimestampMixin):
     """Per-user integration configuration."""
@@ -365,20 +338,6 @@ class AgentResponse(BaseModel):
     requires_followup: bool = Field(default=False)
     followup_actions: List[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-    # Token usage information
-    input_tokens: Optional[int] = Field(
-        default=None, description="Number of input tokens used"
-    )
-    output_tokens: Optional[int] = Field(
-        default=None, description="Number of output tokens generated"
-    )
-    total_tokens: Optional[int] = Field(
-        default=None, description="Total tokens used (input + output)"
-    )
-    model: Optional[str] = Field(
-        default=None, description="Model used for this response"
-    )
 
 
 # Shared Pydantic models for inter-service communication

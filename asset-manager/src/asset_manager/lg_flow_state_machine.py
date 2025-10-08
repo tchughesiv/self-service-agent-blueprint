@@ -116,6 +116,7 @@ class StateMachine:
         authoritative_user_id: str,
         allowed_tools: list = None,
         action_config: dict = None,
+        token_context: str = None,
     ) -> dict:
         """Build kwargs for create_response_with_retry.
 
@@ -160,6 +161,10 @@ class StateMachine:
         # Add allowed_tools if specified
         if allowed_tools is not None:
             response_kwargs["allowed_tools"] = allowed_tools
+
+        # Add token_context if specified
+        if token_context is not None:
+            response_kwargs["token_context"] = token_context
 
         return response_kwargs
 
@@ -241,7 +246,12 @@ class StateMachine:
             return text
 
     def process_llm_processor_state(
-        self, state: dict, state_config: dict, agent, authoritative_user_id: str = None
+        self,
+        state: dict,
+        state_config: dict,
+        agent,
+        authoritative_user_id: str = None,
+        token_context: str = None,
     ) -> tuple[dict, str]:
         """Process llm_processor type states - completely generic and configuration-driven.
 
@@ -294,8 +304,14 @@ class StateMachine:
         allowed_tools = state_config.get("allowed_tools")
 
         # Build kwargs for create_response_with_retry
+        # Use token_context parameter passed from ConversationSession
         response_kwargs = self._build_response_kwargs(
-            state, state_config, temperature, authoritative_user_id, allowed_tools
+            state,
+            state_config,
+            temperature,
+            authoritative_user_id,
+            allowed_tools,
+            token_context=token_context,
         )
 
         response = agent.create_response_with_retry(
@@ -649,7 +665,12 @@ class StateMachine:
         return state
 
     def process_intent_classifier_state(
-        self, state: dict, state_config: dict, agent, authoritative_user_id: str = None
+        self,
+        state: dict,
+        state_config: dict,
+        agent,
+        authoritative_user_id: str = None,
+        token_context: str = None,
     ) -> tuple[dict, str]:
         """Process intent_classifier type states.
 
@@ -685,7 +706,12 @@ class StateMachine:
 
         # Build kwargs for create_response_with_retry
         response_kwargs = self._build_response_kwargs(
-            state, state_config, temperature, authoritative_user_id, allowed_tools
+            state,
+            state_config,
+            temperature,
+            authoritative_user_id,
+            allowed_tools,
+            token_context=token_context,
         )
 
         intent_response = (
@@ -732,6 +758,7 @@ class StateMachine:
                         authoritative_user_id,
                         action_allowed_tools,
                         action_config=action,
+                        token_context=token_context,
                     )
 
                     response = agent.create_response_with_retry(
@@ -761,7 +788,12 @@ class StateMachine:
         return state, "end"
 
     def process_llm_validator_state(
-        self, state: dict, state_config: dict, agent, authoritative_user_id: str = None
+        self,
+        state: dict,
+        state_config: dict,
+        agent,
+        authoritative_user_id: str = None,
+        token_context: str = None,
     ) -> tuple[dict, str]:
         """Process llm_validator type states (like laptop selection validation).
 
@@ -800,7 +832,12 @@ class StateMachine:
 
         # Build kwargs for create_response_with_retry
         response_kwargs = self._build_response_kwargs(
-            state, state_config, temperature, authoritative_user_id, allowed_tools
+            state,
+            state_config,
+            temperature,
+            authoritative_user_id,
+            allowed_tools,
+            token_context=token_context,
         )
 
         response = agent.create_response_with_retry(
@@ -819,7 +856,12 @@ class StateMachine:
 
         # Build kwargs for validation response
         validation_kwargs = self._build_response_kwargs(
-            state, state_config, 0.1, authoritative_user_id, allowed_tools
+            state,
+            state_config,
+            0.1,
+            authoritative_user_id,
+            allowed_tools,
+            token_context=token_context,
         )
 
         validation_response = (
@@ -858,7 +900,11 @@ class StateMachine:
         return state, "end"
 
     def process_state(
-        self, state: dict, agent, authoritative_user_id: str = None
+        self,
+        state: dict,
+        agent,
+        authoritative_user_id: str = None,
+        token_context: str = None,
     ) -> tuple[dict, str]:
         """Process the current state based on its configuration.
 
@@ -875,15 +921,15 @@ class StateMachine:
 
         if state_type == "llm_processor":
             return self.process_llm_processor_state(
-                state, state_config, agent, authoritative_user_id
+                state, state_config, agent, authoritative_user_id, token_context
             )
         elif state_type == "intent_classifier":
             return self.process_intent_classifier_state(
-                state, state_config, agent, authoritative_user_id
+                state, state_config, agent, authoritative_user_id, token_context
             )
         elif state_type == "llm_validator":
             return self.process_llm_validator_state(
-                state, state_config, agent, authoritative_user_id
+                state, state_config, agent, authoritative_user_id, token_context
             )
         elif state_type == "terminal":
             return self.process_terminal_state(state, state_config)
@@ -947,6 +993,9 @@ class ConversationSession:
 
         # Thread configuration for this session
         self.thread_config = {"configurable": {"thread_id": self.thread_id}}
+
+        # Store current token context for this session
+        self.current_token_context = None
 
     def _create_graph(self):
         """Create the LangGraph workflow with one node per YAML state."""
@@ -1022,7 +1071,10 @@ class ConversationSession:
                     else:
                         # Process the state and get next node
                         updated_state, next_node = self.state_machine.process_state(
-                            state, self.agent, self.authoritative_user_id
+                            state,
+                            self.agent,
+                            self.authoritative_user_id,
+                            self.current_token_context,
                         )
                         # Return Command with routing information
                         return Command(goto=next_node, update=updated_state)
@@ -1085,13 +1137,14 @@ class ConversationSession:
             )
             return ""
 
-    def send_message(self, message: str) -> str:
+    def send_message(self, message: str, token_context: Optional[str] = None) -> str:
         """
         Send a message to the agent and return the response.
         Uses checkpointed thread state for persistence across process restarts.
 
         Args:
             message: The user message to send to the agent
+            token_context: Optional context for token counting (e.g., "session_123")
 
         Returns:
             The agent's response message as a string
@@ -1145,6 +1198,10 @@ class ConversationSession:
                     # Mark this kickoff message as already processed so waiting nodes don't consume it
                     initial_state["_last_processed_human_count"] = 1
 
+                # Store token_context for access during processing
+                if token_context:
+                    self.current_token_context = token_context
+
                 result = self.app.invoke(initial_state, config=self.thread_config)
             else:
                 # Existing conversation - add user message and continue
@@ -1153,6 +1210,10 @@ class ConversationSession:
                     "messages": [HumanMessage(content=message)],
                     "_consumed_this_invoke": False,  # Reset flag so first waiting node can consume
                 }
+
+                # Store token_context for access during processing
+                if token_context:
+                    self.current_token_context = token_context
 
                 result = self.app.invoke(user_input, config=self.thread_config)
 

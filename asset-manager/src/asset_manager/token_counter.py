@@ -106,8 +106,13 @@ class TokenCounter:
         """Get token statistics, optionally filtered by context"""
         with self._stats_lock:
             if context:
-                return self._context_stats.get(context, TokenStats())
+                # Return context-specific stats if they exist, otherwise empty stats
+                if context in self._context_stats:
+                    return self._context_stats[context]
+                else:
+                    return TokenStats()  # Empty stats for non-existent contexts
             else:
+                # Return global stats (no context requested)
                 return TokenStats(
                     total_input_tokens=self._stats.total_input_tokens,
                     total_output_tokens=self._stats.total_output_tokens,
