@@ -1,0 +1,68 @@
+# Test environment overrides
+# Use this file for CI/CD pipelines and general testing (not performance testing)
+# Usage: helm install my-release ./helm -f values-test.yaml
+
+environment:
+  type: "test"
+
+# Moderate resource requirements for general testing (not performance testing)
+requestManagement:
+  requestManager:
+    # No resource overrides - let Kubernetes handle resource allocation
+    healthChecks:
+      # Test environment - moderately conservative for CI stability
+      livenessProbe:
+        initialDelaySeconds: 15     # Moderate for test infrastructure
+        periodSeconds: 30
+        timeoutSeconds: 8           # Moderate timeout for test nodes
+        failureThreshold: 4         # Moderate failures allowed
+      readinessProbe:
+        initialDelaySeconds: 8      # Moderate for test infrastructure
+        periodSeconds: 12           # Moderate frequency
+        timeoutSeconds: 5           # Moderate timeout for test nodes
+        failureThreshold: 4         # Moderate failures allowed
+      startupProbe:
+        initialDelaySeconds: 3      # Moderate start for test
+        periodSeconds: 3            # Moderate frequency
+        timeoutSeconds: 8           # Moderate timeout for test nodes
+        failureThreshold: 20        # 1 minute total startup time
+
+  integrationDispatcher:
+    # No resource overrides - let Kubernetes handle resource allocation
+    healthChecks:
+      # Test environment - moderately conservative for CI stability
+      livenessProbe:
+        initialDelaySeconds: 12     # Moderate for test infrastructure
+        periodSeconds: 30
+        timeoutSeconds: 8           # Moderate timeout for test nodes
+        failureThreshold: 4         # Moderate failures allowed
+      readinessProbe:
+        initialDelaySeconds: 6      # Moderate for test infrastructure
+        periodSeconds: 12           # Moderate frequency
+        timeoutSeconds: 5           # Moderate timeout for test nodes
+        failureThreshold: 4         # Moderate failures allowed
+      startupProbe:
+        initialDelaySeconds: 2      # Moderate start for test
+        periodSeconds: 3            # Moderate frequency
+        timeoutSeconds: 8           # Moderate timeout for test nodes
+        failureThreshold: 15        # 45 seconds total startup time
+
+  agentService:
+    # No resource overrides - let Kubernetes handle resource allocation
+    healthChecks:
+      # Test environment - moderately conservative for CI stability
+      livenessProbe:
+        initialDelaySeconds: 18     # Moderate for test infrastructure (LLM)
+        periodSeconds: 30
+        timeoutSeconds: 10          # Moderate timeout for LLM on test nodes
+        failureThreshold: 4         # Moderate failures allowed
+      readinessProbe:
+        initialDelaySeconds: 10     # Moderate for test infrastructure (LLM)
+        periodSeconds: 12           # Moderate frequency
+        timeoutSeconds: 8           # Moderate timeout for LLM on test nodes
+        failureThreshold: 4         # Moderate failures allowed
+      startupProbe:
+        initialDelaySeconds: 3      # Moderate start for test
+        periodSeconds: 3            # Moderate frequency
+        timeoutSeconds: 10          # Moderate timeout for LLM on test nodes
+        failureThreshold: 25        # 1.25 minutes total startup time

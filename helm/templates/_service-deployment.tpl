@@ -58,13 +58,27 @@ spec:
         {{- end }}
         # Service-specific environment variables
         # All environment variables are now handled by the templates above
+        {{- if $serviceConfig.resources }}
         resources:
+          {{- if $serviceConfig.resources.requests }}
           requests:
+            {{- if $serviceConfig.resources.requests.memory }}
             memory: {{ $serviceConfig.resources.requests.memory }}
+            {{- end }}
+            {{- if $serviceConfig.resources.requests.cpu }}
             cpu: {{ $serviceConfig.resources.requests.cpu }}
+            {{- end }}
+          {{- end }}
+          {{- if $serviceConfig.resources.limits }}
           limits:
+            {{- if $serviceConfig.resources.limits.memory }}
             memory: {{ $serviceConfig.resources.limits.memory }}
+            {{- end }}
+            {{- if $serviceConfig.resources.limits.cpu }}
             cpu: {{ $serviceConfig.resources.limits.cpu }}
+            {{- end }}
+          {{- end }}
+        {{- end }}
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:

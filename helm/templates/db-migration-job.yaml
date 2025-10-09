@@ -74,13 +74,10 @@ spec:
             secretKeyRef:
               name: pgvector
               key: password
+        {{- if .Values.requestManagement.dbMigration.resources }}
         resources:
-          limits:
-            cpu: 100m
-            memory: 128Mi
-          requests:
-            cpu: 50m
-            memory: 64Mi
+          {{- toYaml .Values.requestManagement.dbMigration.resources | nindent 10 }}
+        {{- end }}
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:

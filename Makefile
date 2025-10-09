@@ -820,8 +820,6 @@ define helm_install_common
 	@kubectl rollout status deploy/$(MAIN_CHART_NAME)-agent-service -n $(NAMESPACE) --timeout 10m
 	$(if $(filter true,$(3)),@echo "Waiting for mock eventing deployment..." && kubectl rollout status deploy/$(MAIN_CHART_NAME)-mock-eventing -n $(NAMESPACE) --timeout 5m,)
 	@echo "$(MAIN_CHART_NAME) $(1) installed successfully"
-	$(PRINT_REQUEST_MANAGER_URL)
-	$(PRINT_INTEGRATION_DISPATCHER_URL)
 endef
 
 # Install with direct HTTP communication (development mode)
@@ -830,14 +828,17 @@ helm-install-dev: namespace helm-depend
 	$(call helm_install_common,"with direct HTTP communication - development",\
 		"",\
 		false)
+	@$(MAKE) print-urls
 
 # Install with mock eventing service (testing/CI mode)
 .PHONY: helm-install-test
 helm-install-test: namespace helm-depend
 	$(call helm_install_common,"with mock eventing service - testing/CI",\
+		-f helm/values-test.yaml \
 		--set requestManagement.knative.mockEventing.enabled=true \
 		--set testIntegrationEnabled=true,\
 		true)
+	@$(MAKE) print-urls
 
 # Install with full Knative eventing (production mode)
 .PHONY: helm-install-prod
@@ -851,6 +852,7 @@ helm-install-prod: namespace helm-depend
 			ACTUAL_TRIGGERS=$$(kubectl get triggers -n $(NAMESPACE) --no-headers 2>/dev/null | wc -l); \
 			if [ "$$ACTUAL_TRIGGERS" -eq "$$EXPECTED_TRIGGERS" ]; then \
 				echo "✅ All $$EXPECTED_TRIGGERS triggers deployed successfully"; \
+				@$(MAKE) print-urls; \
 				exit 0; \
 			else \
 				echo "❌ Only $$ACTUAL_TRIGGERS out of $$EXPECTED_TRIGGERS triggers deployed"; \
@@ -874,8 +876,15 @@ helm-install-prod: namespace helm-depend
 .PHONY: _helm-install-prod-single
 _helm-install-prod-single:
 	@$(call helm_install_common,"with full Knative eventing - production",\
+		-f helm/values-production.yaml \
 		--set requestManagement.knative.eventing.enabled=true,\
 		false)
+
+# Print service URLs (used after successful installation)
+.PHONY: print-urls
+print-urls:
+	@$(PRINT_REQUEST_MANAGER_URL)
+	@$(PRINT_INTEGRATION_DISPATCHER_URL)
 
 # Verify all expected Knative triggers are deployed
 .PHONY: verify-triggers
