@@ -41,11 +41,11 @@ spec:
   # Resource configuration for Knative Kafka components (commented out - not supported in current KnativeKafka CRD)
   # resources:
   #   requests:
-  #     memory: {{ .Values.requestManagement.knative.kafka.resources.requests.memory | default "256Mi" }}
-  #     cpu: {{ .Values.requestManagement.knative.kafka.resources.requests.cpu | default "100m" }}
+  #     memory: "256Mi"
+  #     cpu: "100m"
   #   limits:
-  #     memory: {{ .Values.requestManagement.knative.kafka.resources.limits.memory | default "512Mi" }}
-  #     cpu: {{ .Values.requestManagement.knative.kafka.resources.limits.cpu | default "500m" }}
+  #     memory: "512Mi"
+  #     cpu: "500m"
 
   # Security configuration (commented out - not supported in current KnativeKafka CRD)
   # security:

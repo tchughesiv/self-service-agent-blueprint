@@ -113,13 +113,7 @@ pgvector:
 llama-stack:
   initContainers:
     enabled: true
-  resources:
-    requests:
-      memory: "512Mi"
-      cpu: "50m"
-    limits:
-      memory: "1.5Gi"
-      cpu: "500m"
+  resources: {}
   providers:
     agents:
       - provider_id: meta-ref-postgres
@@ -209,13 +203,21 @@ requestManagement:
     mockEventing:
       enabled: false  # Set to true to use mock eventing service (testing/CI mode)
       logLevel: "INFO"
-      resources:
-        requests:
-          memory: "128Mi"
-          cpu: "100m"
-        limits:
-          memory: "256Mi"
-          cpu: "200m"
+      resources: {}
+      # Health check configuration (dev-optimized for resource-constrained environments)
+      healthChecks:
+        livenessProbe:
+          initialDelaySeconds: 15     # Conservative for dev infrastructure
+          periodSeconds: 30           # Reasonable check frequency
+          timeoutSeconds: 10          # Longer timeout for slower dev nodes
+          failureThreshold: 5         # More failures allowed for dev instability
+          successThreshold: 1
+        readinessProbe:
+          initialDelaySeconds: 5      # Conservative for dev infrastructure
+          periodSeconds: 15           # Less frequent to reduce load
+          timeoutSeconds: 5           # Longer timeout for slower dev nodes
+          failureThreshold: 5         # More failures allowed for dev instability
+          successThreshold: 1
 
     # KnativeKafka configuration (automatically enabled when eventing is enabled)
     kafka:
@@ -231,13 +233,7 @@ requestManagement:
       
       
       # Resource limits for KnativeKafka components
-      resources:
-        requests:
-          memory: "256Mi"
-          cpu: "100m"
-        limits:
-          memory: "512Mi"
-          cpu: "500m"
+      resources: {}
       
       # Security configuration
       security:
@@ -263,30 +259,12 @@ requestManagement:
       offsetsTopicReplicationFactor: 1
       transactionStateLogMinIsr: 1
       transactionStateLogReplicationFactor: 1
-    resources:
-      requests:
-        memory: "1Gi"
-        cpu: "500m"
-      limits:
-        memory: "2Gi"
-        cpu: "1000m"
+    resources: {}
     entityOperator:
       topicOperator:
-        resources:
-          requests:
-            memory: "128Mi"
-            cpu: "100m"
-          limits:
-            memory: "256Mi"
-            cpu: "200m"
+        resources: {}
       userOperator:
-        resources:
-          requests:
-            memory: "128Mi"
-            cpu: "100m"
-          limits:
-            memory: "256Mi"
-            cpu: "200m"
+        resources: {}
 
   
   # Network Policies Configuration
@@ -297,32 +275,26 @@ requestManagement:
   # Request Manager Service
   requestManager:
     replicas: 1
-    resources:
-      requests:
-        memory: "256Mi"
-        cpu: "100m"
-      limits:
-        memory: "512Mi"
-        cpu: "500m"
-    # Health check configuration
+    resources: {}
+    # Health check configuration (dev-optimized for resource-constrained environments)
     healthChecks:
       livenessProbe:
-        initialDelaySeconds: 30
-        periodSeconds: 30
-        timeoutSeconds: 5
-        failureThreshold: 3
+        initialDelaySeconds: 20     # Conservative for dev infrastructure
+        periodSeconds: 30           # Reasonable check frequency
+        timeoutSeconds: 10          # Longer timeout for slower dev nodes
+        failureThreshold: 5         # More failures allowed for dev instability
         successThreshold: 1
       readinessProbe:
-        initialDelaySeconds: 5
-        periodSeconds: 10
-        timeoutSeconds: 3
-        failureThreshold: 3
+        initialDelaySeconds: 10     # Conservative for dev infrastructure
+        periodSeconds: 15           # Less frequent to reduce load
+        timeoutSeconds: 5           # Longer timeout for slower dev nodes
+        failureThreshold: 5         # More failures allowed for dev instability
         successThreshold: 1
       startupProbe:
-        initialDelaySeconds: 10
-        periodSeconds: 5
-        timeoutSeconds: 5
-        failureThreshold: 30
+        initialDelaySeconds: 5      # Conservative start for dev
+        periodSeconds: 5            # Less frequent checks for dev
+        timeoutSeconds: 10          # Longer timeout for slower dev nodes
+        failureThreshold: 24        # 2 minutes total startup time (dev infrastructure)
         successThreshold: 1
     # HPA-style autoscaling
     autoscaling:
@@ -335,32 +307,26 @@ requestManagement:
   # Integration Dispatcher Service
   integrationDispatcher:
     replicas: 1
-    resources:
-      requests:
-        memory: "256Mi"
-        cpu: "100m"
-      limits:
-        memory: "512Mi"
-        cpu: "500m"
-    # Health check configuration (optimized for SMTP services)
+    resources: {}
+    # Health check configuration (dev-optimized for resource-constrained environments)
     healthChecks:
       livenessProbe:
-        initialDelaySeconds: 30
-        periodSeconds: 60        # Reduced from 10s to avoid SMTP rate limits
-        timeoutSeconds: 5
-        failureThreshold: 3
+        initialDelaySeconds: 15     # Conservative for dev infrastructure
+        periodSeconds: 30           # Standard frequency
+        timeoutSeconds: 10          # Longer timeout for slower dev nodes
+        failureThreshold: 5         # More failures allowed for dev instability
         successThreshold: 1
       readinessProbe:
-        initialDelaySeconds: 5
-        periodSeconds: 30        # Reduced from 5s to avoid SMTP rate limits
-        timeoutSeconds: 3
-        failureThreshold: 3
+        initialDelaySeconds: 8      # Conservative for dev infrastructure
+        periodSeconds: 15           # Less frequent to reduce load
+        timeoutSeconds: 5           # Longer timeout for slower dev nodes
+        failureThreshold: 5         # More failures allowed for dev instability
         successThreshold: 1
       startupProbe:
-        initialDelaySeconds: 20
-        periodSeconds: 5         # Keep startup probe frequent for faster startup
-        timeoutSeconds: 10
-        failureThreshold: 30
+        initialDelaySeconds: 3      # Conservative start for dev
+        periodSeconds: 5            # Less frequent checks for dev
+        timeoutSeconds: 10          # Longer timeout for slower dev nodes
+        failureThreshold: 20        # 1.5 minutes total startup time (dev infrastructure)
         successThreshold: 1
     # HPA-style autoscaling
     autoscaling:
@@ -383,32 +349,26 @@ requestManagement:
   # Agent Service
   agentService:
     replicas: 1
-    resources:
-      requests:
-        memory: "256Mi"
-        cpu: "100m"
-      limits:
-        memory: "512Mi"
-        cpu: "500m"
-    # Health check configuration
+    resources: {}
+    # Health check configuration (dev-optimized for resource-constrained environments)
     healthChecks:
       livenessProbe:
-        initialDelaySeconds: 30
-        periodSeconds: 30
-        timeoutSeconds: 5
-        failureThreshold: 3
+        initialDelaySeconds: 25     # Conservative for dev infrastructure (LLM loading)
+        periodSeconds: 30           # Standard frequency
+        timeoutSeconds: 15          # Longer timeout for LLM operations on dev nodes
+        failureThreshold: 5         # More failures allowed for dev instability
         successThreshold: 1
       readinessProbe:
-        initialDelaySeconds: 5
-        periodSeconds: 10
-        timeoutSeconds: 3
-        failureThreshold: 3
+        initialDelaySeconds: 15     # Conservative for dev infrastructure (LLM loading)
+        periodSeconds: 15           # Less frequent to reduce load
+        timeoutSeconds: 10          # Longer timeout for LLM operations on dev nodes
+        failureThreshold: 5         # More failures allowed for dev instability
         successThreshold: 1
       startupProbe:
-        initialDelaySeconds: 10
-        periodSeconds: 5
-        timeoutSeconds: 5
-        failureThreshold: 30
+        initialDelaySeconds: 5      # Conservative start for dev
+        periodSeconds: 5            # Less frequent checks for dev
+        timeoutSeconds: 15          # Longer timeout for LLM operations on dev nodes
+        failureThreshold: 30        # 2.5 minutes total startup time (dev infrastructure + LLM)
         successThreshold: 1
     # HPA-style autoscaling
     autoscaling:
@@ -420,13 +380,7 @@ requestManagement:
   
   # Init Job
   initJob:
-    resources:
-      requests:
-        memory: "512Mi"
-        cpu: "200m"
-      limits:
-        memory: "1Gi"
-        cpu: "1000m"
+    resources: {}
   
   # Integration Configuration
   integrations:
@@ -473,13 +427,7 @@ requestManagement:
   # Database Migration
   dbMigration:
     enabled: true
-    resources:
-      requests:
-        memory: "128Mi"
-        cpu: "50m"
-      limits:
-        memory: "256Mi"
-        cpu: "200m"
+    resources: {}
 
 # Security Configuration
 security:

@@ -28,22 +28,16 @@ spec:
       auto.create.topics.enable: false
     # Resources moved to KafkaNodePool
   entityOperator:
+    {{- if .Values.requestManagement.kafka.entityOperator.topicOperator.resources }}
     topicOperator:
       resources:
-        requests:
-          memory: {{ .Values.requestManagement.kafka.entityOperator.topicOperator.resources.requests.memory }}
-          cpu: {{ .Values.requestManagement.kafka.entityOperator.topicOperator.resources.requests.cpu }}
-        limits:
-          memory: {{ .Values.requestManagement.kafka.entityOperator.topicOperator.resources.limits.memory }}
-          cpu: {{ .Values.requestManagement.kafka.entityOperator.topicOperator.resources.limits.cpu }}
+        {{- toYaml .Values.requestManagement.kafka.entityOperator.topicOperator.resources | nindent 8 }}
+    {{- end }}
+    {{- if .Values.requestManagement.kafka.entityOperator.userOperator.resources }}
     userOperator:
       resources:
-        requests:
-          memory: {{ .Values.requestManagement.kafka.entityOperator.userOperator.resources.requests.memory }}
-          cpu: {{ .Values.requestManagement.kafka.entityOperator.userOperator.resources.requests.cpu }}
-        limits:
-          memory: {{ .Values.requestManagement.kafka.entityOperator.userOperator.resources.limits.memory }}
-          cpu: {{ .Values.requestManagement.kafka.entityOperator.userOperator.resources.limits.cpu }}
+        {{- toYaml .Values.requestManagement.kafka.entityOperator.userOperator.resources | nindent 8 }}
+    {{- end }}
 ---
 # KafkaNodePool for managing Kafka broker storage and resources
 apiVersion: kafka.strimzi.io/v1beta2
@@ -64,11 +58,8 @@ spec:
     {{- if eq .Values.requestManagement.kafka.storage.type "persistent-claim" }}
     size: {{ .Values.requestManagement.kafka.storage.size }}
     {{- end }}
+  {{- if .Values.requestManagement.kafka.resources }}
   resources:
-    requests:
-      memory: {{ .Values.requestManagement.kafka.resources.requests.memory }}
-      cpu: {{ .Values.requestManagement.kafka.resources.requests.cpu }}
-    limits:
-      memory: {{ .Values.requestManagement.kafka.resources.limits.memory }}
-      cpu: {{ .Values.requestManagement.kafka.resources.limits.cpu }}
+    {{- toYaml .Values.requestManagement.kafka.resources | nindent 4 }}
+  {{- end }}
 {{- end }}

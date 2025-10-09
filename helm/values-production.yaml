@@ -1,0 +1,91 @@
+# Production environment overrides
+# Use this file for production deployments
+# Usage: helm install my-release ./helm -f values-production.yaml
+
+environment:
+  type: "production"
+
+# Production-optimized resource requirements
+requestManagement:
+  requestManager:
+#    replicas: 2  # Start with 2 replicas for high availability
+    # No resource overrides - let Kubernetes handle resource allocation
+    healthChecks:
+      # Production environment - aggressive for best infrastructure
+      livenessProbe:
+        initialDelaySeconds: 10     # Aggressive for production infrastructure
+        periodSeconds: 30
+        timeoutSeconds: 5           # Standard timeout for production nodes
+        failureThreshold: 3         # Fewer failures allowed for production
+      readinessProbe:
+        initialDelaySeconds: 3      # Aggressive for production infrastructure
+        periodSeconds: 10           # Frequent checks for production
+        timeoutSeconds: 3           # Standard timeout for production nodes
+        failureThreshold: 3         # Fewer failures allowed for production
+      startupProbe:
+        initialDelaySeconds: 1      # Aggressive start for production
+        periodSeconds: 2            # Frequent checks for production
+        timeoutSeconds: 5           # Standard timeout for production nodes
+        failureThreshold: 15        # 30 seconds total startup time
+
+  integrationDispatcher:
+#    replicas: 2  # Start with 2 replicas for high availability
+    # No resource overrides - let Kubernetes handle resource allocation
+    healthChecks:
+      # Production environment - aggressive for best infrastructure
+      livenessProbe:
+        initialDelaySeconds: 8      # Aggressive for production infrastructure
+        periodSeconds: 30
+        timeoutSeconds: 5           # Standard timeout for production nodes
+        failureThreshold: 3         # Fewer failures allowed for production
+      readinessProbe:
+        initialDelaySeconds: 2      # Aggressive for production infrastructure
+        periodSeconds: 10           # Frequent checks for production
+        timeoutSeconds: 3           # Standard timeout for production nodes
+        failureThreshold: 3         # Fewer failures allowed for production
+      startupProbe:
+        initialDelaySeconds: 1      # Aggressive start for production
+        periodSeconds: 2            # Frequent checks for production
+        timeoutSeconds: 5           # Standard timeout for production nodes
+        failureThreshold: 10        # 20 seconds total startup time
+    # autoscaling:
+    #   enabled: true
+    #   minReplicas: 2
+    #   maxReplicas: 5
+    #   targetCPUUtilization: 70
+    #   targetMemoryUtilization: 80
+
+  agentService:
+    # replicas: 2  # Start with 2 replicas for high availability
+    # No resource overrides - let Kubernetes handle resource allocation
+    healthChecks:
+      # Production environment - aggressive for best infrastructure
+      livenessProbe:
+        initialDelaySeconds: 12     # Aggressive for production infrastructure (LLM)
+        periodSeconds: 30
+        timeoutSeconds: 8           # Standard timeout for LLM on production nodes
+        failureThreshold: 3         # Fewer failures allowed for production
+      readinessProbe:
+        initialDelaySeconds: 5      # Aggressive for production infrastructure (LLM)
+        periodSeconds: 10           # Frequent checks for production
+        timeoutSeconds: 5           # Standard timeout for LLM on production nodes
+        failureThreshold: 3         # Fewer failures allowed for production
+      startupProbe:
+        initialDelaySeconds: 1      # Aggressive start for production
+        periodSeconds: 2            # Frequent checks for production
+        timeoutSeconds: 8           # Standard timeout for LLM on production nodes
+        failureThreshold: 20        # 40 seconds total startup time
+    # autoscaling:
+    #   enabled: true
+    #   minReplicas: 2
+    #   maxReplicas: 5
+    #   targetCPUUtilization: 70
+    #   targetMemoryUtilization: 80
+
+# Production security settings
+# security:
+#   jwt:
+#     enabled: true  # Enable JWT validation for production
+
+# # Production logging
+# logLevel: "INFO"  # Use INFO level for production (not DEBUG)
