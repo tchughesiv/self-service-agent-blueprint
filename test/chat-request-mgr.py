@@ -39,7 +39,9 @@ async def main():
 
     # Create chat client with optional user_id
     chat_client = CLIChatClient(
-        request_manager_url=request_manager_url, user_id=user_id
+        request_manager_url=request_manager_url,
+        user_id=user_id,
+        use_responses=False,  # Disable responses mode for this client
     )
 
     if user_id:

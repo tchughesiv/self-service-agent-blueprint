@@ -808,6 +808,61 @@ async def _forward_response_to_integration_dispatcher(
         broker_url = os.getenv("BROKER_URL", "http://knative-broker:8080")
         event_sender = CloudEventSender(broker_url, "request-manager")
 
+        # Get original request context from database to include slack_user_id
+        template_variables = event_data.get("template_variables", {})
+        request_id = event_data.get("request_id")
+
+        if request_id:
+            # Retrieve original request context from RequestLog
+            # Get database session
+            from shared_models.database import get_database_manager
+            from shared_models.models import RequestLog
+            from sqlalchemy import select
+
+            db_manager = get_database_manager()
+
+            async with db_manager.get_session() as db:
+                stmt = select(RequestLog).where(RequestLog.request_id == request_id)
+                result = await db.execute(stmt)
+                request_log = result.scalar_one_or_none()
+
+                if request_log and request_log.normalized_request:
+                    integration_context = request_log.normalized_request.get(
+                        "integration_context", {}
+                    )
+                    slack_user_id = integration_context.get("slack_user_id")
+                    slack_channel = integration_context.get("channel_id")
+
+                    logger.info(
+                        "Retrieved integration context from database",
+                        request_id=request_id,
+                        integration_context=integration_context,
+                        slack_user_id=slack_user_id,
+                        slack_channel=slack_channel,
+                    )
+
+                    if slack_user_id:
+                        template_variables["slack_user_id"] = slack_user_id
+                        logger.info(
+                            "Added slack_user_id to template variables",
+                            request_id=request_id,
+                            slack_user_id=slack_user_id,
+                        )
+                    else:
+                        logger.warning(
+                            "No slack_user_id found in integration context",
+                            request_id=request_id,
+                            integration_context=integration_context,
+                        )
+
+                    if slack_channel:
+                        template_variables["slack_channel"] = slack_channel
+                        logger.debug(
+                            "Added slack_channel to template variables",
+                            request_id=request_id,
+                            slack_channel=slack_channel,
+                        )
+
         # Create delivery event data for Integration Dispatcher
         # This matches the structure expected by DeliveryRequest in Integration Dispatcher
         delivery_event_data = {
@@ -818,9 +873,7 @@ async def _forward_response_to_integration_dispatcher(
                 "subject"
             ),  # This may be None for Agent Service events
             "content": event_data.get("content"),
-            "template_variables": event_data.get(
-                "template_variables", {}
-            ),  # Default to empty dict if not present
+            "template_variables": template_variables,
             "agent_id": event_data.get("agent_id"),
         }
 

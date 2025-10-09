@@ -70,6 +70,21 @@ class IntegrationDispatcher:
         }
         self.template_engine = TemplateEngine()
 
+    def _ensure_slack_config_has_identifiers(self, user_config, user_id: str) -> None:
+        """Ensure Slack config has necessary identifiers for channel resolution."""
+        has_channel = bool(user_config.config.get("channel_id"))
+        has_user_email = bool(user_config.config.get("user_email"))
+        has_slack_user_id = bool(user_config.config.get("slack_user_id"))
+
+        if not (has_channel or has_user_email or has_slack_user_id):
+            # Add slack_user_id as fallback
+            user_config.config["slack_user_id"] = user_id
+            logger.info(
+                "Added slack_user_id to existing Slack config",
+                user_id=user_id,
+                config=user_config.config,
+            )
+
     async def _get_user_integration_configs(
         self, user_id: str, db: AsyncSession, request: Optional[DeliveryRequest] = None
     ) -> List[UserIntegrationConfig]:
@@ -103,6 +118,28 @@ class IntegrationDispatcher:
                     slack_channel=slack_channel,
                 )
 
+            # Look for Slack user ID in template variables
+            slack_user_id = request.template_variables.get("slack_user_id")
+            logger.info(
+                "Checking template variables for slack_user_id",
+                user_id=user_id,
+                template_variables=request.template_variables,
+                slack_user_id=slack_user_id,
+            )
+            if slack_user_id:
+                context["slack_user_id"] = slack_user_id
+                logger.info(
+                    "Found Slack user ID in template variables",
+                    user_id=user_id,
+                    slack_user_id=slack_user_id,
+                )
+            else:
+                logger.warning(
+                    "No slack_user_id found in template variables",
+                    user_id=user_id,
+                    template_variables=request.template_variables,
+                )
+
         # Get smart defaults for all enabled integrations (no database persistence)
         smart_defaults = await integration_defaults_service.get_smart_defaults(
             user_id, db=db, context=context
@@ -115,18 +152,7 @@ class IntegrationDispatcher:
         for user_config in user_configs:
             # For Slack configs, ensure they have channel information
             if user_config.integration_type.value == "SLACK":
-                has_channel = bool(user_config.config.get("channel_id"))
-                has_user_email = bool(user_config.config.get("user_email"))
-                has_slack_user_id = bool(user_config.config.get("slack_user_id"))
-
-                if not (has_channel or has_user_email or has_slack_user_id):
-                    # Add slack_user_id as fallback
-                    user_config.config["slack_user_id"] = user_id
-                    logger.info(
-                        "Added slack_user_id to existing Slack config",
-                        user_id=user_id,
-                        config=user_config.config,
-                    )
+                self._ensure_slack_config_has_identifiers(user_config, user_id)
 
             final_configs.append(user_config)
 
@@ -808,6 +834,10 @@ async def create_user_integration(
         existing_config.retry_delay_seconds = config_data.retry_delay_seconds
         existing_config.updated_at = datetime.now(timezone.utc)
 
+        # Ensure Slack configs have necessary identifiers
+        if existing_config.integration_type.value == "SLACK":
+            dispatcher._ensure_slack_config_has_identifiers(existing_config, user_id)
+
         await db.commit()
         await db.refresh(existing_config)
         return UserIntegrationConfigResponse.from_orm(existing_config)
@@ -822,6 +852,10 @@ async def create_user_integration(
             retry_count=config_data.retry_count,
             retry_delay_seconds=config_data.retry_delay_seconds,
         )
+
+        # Ensure Slack configs have necessary identifiers
+        if config.integration_type.value == "SLACK":
+            dispatcher._ensure_slack_config_has_identifiers(config, user_id)
 
         db.add(config)
         await db.commit()
@@ -866,6 +900,10 @@ async def update_user_integration(
     update_data = config_update.dict(exclude_unset=True)
     for field, value in update_data.items():
         setattr(config, field, value)
+
+    # Ensure Slack configs have necessary identifiers
+    if config.integration_type.value == "SLACK":
+        dispatcher._ensure_slack_config_has_identifiers(config, user_id)
 
     config.updated_at = datetime.now(timezone.utc)
 

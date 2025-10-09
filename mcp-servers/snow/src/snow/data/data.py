@@ -239,6 +239,17 @@ MOCK_EMPLOYEE_DATA = {
         "warranty_expiry": "2026-04-18",
         "warranty_status": "Active",
     },
+    "3001": {
+        "employee_id": "3001",
+        "name": "Tommy Hughes",
+        "email": "tchughesiv@gmail.com",
+        "location": "New Orleans - Remote",
+        "laptop_model": "MacBook Pro 16-inch",
+        "laptop_serial_number": "TCH789012",
+        "purchase_date": "2021-01-10",
+        "warranty_expiry": "2024-01-10",
+        "warranty_status": "Expired",
+    },
 }
 
 # Email to employee ID mapping for O(1) lookup performance

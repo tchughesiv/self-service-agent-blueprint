@@ -18,6 +18,8 @@ from shared_models import (
     configure_logging,
     verify_slack_signature,
 )
+from slack_sdk.errors import SlackApiError
+from slack_sdk.web.async_client import AsyncWebClient
 
 from .slack_schemas import SlackInteractionPayload, SlackSlashCommand
 
@@ -29,13 +31,20 @@ class SlackService:
 
     def __init__(self):
         self.signing_secret = os.getenv("SLACK_SIGNING_SECRET")
-        self.request_manager_client = RequestManagerClient()
+        self.request_manager_client = RequestManagerClient(
+            timeout=60.0
+        )  # Reduced from 180s
         self.agent_service_client = AgentServiceClient()
         # Simple rate limiting: track last request time per user
         self._last_request_time = {}
         # Eventing configuration
         self.eventing_enabled = os.getenv("EVENTING_ENABLED", "true").lower() == "true"
         self.broker_url = os.getenv("BROKER_URL")
+        # Slack client for API calls
+        self.bot_token = os.getenv("SLACK_BOT_TOKEN")
+        self.slack_client = (
+            AsyncWebClient(token=self.bot_token) if self.bot_token else None
+        )
 
     def _create_slack_message_id(self, event: Dict, event_id: str = None) -> str:
         """Create a unique identifier for a Slack message using Slack's event_id."""
@@ -98,7 +107,7 @@ class SlackService:
                     self.broker_url,
                     headers=headers,
                     content=body,
-                    timeout=30.0,
+                    timeout=15.0,  # Reduced from 30s for faster failure detection
                 )
                 response.raise_for_status()
 
@@ -243,13 +252,18 @@ class SlackService:
                 )
                 return
 
-            user_id = event.get("user")
+            slack_user_id = event.get("user")
             text = event.get("text", "").strip()
             channel = event.get("channel")
             thread_ts = event.get("thread_ts") or event.get("ts")
 
-            if not text or not user_id:
+            if not text or not slack_user_id:
                 return
+
+            # Resolve user ID (email or fallback to Slack user ID)
+            user_id, original_slack_user_id = await self._resolve_user_id(
+                slack_user_id, "message"
+            )
 
             # Skip messages that look like session information or system messages (to prevent loops)
             session_indicators = [
@@ -305,6 +319,7 @@ class SlackService:
                 "slack_channel": channel,
                 "slack_thread_ts": thread_ts,
                 "slack_team_id": effective_team_id,
+                "slack_user_id": original_slack_user_id,  # Keep original Slack user ID for reference
                 "source": "slack_message",
             }
 
@@ -340,30 +355,16 @@ class SlackService:
                     "Example: `/agent I need help with my laptop refresh`",
                 }
 
-            logger.info(
-                "Processing Slack slash command",
-                user_id=command.user_id,
-                command=command.command,
-                text=command.text[:100],
-            )
-
-            # Forward to Request Manager
-            await self._forward_to_request_manager(
-                user_id=command.user_id,
-                content=command.text,
-                integration_type="SLACK",
-                metadata={
-                    "slack_channel": command.channel_id,
-                    "slack_response_url": command.response_url,
-                    "slack_team_id": command.team_id,
-                    "source": "slash_command",
-                },
-            )
-
-            return {
+            # Send immediate acknowledgment to prevent timeout
+            immediate_response = {
                 "response_type": "ephemeral",
-                "text": "🚀 Your request has been submitted! I'll send you a response shortly.",
+                "text": "🚀 Processing your request... I'll send you a response shortly.",
             }
+
+            # Process the request asynchronously (don't await)
+            asyncio.create_task(self._process_slash_command_async(command))
+
+            return immediate_response
 
         except Exception as e:
             logger.error(
@@ -373,6 +374,35 @@ class SlackService:
                 "response_type": "ephemeral",
                 "text": "❌ Sorry, there was an error processing your request. Please try again.",
             }
+
+    async def _process_slash_command_async(self, command: SlackSlashCommand) -> None:
+        """Process slash command asynchronously and send response via DM."""
+        try:
+            # Resolve user ID (email or fallback to Slack user ID)
+            user_id, original_slack_user_id = await self._resolve_user_id(
+                command.user_id, "slash command"
+            )
+
+            # Forward to Request Manager
+            await self._forward_to_request_manager(
+                user_id=user_id,
+                content=command.text,
+                integration_type="SLACK",
+                metadata={
+                    "slack_channel": None,  # Don't use original channel for /agent commands - create DM instead
+                    "slack_response_url": command.response_url,
+                    "slack_team_id": command.team_id,
+                    "slack_user_id": original_slack_user_id,  # Keep original Slack user ID for reference
+                    "source": "slash_command",
+                },
+            )
+
+        except Exception as e:
+            logger.error(
+                "Error processing slash command asynchronously",
+                error=str(e),
+                command=command.dict(),
+            )
 
     async def handle_button_interaction(self, payload: SlackInteractionPayload) -> Dict:
         """Handle button interactions."""
@@ -418,7 +448,7 @@ class SlackService:
                             response = await client.post(
                                 payload.response_url,
                                 json=session_info_message,
-                                timeout=10.0,
+                                timeout=5.0,  # Reduced from 10s for faster failure detection
                             )
                             logger.debug(
                                 "Session info response URL post completed",
@@ -448,9 +478,14 @@ class SlackService:
                 # Create a new session and immediately send a message to routing-agent
                 try:
                     # Extract user info from the payload
-                    user_id = payload.user.id
+                    slack_user_id = payload.user.id
                     channel_id = payload.channel.id if payload.channel else None
                     team_id = payload.team.id if payload.team else None
+
+                    # Resolve user ID (email or fallback to Slack user ID)
+                    user_id, original_slack_user_id = await self._resolve_user_id(
+                        slack_user_id, "button interaction"
+                    )
 
                     # Create a new session by sending a message to the routing-agent
                     new_session_content = "Hello! I'd like to start a fresh conversation. Please introduce yourself and tell me how you can help."
@@ -491,7 +526,7 @@ class SlackService:
                                 response = await client.post(
                                     payload.response_url,
                                     json=fallback_message,
-                                    timeout=10.0,
+                                    timeout=5.0,  # Reduced from 10s for faster failure detection
                                 )
                                 logger.debug(
                                     "Fallback new session response URL post completed",
@@ -536,16 +571,22 @@ class SlackService:
                         },
                     }
 
+                # Resolve user ID (email or fallback to Slack user ID)
+                slack_user_id = payload.user.id
+                user_id, original_slack_user_id = await self._resolve_user_id(
+                    slack_user_id, "modal submission"
+                )
+
                 logger.info(
                     "Processing follow-up from modal",
-                    user_id=payload.user.id,
+                    user_id=user_id,
                     session_id=session_id,
                     text=followup_input[:100],
                 )
 
                 # Forward to Request Manager with session context
                 await self._forward_to_request_manager(
-                    user_id=payload.user.id,
+                    user_id=user_id,
                     content=followup_input,
                     integration_type="SLACK",
                     metadata={
@@ -570,6 +611,193 @@ class SlackService:
                 },
             }
 
+    async def _get_user_email(self, slack_user_id: str) -> Optional[str]:
+        """Fetch user email address from Slack API."""
+        if not self.slack_client:
+            logger.warning("Slack client not available - cannot fetch user email")
+            return None
+
+        try:
+            response = await self.slack_client.users_info(user=slack_user_id)
+            if response["ok"]:
+                user_info = response["user"]
+                email = user_info.get("profile", {}).get("email")
+                if email:
+                    logger.info(
+                        "Successfully fetched user email from Slack",
+                        slack_user_id=slack_user_id,
+                        email=email,
+                    )
+                    return email
+                else:
+                    logger.warning(
+                        "User email not found in Slack profile",
+                        slack_user_id=slack_user_id,
+                        user_info=user_info,
+                    )
+            else:
+                logger.error(
+                    "Failed to fetch user info from Slack",
+                    slack_user_id=slack_user_id,
+                    error=response.get("error"),
+                )
+        except SlackApiError as e:
+            logger.error(
+                "Slack API error fetching user info",
+                slack_user_id=slack_user_id,
+                error=str(e),
+            )
+        except Exception as e:
+            logger.error(
+                "Unexpected error fetching user info",
+                slack_user_id=slack_user_id,
+                error=str(e),
+            )
+
+        return None
+
+    async def _get_cached_email_from_slack_user_id(
+        self, slack_user_id: str
+    ) -> Optional[str]:
+        """Get email from Slack user ID using cached mapping with TTL validation."""
+        try:
+            from shared_models.database import get_database_manager
+            from shared_models.models import IntegrationType, UserIntegrationMapping
+            from sqlalchemy import select
+
+            db_manager = get_database_manager()
+            async with db_manager.get_session() as db:
+                # Find mapping by Slack user ID
+                stmt = select(UserIntegrationMapping).where(
+                    UserIntegrationMapping.integration_user_id == slack_user_id,
+                    UserIntegrationMapping.integration_type == IntegrationType.SLACK,
+                )
+                result = await db.execute(stmt)
+                mapping = result.scalar_one_or_none()
+
+                if not mapping:
+                    logger.debug(
+                        "No cached mapping found for Slack user ID",
+                        slack_user_id=slack_user_id,
+                    )
+                    return None
+
+                # Use shared TTL validation logic
+                from .integrations.defaults import integration_defaults_service
+
+                is_valid = (
+                    await integration_defaults_service._validate_mapping_with_ttl(
+                        mapping, "slack user lookup"
+                    )
+                )
+
+                if is_valid:
+                    await db.commit()
+                    return mapping.user_email
+                else:
+                    await db.commit()
+                    return None
+
+        except Exception as e:
+            logger.error(
+                "Error getting cached email from Slack user ID",
+                slack_user_id=slack_user_id,
+                error=str(e),
+            )
+            return None
+
+    async def _store_user_mapping(self, user_email: str, slack_user_id: str) -> None:
+        """Store the email -> Slack user ID mapping for future use."""
+        try:
+            from datetime import datetime, timezone
+
+            from shared_models.database import get_database_manager
+            from shared_models.models import IntegrationType, UserIntegrationMapping
+
+            db_manager = get_database_manager()
+            async with db_manager.get_session() as db:
+                # Use upsert pattern - update if exists, insert if not
+                from sqlalchemy.dialects.postgresql import insert
+
+                stmt = insert(UserIntegrationMapping).values(
+                    user_email=user_email,
+                    integration_type=IntegrationType.SLACK,
+                    integration_user_id=slack_user_id,
+                    last_validated_at=datetime.now(timezone.utc),
+                    created_by="slack_service",
+                )
+
+                # On conflict, update the Slack user ID and validation timestamp
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["user_email", "integration_type"],
+                    set_={
+                        "integration_user_id": stmt.excluded.integration_user_id,
+                        "last_validated_at": stmt.excluded.last_validated_at,
+                        "validation_attempts": 0,
+                        "last_validation_error": None,
+                        "updated_at": datetime.now(timezone.utc),
+                    },
+                )
+
+                await db.execute(stmt)
+                await db.commit()
+
+                logger.info(
+                    "Stored/updated user mapping",
+                    user_email=user_email,
+                    slack_user_id=slack_user_id,
+                )
+
+        except Exception as e:
+            logger.error(
+                "Failed to store user mapping",
+                user_email=user_email,
+                slack_user_id=slack_user_id,
+                error=str(e),
+            )
+
+    async def _resolve_user_id(
+        self, slack_user_id: str, context: str = "request"
+    ) -> tuple[str, str]:
+        """
+        Resolve user ID by checking cache first, then fetching email from Slack API if needed.
+
+        Returns:
+            tuple: (resolved_user_id, slack_user_id) where resolved_user_id is either email or slack_user_id
+        """
+        logger.info(
+            f"Resolving user ID for {context}",
+            slack_user_id=slack_user_id,
+        )
+
+        # First, try to find existing mapping by Slack user ID (simple cache lookup)
+        existing_email = await self._get_cached_email_from_slack_user_id(slack_user_id)
+        if existing_email:
+            logger.info(
+                f"Using cached email for {context}",
+                slack_user_id=slack_user_id,
+                user_email=existing_email,
+            )
+            return existing_email, slack_user_id
+
+        # If no cached mapping, fetch fresh from Slack API
+        user_email = await self._get_user_email(slack_user_id)
+        if user_email:
+            logger.info(
+                f"Using fresh email from Slack API for {context}",
+                slack_user_id=slack_user_id,
+                user_email=user_email,
+            )
+            # Store the mapping for future use
+            await self._store_user_mapping(user_email, slack_user_id)
+            return user_email, slack_user_id
+        else:
+            logger.warning(
+                f"Could not fetch user email for {context}, using Slack user ID as fallback",
+                slack_user_id=slack_user_id,
+            )
+            return slack_user_id, slack_user_id
+
     def _clean_message_text(self, text: str) -> str:
         """Clean message text by removing bot mentions and extra whitespace."""
         import re
@@ -592,8 +820,20 @@ class SlackService:
             # Extract Slack-specific fields from metadata
             channel_id = metadata.get("slack_channel", "") if metadata else ""
             thread_id = metadata.get("slack_thread_ts") if metadata else None
-            slack_user_id = user_id  # Slack user ID is the same as user_id
+            slack_user_id = metadata.get(
+                "slack_user_id", user_id
+            )  # Get original Slack user ID from metadata
             slack_team_id = metadata.get("slack_team_id", "") if metadata else ""
+
+            logger.info(
+                "Extracting Slack fields from metadata",
+                user_id=user_id,
+                metadata=metadata,
+                slack_user_id=slack_user_id,
+                channel_id=channel_id,
+                thread_id=thread_id,
+                slack_team_id=slack_team_id,
+            )
 
             # Create payload - Request Manager will generate request_id and session_id
             payload = {

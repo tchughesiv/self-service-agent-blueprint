@@ -20,7 +20,7 @@ class BaseRequest(BaseModel):
     request_type: str = Field(default="message", max_length=100)
     metadata: Dict[str, Any] = Field(default_factory=dict)
     use_responses: bool = Field(
-        default=False,
+        default=True,
         description="Enable responses API mode (LangGraph-based conversations)",
     )
 
@@ -37,7 +37,7 @@ class SlackRequest(BaseRequest):
     """Slack-specific request schema."""
 
     integration_type: IntegrationType = IntegrationType.SLACK
-    channel_id: str = Field(..., min_length=1, max_length=255)
+    channel_id: Optional[str] = Field(None, max_length=255)  # Optional for DM requests
     thread_id: Optional[str] = Field(None, max_length=255)
     slack_user_id: str = Field(..., min_length=1, max_length=255)
     slack_team_id: str = Field(..., min_length=1, max_length=255)

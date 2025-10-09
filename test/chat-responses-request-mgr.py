@@ -43,7 +43,6 @@ async def main():
     chat_client = CLIChatClient(
         request_manager_url=request_manager_url,
         user_id=user_id,
-        use_responses=True,  # Enable responses mode for this client
     )
 
     if user_id:

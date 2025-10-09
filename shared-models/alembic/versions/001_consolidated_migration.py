@@ -5,6 +5,7 @@ Creates all required tables for the self-service agent system including:
 - User integration configurations and smart defaults
 - Integration templates and credentials
 - Delivery logs and processed events
+- User integration mappings for email to integration user ID mappings
 
 Revision ID: 001
 Revises:
@@ -44,7 +45,7 @@ def upgrade() -> None:
                 "WEBHOOK",
                 "TEAMS",
                 "DISCORD",
-                "TEST",  # Added in migration 005
+                "TEST",
             ],
         ),
         ("sessionstatus", ["ACTIVE", "INACTIVE", "EXPIRED", "ARCHIVED"]),
@@ -81,7 +82,7 @@ def upgrade() -> None:
     session_status_enum = ENUM(name="sessionstatus", create_type=False)
     delivery_status_enum = ENUM(name="deliverystatus", create_type=False)
 
-    # Create request_sessions table with all fields from migrations 001 and 003
+    # Create request_sessions table
     try:
         op.create_table(
             "request_sessions",
@@ -104,7 +105,7 @@ def upgrade() -> None:
             sa.Column(
                 "updated_at", postgresql.TIMESTAMP(timezone=True), nullable=False
             ),
-            # Additional fields from migration 003
+            # Additional fields
             sa.Column("external_session_id", sa.String(length=255), nullable=True),
             sa.Column("current_agent_id", sa.String(length=255), nullable=True),
             sa.Column("conversation_thread_id", sa.String(length=255), nullable=True),
@@ -156,11 +157,12 @@ def upgrade() -> None:
         sa.UniqueConstraint("request_id", name=op.f("uq_request_logs_request_id")),
     )
     op.create_index(op.f("ix_request_id"), "request_logs", ["request_id"], unique=False)
-
-    # Add a small delay and explicit commit attempt to see if it helps
-    import time
-
-    time.sleep(0.1)
+    op.create_index(
+        op.f("ix_request_logs_session_id"), "request_logs", ["session_id"], unique=False
+    )
+    op.create_index(
+        op.f("ix_request_logs_agent_id"), "request_logs", ["agent_id"], unique=False
+    )
 
     # Create user_integration_configs table with timezone-aware timestamps
     try:
@@ -190,6 +192,12 @@ def upgrade() -> None:
             "ix_user_integration_configs_user_id",
             "user_integration_configs",
             ["user_id"],
+            unique=False,
+        )
+        op.create_index(
+            "ix_user_integration_configs_integration_type",
+            "user_integration_configs",
+            ["integration_type"],
             unique=False,
         )
     except Exception:
@@ -285,7 +293,7 @@ def upgrade() -> None:
         "ix_delivery_logs_user_id", "delivery_logs", ["user_id"], unique=False
     )
 
-    # Create processed_events table from migration 007
+    # Create processed_events table
     op.create_table(
         "processed_events",
         sa.Column("id", sa.Integer(), nullable=False),
@@ -320,7 +328,7 @@ def upgrade() -> None:
         unique=False,
     )
 
-    # Create integration_default_configs table (from migration 002)
+    # Create integration_default_configs table
     op.create_table(
         "integration_default_configs",
         sa.Column("id", sa.Integer(), nullable=False),
@@ -337,10 +345,60 @@ def upgrade() -> None:
         sa.UniqueConstraint("integration_type", name="uq_integration_default_type"),
     )
 
+    # Create user_integration_mappings table
+    op.create_table(
+        "user_integration_mappings",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("user_email", sa.String(length=255), nullable=False),
+        sa.Column(
+            "integration_type",
+            postgresql.ENUM(name="integrationtype", create_type=False),
+            nullable=False,
+        ),
+        sa.Column("integration_user_id", sa.String(length=255), nullable=False),
+        sa.Column("last_validated_at", sa.TIMESTAMP(timezone=True), nullable=True),
+        sa.Column("validation_attempts", sa.Integer(), nullable=False, default=0),
+        sa.Column("last_validation_error", sa.Text(), nullable=True),
+        sa.Column("created_by", sa.String(length=255), nullable=True, default="system"),
+        sa.Column(
+            "created_at",
+            sa.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+        ),
+        sa.Column(
+            "updated_at",
+            sa.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+        ),
+        sa.PrimaryKeyConstraint("id"),
+    )
+
+    # Create indexes for user_integration_mappings
+    op.create_index(
+        "ix_user_integration_mapping_email_type",
+        "user_integration_mappings",
+        ["user_email", "integration_type"],
+    )
+    op.create_index(
+        "ix_user_integration_mappings_user_email",
+        "user_integration_mappings",
+        ["user_email"],
+    )
+
+    # Create unique constraint for user_integration_mappings
+    op.create_unique_constraint(
+        "uq_user_integration_mapping",
+        "user_integration_mappings",
+        ["user_email", "integration_type"],
+    )
+
 
 def downgrade() -> None:
     """Downgrade database schema."""
     # Drop tables in reverse order
+    op.drop_table("user_integration_mappings")
     op.drop_table("integration_default_configs")
     op.drop_table("processed_events")
     op.drop_table("delivery_logs")
