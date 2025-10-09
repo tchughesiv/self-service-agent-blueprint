@@ -31,6 +31,18 @@ logging.getLogger("langgraph").setLevel(logging.WARNING)
 logging.getLogger("asset_manager").setLevel(logging.WARNING)
 
 
+def get_session_token_context(session_id: str) -> str:
+    """Generate session-specific token context for consistent token counting.
+
+    Args:
+        session_id: The Request Manager session ID
+
+    Returns:
+        Session-specific token context string (e.g., "session_123")
+    """
+    return f"session_{session_id}"
+
+
 class BaseSessionManager:
     """Base session management for LlamaStack Agent API.
 
@@ -255,7 +267,11 @@ class ResponsesSessionManager(BaseSessionManager):
                 f"Sending message to LangGraph session - user_id: {self.user_id}, current_agent: {self.current_agent_name}, thread_id: {self.conversation_session.thread_id if self.conversation_session else None}"
             )
 
-            response = self.conversation_session.send_message(text)
+            token_context = get_session_token_context(self.request_manager_session_id)
+            response = self.conversation_session.send_message(
+                text,
+                token_context=token_context,
+            )
             processed_response = self._process_agent_response(response)
 
             # Handle routing logic
@@ -724,7 +740,11 @@ class ResponsesSessionManager(BaseSessionManager):
                 message_preview=text[:100],
             )
 
-            response = session.send_message(text)
+            token_context = get_session_token_context(self.request_manager_session_id)
+            response = session.send_message(
+                text,
+                token_context=token_context,
+            )
 
             logger.info(
                 "Successfully routed to specialist agent",

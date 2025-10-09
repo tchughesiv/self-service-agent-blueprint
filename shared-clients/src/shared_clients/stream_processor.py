@@ -12,6 +12,34 @@ class LlamaStackStreamProcessor:
     """Unified stream processor for LlamaStack streaming responses."""
 
     @staticmethod
+    def _extract_token_usage(usage_object) -> tuple[int, int, int]:
+        """Extract token usage from a usage object. Returns (input_tokens, output_tokens, total_tokens)."""
+        if not usage_object:
+            return (0, 0, 0)
+
+        # Try to get from usage object first
+        input_tokens = getattr(usage_object, "prompt_tokens", 0) or getattr(
+            usage_object, "input_tokens", 0
+        )
+        output_tokens = getattr(usage_object, "completion_tokens", 0) or getattr(
+            usage_object, "output_tokens", 0
+        )
+        total_tokens = getattr(usage_object, "total_tokens", 0) or (
+            input_tokens + output_tokens
+        )
+
+        # If no tokens found and object has direct attributes, try those
+        if input_tokens == 0 and output_tokens == 0:
+            if hasattr(usage_object, "input_tokens") and hasattr(
+                usage_object, "output_tokens"
+            ):
+                input_tokens = usage_object.input_tokens or 0
+                output_tokens = usage_object.output_tokens or 0
+                total_tokens = input_tokens + output_tokens
+
+        return (input_tokens, output_tokens, total_tokens)
+
+    @staticmethod
     async def process_stream(
         response_stream,
         on_content: Optional[Callable[[str], None]] = None,
@@ -40,6 +68,11 @@ class LlamaStackStreamProcessor:
         processing_time_ms = None
         metadata = {}
         stop_reason = None
+        # Token usage tracking
+        input_tokens = 0
+        output_tokens = 0
+        total_tokens = 0
+        final_response = None
 
         try:
             for chunk in response_stream:
@@ -93,12 +126,29 @@ class LlamaStackStreamProcessor:
                             hasattr(event_payload, "event_type")
                             and event_payload.event_type == "turn_complete"
                         ):
+                            # Store the final response object for token extraction
+                            final_response = event_payload.turn
                             if hasattr(event_payload, "turn") and hasattr(
                                 event_payload.turn, "output_message"
                             ):
                                 stop_reason = (
                                     event_payload.turn.output_message.stop_reason
                                 )
+
+                                # Extract token usage information
+                                usage = getattr(event_payload.turn, "usage", None)
+                                if usage:
+                                    input_tokens, output_tokens, total_tokens = (
+                                        LlamaStackStreamProcessor._extract_token_usage(
+                                            usage
+                                        )
+                                    )
+                                    logger.debug(
+                                        "Extracted token usage from turn_complete",
+                                        input_tokens=input_tokens,
+                                        output_tokens=output_tokens,
+                                        total_tokens=total_tokens,
+                                    )
 
                                 if stop_reason == "end_of_turn":
                                     chunk_content = (
@@ -140,6 +190,36 @@ class LlamaStackStreamProcessor:
             if on_error:
                 on_error(str(e))
 
+        # Try to extract token usage from final response object if not found in streaming
+        if (input_tokens == 0 and output_tokens == 0) and final_response:
+            logger.debug(
+                "No token usage found in streaming, trying final response object",
+            )
+
+            # Try to extract token usage from final response object
+            usage = getattr(final_response, "usage", None)
+            if usage:
+                input_tokens, output_tokens, total_tokens = (
+                    LlamaStackStreamProcessor._extract_token_usage(usage)
+                )
+                logger.debug(
+                    "Extracted token usage from final response object",
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    total_tokens=total_tokens,
+                )
+            else:
+                # Try extracting from final_response directly
+                input_tokens, output_tokens, total_tokens = (
+                    LlamaStackStreamProcessor._extract_token_usage(final_response)
+                )
+                logger.debug(
+                    "Extracted token usage from final response object (direct attributes)",
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    total_tokens=total_tokens,
+                )
+
         return {
             "content": content,
             "tool_calls_made": tool_calls_made,
@@ -149,6 +229,12 @@ class LlamaStackStreamProcessor:
             "processing_time_ms": processing_time_ms,
             "metadata": metadata,
             "stop_reason": stop_reason,
+            "token_usage": {
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "total_tokens": total_tokens,
+            },
+            "final_response": final_response,
         }
 
     @staticmethod

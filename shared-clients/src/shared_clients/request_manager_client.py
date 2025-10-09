@@ -254,38 +254,173 @@ class CLIChatClient(RequestManagerClient):
         # For now, just generate a new user_id to effectively reset the session
         self.user_id = str(uuid.uuid4())
 
+    async def _process_message(
+        self, message: str, debug: bool, test_mode: bool
+    ) -> bool:
+        """
+        Process a single message and return True if the chat loop should continue.
+
+        Returns:
+            bool: True if chat should continue, False if it should break
+        """
+        if message.lower() in ["quit", "exit"] or (
+            not test_mode and message.lower() == "q"
+        ):
+            return False
+        elif message.lower() == "**tokens**":
+            agent_response = await self.send_message(message, debug=debug)
+            self._handle_tokens_command(agent_response)
+            return False
+        elif message.strip():
+            agent_response = await self.send_message(message, debug=debug)
+            print(f"agent: {agent_response}")
+            if test_mode:
+                print(AGENT_MESSAGE_TERMINATOR)
+
+        return True
+
+    def _handle_tokens_command(self, agent_response: str) -> None:
+        """Handle the **tokens** command by extracting and formatting token summary."""
+        if "TOKEN_SUMMARY:" in agent_response:
+            # Extract the token summary line
+            lines = agent_response.split("\n")
+            token_summary_line = None
+            for line in lines:
+                if line.startswith("TOKEN_SUMMARY:"):
+                    token_summary_line = line
+                    break
+
+            if token_summary_line:
+                self._format_token_summary(token_summary_line)
+        else:
+            print(agent_response)
+
+    def _format_token_summary(self, token_summary_line: str) -> None:
+        """Format and print token summary like test/chat.py."""
+        # Parse the token summary to create formatted output
+        # Format: TOKEN_SUMMARY:INPUT:1100:OUTPUT:590:TOTAL:1690:CALLS:6:MAX_SINGLE_INPUT:236:MAX_SINGLE_OUTPUT:184:MAX_SINGLE_TOTAL:348
+        parts = token_summary_line.split(":")
+        if len(parts) >= 8:
+            input_tokens = int(parts[2])
+            output_tokens = int(parts[4])
+            total_tokens = int(parts[6])
+            calls = int(parts[8])
+            max_input = int(parts[10])
+            max_output = int(parts[12])
+            max_total = int(parts[14])
+
+            # Print the formatted summary like test/chat.py
+            print(
+                f"CURRENT_TOKEN_SUMMARY:INPUT:{input_tokens}:OUTPUT:{output_tokens}:TOTAL:{total_tokens}:CALLS:{calls}:MAX_SINGLE_INPUT:{max_input}:MAX_SINGLE_OUTPUT:{max_output}:MAX_SINGLE_TOTAL:{max_total}"
+            )
+            print("TOKEN_SUMMARY_END")
+            print()
+            print("bye!")
+
+            # Show session name for resuming conversation
+            if hasattr(self, "session_id") and self.session_id:
+                print(
+                    f"To resume this conversation, use: --session-name {self.session_id}"
+                )
+
+            # Print formatted token usage summary
+            print("\n" + "=" * 50)
+            print("  Total Token Usage Summary:")
+            print(f"    Total calls: {calls}")
+            print(f"    Input tokens: {input_tokens:,}")
+            print(f"    Output tokens: {output_tokens:,}")
+            print(f"    Total tokens: {total_tokens:,}")
+            print(f"    Max single request input: {max_input}")
+            print(f"    Max single request output: {max_output}")
+            print(f"    Max single request total: {max_total}")
+            if calls > 0:
+                avg_input = input_tokens / calls
+                avg_output = output_tokens / calls
+                avg_total = total_tokens / calls
+                print(
+                    f"    Average per call: {avg_input:.1f} input, {avg_output:.1f} output, {avg_total:.1f} total"
+                )
+            print("=" * 50)
+
+            # Print machine-readable token counts
+            print(token_summary_line)
+            print("TOKEN_SUMMARY_END")
+
     async def chat_loop(
         self,
         initial_message: str = None,
         debug: bool = False,
+        test_mode: bool = False,
     ):
         """
-        Run an interactive chat loop.
+        Run a chat loop for interactive or automated testing.
 
         Args:
             initial_message: Optional initial message to send
             debug: Whether to print debug information
+            test_mode: If True, reads from stdin for automated testing
         """
-        print("CLI Chat - Type 'quit' to exit, 'reset' to clear session")
-        print(f"Using Request Manager at: {self.request_manager_url}")
+        if test_mode:
+            if debug:
+                print("DEBUG: Test mode chat loop started")
+                print(f"DEBUG: Using Request Manager at: {self.request_manager_url}")
+                print(f"DEBUG: User ID: {self.user_id}")
+        else:
+            print("CLI Chat - Type 'quit' to exit, 'reset' to clear session")
+            print(f"Using Request Manager at: {self.request_manager_url}")
 
         # Send initial greeting if provided
         if initial_message:
-            agent_response = await self.send_message(initial_message, debug=debug)
-            print(f"agent: {agent_response}")
-
-        while True:
+            if debug and test_mode:
+                print(f"DEBUG: Sending initial message: {initial_message}")
             try:
-                message = input("> ")
-                if message.lower() in ["quit", "exit", "q"]:
-                    break
+                agent_response = await self.send_message(initial_message, debug=debug)
+                print(f"agent: {agent_response}")
+                if test_mode:
+                    print(AGENT_MESSAGE_TERMINATOR)
+            except Exception as e:
+                if test_mode:
+                    print(f"Error sending initial message: {e}")
+                    return
+                else:
+                    print(f"Error: {e}")
 
-                if message.strip():
-                    agent_response = await self.send_message(message, debug=debug)
-                    print(f"agent: {agent_response}")
+        # Main message processing loop
+        if test_mode:
+            # Test mode: read from stdin
+            try:
+                import sys
 
+                for line in sys.stdin:
+                    message = line.strip()
+                    if not message:
+                        continue
+
+                    should_continue = await self._process_message(
+                        message, debug, test_mode=True
+                    )
+                    if not should_continue:
+                        break
+
+            except EOFError:
+                # End of input stream
+                pass
             except KeyboardInterrupt:
-                break
+                # Handle Ctrl+C gracefully
+                pass
+        else:
+            # Interactive mode: use input()
+            while True:
+                try:
+                    message = input("> ")
+                    should_continue = await self._process_message(
+                        message, debug, test_mode=False
+                    )
+                    if not should_continue:
+                        break
+
+                except KeyboardInterrupt:
+                    break
 
         await self.close()
 
@@ -296,49 +431,12 @@ class CLIChatClient(RequestManagerClient):
     ):
         """
         Run a test-mode chat loop that reads from stdin for automated testing.
+        This is a convenience wrapper around chat_loop with test_mode=True.
 
         Args:
             initial_message: Optional initial message to send
             debug: Whether to print debug information
         """
-        if debug:
-            print("DEBUG: Test mode chat loop started")
-            print(f"DEBUG: Using Request Manager at: {self.request_manager_url}")
-            print(f"DEBUG: User ID: {self.user_id}")
-
-        # Send initial greeting if provided
-        if initial_message:
-            if debug:
-                print(f"DEBUG: Sending initial message: {initial_message}")
-            try:
-                agent_response = await self.send_message(initial_message, debug=debug)
-                print(f"agent: {agent_response}")
-                print(AGENT_MESSAGE_TERMINATOR)
-            except Exception as e:
-                print(f"Error sending initial message: {e}")
-                return
-
-        # Read messages from stdin for automated testing
-        try:
-            import sys
-
-            for line in sys.stdin:
-                message = line.strip()
-                if not message:
-                    continue
-
-                if message.lower() in ["quit", "exit"]:
-                    break
-
-                agent_response = await self.send_message(message, debug=debug)
-                print(f"agent: {agent_response}")
-                print(AGENT_MESSAGE_TERMINATOR)
-
-        except EOFError:
-            # End of input stream
-            pass
-        except KeyboardInterrupt:
-            # Handle Ctrl+C gracefully
-            pass
-        finally:
-            await self.close()
+        await self.chat_loop(
+            initial_message=initial_message, debug=debug, test_mode=True
+        )

@@ -217,6 +217,7 @@ class Agent:
         skip_all_tools: bool = False,
         skip_mcp_servers_only: bool = False,
         current_state_name: str = None,
+        token_context: str = None,
     ) -> str:
         """Create a response with retry logic for empty responses and errors."""
         response = None
@@ -233,6 +234,7 @@ class Agent:
                     skip_all_tools=skip_all_tools,
                     skip_mcp_servers_only=skip_mcp_servers_only,
                     current_state_name=current_state_name,
+                    token_context=token_context,
                 )
 
                 # Check if response is empty or contains error
@@ -380,6 +382,7 @@ class Agent:
         skip_all_tools: bool = False,
         skip_mcp_servers_only: bool = False,
         current_state_name: str = None,
+        token_context: str = None,
     ) -> str:
         """Create a response using LlamaStack responses API.
 
@@ -449,8 +452,11 @@ class Agent:
             try:
                 from asset_manager.token_counter import count_tokens_from_response
 
+                # Use provided token context or fallback to default
+                context = token_context or "chat_agent"
+
                 count_tokens_from_response(
-                    response, self.model, "chat_agent", messages_with_system
+                    response, self.model, context, messages_with_system
                 )
             except ImportError:
                 pass  # Token counting is optional
