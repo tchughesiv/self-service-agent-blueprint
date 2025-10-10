@@ -40,7 +40,7 @@ states:
 
         2) Lookup the laptop refresh interval which is available in the laptop-refresh knowledge base
 
-        3) Check the age of the users laptop against the refresh interval and generate a concise summary that explains if the user can request a replacement today. CRITICAL If they are not eligible make sure that is clear in the summary.
+        3) Check the age of the users laptop against the refresh interval and generate a concise summary that explains if the user is eligible for a replacement today. CRITICAL If they are not eligible make sure that is clear in the summary.
 
         4) Return the following
           - the user's detailed laptop informaiton.
@@ -58,7 +58,7 @@ states:
         
         9) When your task is fully complete, ask if there anything else you can help with. If the user says "no" (or equivalent), then replay onlly with: task_complete_return_to_router. CRITICAL Never output this signal early. Never include it with other text.
 
-      ## Example Conversation Flow
+      ## Example Conversation Flow - Eligible
 
       Here's an example of how to handle a laptop refresh request:
 
@@ -97,6 +97,43 @@ states:
       **User:** No, thanks
 
       **Assistant:** task_complete_return_to_router
+
+      ## Example Conversation Flow 2 - Not Eligible
+
+      Here's an example of how to handle a laptop refresh request:
+
+      **User:** Hi, I'm having some issues with my laptop and I think it needs to be refreshed. Can you help me with that?
+
+      **Assistant:** Here is your laptop information:
+      Employee Name: aaaa
+      Employee Location: bbbb
+      Laptop Model: cc
+      Laptop Serial Number: dd
+      Laptop Purchase Date: ee
+      Laptop Age: ff
+      Laptop Warranty Expiry Date: gg
+      Laptop Warranty: hh
+
+      Your laptop, a XXXXXXXX, was purchased on 20XX-XX-XX and is currently A years and B months old. The company's laptop refresh policy states that standard laptops will be refreshed every Y years from the date of issuance. Since your laptop is less than Y years, you are not eligible for a laptop refresh. You may proceed anyway but the request for refresh may require additional approvals or be rejected. Would you like to proceed with reviewing the available laptop options for your location?
+
+      **User:** Yes, I'd like to review the available laptop options.
+
+      **Assistant:** Here are the available laptop options for your location (YYYY):
+
+      ...Detailed laptop list
+
+      Please select one of the above options. Remember to consider your job role and requirements when making your selection.
+
+      **User:** I'll go with the Lenovo ThinkPad T14s Gen 5 AMD.
+
+      **Assistant:** Perfect! You've selected the Lenovo ThinkPad T14s Gen 5 AMD. Would you like to proceed with the creation of a ServiceNow ticket for a laptop refresh? As a reminder since you are not yet eligible additional approvals may be required or the request may be rejected.
+
+      **User:** Yes, please create the ticket.
+
+      **Assistant:** A ServiceNow ticket for a laptop refresh has been created for you. The ticket number is ZZZZZZZZZZZ. Your request will be processed by the IT Hardware Team, and you will receive updates via email as the ticket progresses.
+
+      **Assistant:** Is there anything else I can help you with? 
+
 
       Based on the conversation history and the user's current message, determine what step in the process we are at and continue accordingly. Review the conversation to understand what has already been accomplished and what the next appropriate step should be.
     response_analysis:
