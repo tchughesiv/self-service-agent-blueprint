@@ -60,11 +60,24 @@ class CustomLLM(DeepEvalBaseLLM):
         """
         client = self.load_model()
         try:
-            response = client.chat.completions.create(
-                model=self.model_name,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.1,
-            )
+            # Build kwargs for the API call
+            api_kwargs = {
+                "model": self.model_name,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.1,
+                "max_tokens": 2048,  # Ensure we don't truncate JSON responses
+            }
+
+            # Try to enable JSON mode if the prompt appears to be asking for JSON
+            # This helps larger models produce valid JSON more consistently
+            if any(keyword in prompt.lower() for keyword in ["json", "schema", "format"]):
+                try:
+                    api_kwargs["response_format"] = {"type": "json_object"}
+                    logger.debug("Enabled JSON mode for structured output")
+                except Exception as e:
+                    logger.debug(f"JSON mode not supported, continuing without it: {e}")
+
+            response = client.chat.completions.create(**api_kwargs)
 
             # Count tokens from the response
             count_tokens_from_response(
@@ -96,11 +109,24 @@ class CustomLLM(DeepEvalBaseLLM):
                 api_key=self.api_key, base_url=self.base_url
             )
 
-            response = await async_client.chat.completions.create(
-                model=self.model_name,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.0,
-            )
+            # Build kwargs for the API call
+            api_kwargs = {
+                "model": self.model_name,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.1,  # Slightly higher temperature for better JSON formatting
+                "max_tokens": 2048,  # Ensure we don't truncate JSON responses
+            }
+
+            # Try to enable JSON mode if the prompt appears to be asking for JSON
+            # This helps larger models produce valid JSON more consistently
+            if any(keyword in prompt.lower() for keyword in ["json", "schema", "format"]):
+                try:
+                    api_kwargs["response_format"] = {"type": "json_object"}
+                    logger.debug("Enabled JSON mode for structured output")
+                except Exception as e:
+                    logger.debug(f"JSON mode not supported, continuing without it: {e}")
+
+            response = await async_client.chat.completions.create(**api_kwargs)
 
             # Count tokens from the response
             count_tokens_from_response(
