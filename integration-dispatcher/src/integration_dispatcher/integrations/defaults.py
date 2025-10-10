@@ -1,10 +1,13 @@
 """Integration defaults service for user integration configurations."""
 
 import os
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from shared_models import configure_logging
 from shared_models.models import IntegrationDefaultConfig, IntegrationType
+from slack_sdk.errors import SlackApiError
+from slack_sdk.web.async_client import AsyncWebClient
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,11 +21,196 @@ class IntegrationDefaultsService:
         """Initialize integration defaults service."""
         self.default_integrations = self._load_default_integrations()
         self.last_health_status = {}
+        self.slack_client = None
+        self._init_slack_client()
 
         logger.info(
             "Integration defaults service initialized",
             default_integrations=list(self.default_integrations.keys()),
         )
+
+    def _update_slack_config(self, config: Dict[str, Any], **updates) -> None:
+        """Helper method to update Slack config with proper mutation handling."""
+        slack_config = dict(config["config"])  # Create a mutable copy
+        slack_config.update(updates)
+        config["config"] = slack_config  # Update the config
+
+    def _init_slack_client(self):
+        """Initialize Slack client."""
+        bot_token = os.getenv("SLACK_BOT_TOKEN")
+        if bot_token:
+            self.slack_client = AsyncWebClient(token=bot_token)
+            logger.info("Slack client initialized for user lookup")
+        else:
+            logger.warning("SLACK_BOT_TOKEN not found, Slack user lookup disabled")
+
+    async def _validate_mapping_with_ttl(
+        self, mapping, context: str = "validation"
+    ) -> Optional[bool]:
+        """Validate a user mapping with TTL check. Returns True if valid, False if invalid, None if not found."""
+        if not mapping:
+            return None
+
+        # Check if mapping is recent enough to skip validation
+        current_time = datetime.now(timezone.utc)
+        validation_ttl = timedelta(minutes=5)  # 5 minutes TTL
+
+        if (
+            mapping.last_validated_at
+            and current_time - mapping.last_validated_at < validation_ttl
+        ):
+            # Use recent validation result - no API call needed
+            logger.debug(
+                f"Using recent validation result for {context}",
+                user_email=mapping.user_email,
+                slack_user_id=mapping.integration_user_id,
+                last_validated=mapping.last_validated_at,
+            )
+            return True
+        else:
+            # Mapping is stale - validate it
+            logger.info(
+                f"Mapping is stale, validating via Slack API for {context}",
+                user_email=mapping.user_email,
+                slack_user_id=mapping.integration_user_id,
+                last_validated=mapping.last_validated_at,
+            )
+
+            is_valid = await self._validate_slack_user_mapping(
+                mapping.user_email, mapping.integration_user_id
+            )
+
+            # Update validation status
+            mapping.validation_attempts += 1
+            mapping.last_validated_at = current_time
+
+            if is_valid:
+                mapping.last_validation_error = None
+                logger.info(
+                    f"Validated mapping for {context}",
+                    user_email=mapping.user_email,
+                    slack_user_id=mapping.integration_user_id,
+                )
+                return True
+            else:
+                mapping.last_validation_error = "Email no longer matches Slack user ID"
+                logger.warning(
+                    f"Mapping validation failed for {context}",
+                    user_email=mapping.user_email,
+                    slack_user_id=mapping.integration_user_id,
+                    attempts=mapping.validation_attempts,
+                )
+                return False
+
+    async def _get_validated_slack_user_id(self, user_email: str) -> Optional[str]:
+        """Get validated Slack user ID from stored mapping."""
+        if not self.slack_client:
+            logger.warning("Slack client not available for user validation")
+            return None
+
+        try:
+            from shared_models.database import get_database_manager
+            from shared_models.models import IntegrationType, UserIntegrationMapping
+            from sqlalchemy import select
+
+            db_manager = get_database_manager()
+            async with db_manager.get_session() as db:
+                # Get stored mapping
+                stmt = select(UserIntegrationMapping).where(
+                    UserIntegrationMapping.user_email == user_email,
+                    UserIntegrationMapping.integration_type == IntegrationType.SLACK,
+                )
+                result = await db.execute(stmt)
+                mapping = result.scalar_one_or_none()
+
+                if mapping:
+                    logger.info(
+                        "Found Slack user mapping in database",
+                        user_email=user_email,
+                        slack_user_id=mapping.integration_user_id,
+                        created_at=mapping.created_at,
+                        last_validated_at=mapping.last_validated_at,
+                    )
+
+                if not mapping:
+                    logger.warning(
+                        "No Slack user mapping found for email",
+                        user_email=user_email,
+                    )
+                    return None
+
+                # Use shared TTL validation logic
+                is_valid = await self._validate_mapping_with_ttl(
+                    mapping, "email lookup"
+                )
+
+                if is_valid:
+                    await db.commit()
+                    return mapping.integration_user_id
+                else:
+                    await db.commit()
+                    return None
+
+        except Exception as e:
+            logger.error(
+                "Error getting validated Slack user ID",
+                user_email=user_email,
+                error=str(e),
+            )
+            return None
+
+    async def _validate_slack_user_mapping(
+        self, user_email: str, slack_user_id: str
+    ) -> bool:
+        """Validate that the email still matches the Slack user ID."""
+        try:
+            # Get user info from Slack API
+            response = await self.slack_client.users_info(user=slack_user_id)
+            if response["ok"]:
+                user_info = response["user"]
+                profile_email = user_info.get("profile", {}).get("email")
+
+                if profile_email == user_email:
+                    logger.debug(
+                        "Slack user mapping validation successful",
+                        user_email=user_email,
+                        slack_user_id=slack_user_id,
+                        profile_email=profile_email,
+                    )
+                    return True
+                else:
+                    logger.warning(
+                        "Slack user mapping validation failed - email mismatch",
+                        user_email=user_email,
+                        slack_user_id=slack_user_id,
+                        profile_email=profile_email,
+                    )
+                    return False
+            else:
+                logger.warning(
+                    "Failed to get user info for validation",
+                    user_email=user_email,
+                    slack_user_id=slack_user_id,
+                    error=response.get("error"),
+                )
+                return False
+
+        except SlackApiError as e:
+            logger.error(
+                "Slack API error during validation",
+                user_email=user_email,
+                slack_user_id=slack_user_id,
+                error=str(e),
+            )
+            return False
+        except Exception as e:
+            logger.error(
+                "Unexpected error validating Slack user mapping",
+                user_email=user_email,
+                slack_user_id=slack_user_id,
+                error=str(e),
+            )
+            return False
 
     def _load_default_integrations(self) -> Dict[str, Dict[str, Any]]:
         """Load default integration configurations from environment."""
@@ -284,24 +472,38 @@ class IntegrationDefaultsService:
 
                 if not channel_id:
                     # For direct messages, we need to get the DM channel for the user
-                    # We'll set the user_id in the config so the Slack handler can create/find the DM channel
-                    slack_config = dict(config["config"])  # Create a mutable copy
-                    slack_config["slack_user_id"] = user_id
-                    config["config"] = slack_config  # Update the config
-                    logger.info(
-                        "Applied Slack user ID for DM lookup (no channel in context)",
-                        user_id=user_id,
-                        config=slack_config,
+                    # Use stored mapping with validation if no context provided
+                    final_slack_user_id = await self._get_validated_slack_user_id(
+                        user_id
                     )
+                    if final_slack_user_id:
+                        self._update_slack_config(
+                            config, slack_user_id=final_slack_user_id
+                        )
+                        logger.info(
+                            "Applied Slack user ID for DM lookup (no channel in context)",
+                            user_id=user_id,
+                            slack_user_id=final_slack_user_id,
+                            config=config["config"],
+                        )
+                    else:
+                        # No mapping exists - disable Slack integration for this request
+                        logger.warning(
+                            "No valid Slack user mapping found, disabling Slack integration",
+                            user_id=user_id,
+                        )
+                        config["enabled"] = False
+                        logger.info(
+                            "Disabled Slack integration due to missing user mapping",
+                            user_id=user_id,
+                        )
                 else:
-                    slack_config = dict(config["config"])  # Create a mutable copy
-                    slack_config["channel_id"] = channel_id
-                    config["config"] = slack_config  # Update the config
+                    self._update_slack_config(config, channel_id=channel_id)
                     logger.info(
                         "Applied Slack channel context",
                         user_id=user_id,
                         channel_id=channel_id,
-                        config=slack_config,
+                        config=config["config"],
                     )
 
             # Only include enabled integrations
@@ -411,35 +613,85 @@ class IntegrationDefaultsService:
             if default_config.integration_type.value == "SLACK":
                 # For Slack, include channel information from context or use user ID for DM
                 channel_id = None
+                slack_user_id = None
+
                 if context:
                     channel_id = context.get("slack_channel")
+                    slack_user_id = context.get("slack_user_id")
                     logger.info(
-                        "Found Slack channel in context",
+                        "Found Slack context",
                         user_id=user_id,
                         channel_id=channel_id,
+                        slack_user_id=slack_user_id,
                         context=context,
+                    )
+                else:
+                    logger.warning(
+                        "No context provided for Slack integration",
+                        user_id=user_id,
                     )
 
                 if not channel_id:
                     # For direct messages, we need to get the DM channel for the user
-                    # We'll set the user_id in the config so the Slack handler can create/find the DM channel
-                    slack_config = dict(config["config"])  # Create a mutable copy
-                    slack_config["slack_user_id"] = user_id
-                    config["config"] = slack_config  # Update the config
-                    logger.info(
-                        "Applied Slack user ID for DM lookup (no channel in context)",
-                        user_id=user_id,
-                        config=slack_config,
-                    )
+                    # Use the slack_user_id from context if available, otherwise use stored mapping with validation
+                    if slack_user_id:
+                        # Use the slack_user_id from context (e.g., from Slack message)
+                        final_slack_user_id = slack_user_id
+                        self._update_slack_config(
+                            config, slack_user_id=final_slack_user_id
+                        )
+                        logger.info(
+                            "Using Slack user ID from context",
+                            user_id=user_id,
+                            slack_user_id=slack_user_id,
+                        )
+                    else:
+                        # No context (e.g., CLI/web request), use stored mapping with validation
+                        logger.info(
+                            "No Slack context provided, attempting to lookup user mapping",
+                            user_id=user_id,
+                        )
+                        final_slack_user_id = await self._get_validated_slack_user_id(
+                            user_id
+                        )
+                        if final_slack_user_id:
+                            logger.info(
+                                "Using validated Slack user ID from mapping",
+                                user_id=user_id,
+                                slack_user_id=final_slack_user_id,
+                            )
+                            self._update_slack_config(
+                                config, slack_user_id=final_slack_user_id
+                            )
+                            logger.info(
+                                "Applied Slack user ID for DM lookup (no channel in context)",
+                                user_id=user_id,
+                                slack_user_id_from_context=slack_user_id,
+                                final_slack_user_id=final_slack_user_id,
+                                config=config["config"],
+                            )
+                        else:
+                            # No mapping exists - disable Slack integration for this request
+                            logger.warning(
+                                "No valid Slack user mapping found, disabling Slack integration",
+                                user_id=user_id,
+                            )
+                            config["enabled"] = False
+                            logger.info(
+                                "Disabled Slack integration due to missing user mapping",
+                                user_id=user_id,
+                            )
                 else:
-                    slack_config = dict(config["config"])  # Create a mutable copy
-                    slack_config["channel_id"] = channel_id
-                    config["config"] = slack_config  # Update the config
+                    updates = {"channel_id": channel_id}
+                    if slack_user_id:
+                        updates["slack_user_id"] = slack_user_id
+                    self._update_slack_config(config, **updates)
                     logger.info(
                         "Applied Slack channel context",
                         user_id=user_id,
                         channel_id=channel_id,
-                        config=slack_config,
+                        slack_user_id=slack_user_id,
+                        config=config["config"],
                     )
 
             # Only include enabled integrations

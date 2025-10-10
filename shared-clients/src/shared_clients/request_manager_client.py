@@ -27,7 +27,7 @@ class RequestManagerClient:
         request_manager_url: str = None,
         user_id: str = None,
         timeout: float = 180.0,
-        use_responses: bool = False,
+        use_responses: bool = True,
     ):
         """
         Initialize the Request Manager client.

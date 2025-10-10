@@ -36,6 +36,29 @@ class TestRequestNormalizer:
         assert normalized.integration_context["slack_user_id"] == "U123456789"
         assert normalized.requires_routing is True
 
+    def test_normalize_slack_request_dm(self):
+        """Test Slack request normalization for DM requests (no channel_id)."""
+        slack_request = SlackRequest(
+            user_id="user123",
+            content="Hello, I need help with my laptop",
+            channel_id=None,  # DM request - no channel
+            thread_id=None,
+            slack_user_id="U123456789",
+            slack_team_id="T123456789",
+        )
+
+        normalized = self.normalizer.normalize_request(slack_request, self.session_id)
+
+        assert normalized.request_id is not None
+        assert normalized.session_id == self.session_id
+        assert normalized.user_id == "user123"
+        assert normalized.integration_type == IntegrationType.SLACK
+        assert normalized.content == "Hello, I need help with my laptop"
+        assert normalized.integration_context["platform"] == "slack"
+        assert normalized.integration_context["channel_id"] is None
+        assert normalized.integration_context["slack_user_id"] == "U123456789"
+        assert normalized.requires_routing is True
+
     def test_normalize_web_request(self):
         """Test web request normalization."""
         web_request = WebRequest(

@@ -323,6 +323,35 @@ class IntegrationCredential(Base, TimestampMixin):
     )
 
 
+class UserIntegrationMapping(Base, TimestampMixin):
+    """Mapping between user emails and integration-specific user IDs."""
+
+    __tablename__ = "user_integration_mappings"
+
+    id = Column(Integer, primary_key=True)
+    user_email = Column(String(255), nullable=False, index=True)
+    integration_type = Column(SQLEnum(IntegrationType), nullable=False)
+    integration_user_id = Column(String(255), nullable=False)  # e.g., Slack user ID
+
+    # Validation metadata
+    last_validated_at = Column(TIMESTAMP(timezone=True))
+    validation_attempts = Column(Integer, default=0, nullable=False)
+    last_validation_error = Column(Text)
+
+    # Metadata
+    created_by = Column(String(255), default="system")
+
+    # Ensure one mapping per email per integration type
+    __table_args__ = (
+        UniqueConstraint(
+            "user_email", "integration_type", name="uq_user_integration_mapping"
+        ),
+        Index(
+            "ix_user_integration_mapping_email_type", "user_email", "integration_type"
+        ),
+    )
+
+
 # Shared Pydantic models for inter-service communication
 class AgentResponse(BaseModel):
     """Shared model for agent responses across all services."""

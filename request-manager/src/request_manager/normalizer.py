@@ -42,7 +42,7 @@ class RequestNormalizer:
             "content": request.content,
             "created_at": datetime.now(timezone.utc),
             "target_agent_id": target_agent_id,
-            "use_responses": getattr(request, "use_responses", False),
+            "use_responses": request.use_responses,
         }
 
         # Handle integration-specific normalization
@@ -166,10 +166,18 @@ class RequestNormalizer:
 
     def _extract_slack_user_context(self, request: SlackRequest) -> Dict[str, Any]:
         """Extract user context from Slack request."""
+        # Determine channel type - if channel_id is None, it's a DM request
+        if request.channel_id is None:
+            channel_type = "dm"
+        elif request.channel_id.startswith("D"):
+            channel_type = "dm"
+        else:
+            channel_type = "channel"
+
         context = {
             "platform_user_id": request.slack_user_id,
             "team_id": request.slack_team_id,
-            "channel_type": "dm" if request.channel_id.startswith("D") else "channel",
+            "channel_type": channel_type,
         }
 
         # Add any additional context from metadata

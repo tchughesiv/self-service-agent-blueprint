@@ -441,7 +441,7 @@ class AgentService:
                 await self._publish_processing_event(request)
 
             # Check if responses mode is requested
-            if getattr(request, "use_responses", False):
+            if request.use_responses:
                 logger.info(
                     "Responses mode requested, delegating to responses session manager",
                     request_id=request.request_id,
@@ -1023,6 +1023,11 @@ class AgentService:
         try:
             from shared_models import get_database_manager
 
+            # Handle session management (increment request count) for responses mode
+            await self._handle_session_management(
+                request.session_id, request.request_id
+            )
+
             # Get database session for responses session manager
             db_manager = get_database_manager()
 
@@ -1407,7 +1412,7 @@ def _create_normalized_request_from_data(
         user_context=request_data.get("user_context", {}),
         target_agent_id=request_data.get("target_agent_id"),
         requires_routing=request_data.get("requires_routing", True),
-        use_responses=request_data.get("use_responses", False),
+        use_responses=request_data.get("use_responses", True),
         created_at=datetime.fromisoformat(
             request_data.get("created_at", datetime.now().isoformat())
         ),
