@@ -70,7 +70,9 @@ class CustomLLM(DeepEvalBaseLLM):
 
             # Try to enable JSON mode if the prompt appears to be asking for JSON
             # This helps larger models produce valid JSON more consistently
-            if any(keyword in prompt.lower() for keyword in ["json", "schema", "format"]):
+            if any(
+                keyword in prompt.lower() for keyword in ["json", "schema", "format"]
+            ):
                 try:
                     api_kwargs["response_format"] = {"type": "json_object"}
                     logger.debug("Enabled JSON mode for structured output")
@@ -119,7 +121,9 @@ class CustomLLM(DeepEvalBaseLLM):
 
             # Try to enable JSON mode if the prompt appears to be asking for JSON
             # This helps larger models produce valid JSON more consistently
-            if any(keyword in prompt.lower() for keyword in ["json", "schema", "format"]):
+            if any(
+                keyword in prompt.lower() for keyword in ["json", "schema", "format"]
+            ):
                 try:
                     api_kwargs["response_format"] = {"type": "json_object"}
                     logger.debug("Enabled JSON mode for structured output")
