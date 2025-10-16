@@ -29,7 +29,7 @@ alembic_logger = logging.getLogger("alembic")
 alembic_logger.setLevel(logging.DEBUG)
 
 
-async def wait_for_database(max_retries: int = 30, retry_delay: int = 2) -> bool:
+async def wait_for_database(max_retries: int = 150, retry_delay: int = 2) -> bool:
     """Wait for database to become available."""
     logger.info("Waiting for database to become available...")
 
