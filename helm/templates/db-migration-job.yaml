@@ -18,31 +18,6 @@ spec:
         app: {{ include "self-service-agent.fullname" . }}-db-migration
     spec:
       restartPolicy: OnFailure
-      initContainers:
-      - name: wait-for-db
-        image: postgres:15-alpine
-        imagePullPolicy: {{ .Values.image.pullPolicy }}
-        command: ['sh', '-c']
-        args:
-        - |
-          until pg_isready -h pgvector -p 5432 -U "$POSTGRES_USER"; do
-            echo "Waiting for PostgreSQL to be ready..."
-            sleep 5
-          done
-          echo "PostgreSQL is ready!"
-        env:
-        - name: POSTGRES_USER
-          valueFrom:
-            secretKeyRef:
-              name: pgvector
-              key: user
-        securityContext:
-          allowPrivilegeEscalation: false
-          capabilities:
-            drop:
-            - ALL
-          seccompProfile:
-            type: RuntimeDefault
       containers:
       - name: db-migration
         image: "{{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ .Values.image.tag }}"
