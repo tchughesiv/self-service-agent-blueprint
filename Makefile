@@ -380,15 +380,16 @@ lint: format
 	@echo "1. Running flake8 for code style and basic issues..."
 	uv run flake8 .
 	@echo "2. Running mypy for import validation (imports only)..."
-	uv run mypy --ignore-missing-imports --no-strict-optional --disable-error-code=assignment \
-		--disable-error-code=var-annotated --disable-error-code=attr-defined \
-		--disable-error-code=return-value --disable-error-code=call-overload \
-		--disable-error-code=dict-item --disable-error-code=list-item \
-		--disable-error-code=arg-type --disable-error-code=valid-type \
-		--disable-error-code=misc --disable-error-code=operator \
-		--disable-error-code=union-attr --disable-error-code=type-var \
-		--disable-error-code=call-arg --disable-error-code=annotation-unchecked \
+	uv run mypy --strict \
 		$$(find . -name "*.py" -not -path "*/.venv/*" -not -path "*/__pycache__/*" -not -path "*/.git/*" -not -path "*/node_modules/*")
+#		--no-strict-optional --disable-error-code=assignment \
+#		--disable-error-code=var-annotated --disable-error-code=attr-defined \
+#		--disable-error-code=return-value --disable-error-code=call-overload \
+#		--disable-error-code=dict-item --disable-error-code=list-item \
+#		--disable-error-code=arg-type --disable-error-code=valid-type \
+#		--disable-error-code=misc --disable-error-code=operator \
+#		--disable-error-code=union-attr --disable-error-code=type-var \
+#		--disable-error-code=call-arg --disable-error-code=annotation-unchecked \
 	@echo "3. Running isort to check import organization..."
 	uv run isort --check-only --diff .
 	@echo "Linting completed successfully!"

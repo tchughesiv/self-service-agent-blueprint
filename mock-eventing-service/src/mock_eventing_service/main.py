@@ -28,12 +28,12 @@ class EventSubscription(BaseModel):
 class MockEventingService:
     """Mock Knative Eventing service that simulates broker behavior."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.subscriptions: List[EventSubscription] = []
         self.event_history: List[Dict[str, Any]] = []
         self.delivery_attempts: Dict[str, int] = {}
 
-    def add_subscription(self, subscription: EventSubscription):
+    def add_subscription(self, subscription: EventSubscription) -> None:
         """Add an event subscription."""
         self.subscriptions.append(subscription)
         logger.info(
@@ -202,7 +202,7 @@ mock_service = MockEventingService()
 
 
 # Auto-create default subscriptions on startup
-async def initialize_default_subscriptions():
+async def initialize_default_subscriptions() -> None:
     """Initialize default subscriptions for the mock eventing service."""
     try:
         # Get the service name from environment
@@ -285,7 +285,7 @@ app = FastAPI(
 
 
 @app.on_event("startup")
-async def startup_event():
+async def startup_event() -> None:
     """Initialize the service on startup."""
     await initialize_default_subscriptions()
 
@@ -301,7 +301,7 @@ app.add_middleware(
 
 
 @app.get("/health")
-async def health_check():
+async def health_check() -> Dict[str, Any]:
     """Health check endpoint."""
     return await simple_health_check(
         service_name="mock-eventing-service",
@@ -314,7 +314,7 @@ async def broker_endpoint(
     namespace: str,
     broker_name: str,
     request: Request,
-):
+) -> Dict[str, Any]:
     """Mock Knative Broker endpoint that accepts CloudEvents."""
     try:
         # Parse CloudEvent from request
@@ -434,7 +434,7 @@ async def broker_endpoint(
 
 
 @app.post("/subscriptions")
-async def add_subscription(subscription: EventSubscription):
+async def add_subscription(subscription: EventSubscription) -> Dict[str, Any]:
     """Add an event subscription."""
     mock_service.add_subscription(subscription)
     return {"status": "created", "subscription": subscription.model_dump()}
@@ -444,7 +444,7 @@ async def add_subscription(subscription: EventSubscription):
 async def remove_subscription(
     event_type: str,
     subscriber_url: str,
-):
+) -> Dict[str, Any]:
     """Remove an event subscription."""
     mock_service.remove_subscription(event_type, subscriber_url)
     return {
@@ -455,7 +455,7 @@ async def remove_subscription(
 
 
 @app.get("/subscriptions")
-async def list_subscriptions():
+async def list_subscriptions() -> Dict[str, Any]:
     """List all event subscriptions."""
     return {
         "subscriptions": [sub.model_dump() for sub in mock_service.subscriptions],
@@ -464,7 +464,7 @@ async def list_subscriptions():
 
 
 @app.get("/events")
-async def list_events(limit: int = 100):
+async def list_events(limit: int = 100) -> Dict[str, Any]:
     """List recent events."""
     recent_events = (
         mock_service.event_history[-limit:] if mock_service.event_history else []

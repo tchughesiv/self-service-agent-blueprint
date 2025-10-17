@@ -7,7 +7,7 @@ from shared_models.agent_types import (
 )
 
 
-def test_agent_mapping():
+def test_agent_mapping() -> None:
     """Test AgentMapping functionality."""
     mapping_data = {
         "laptop-refresh": "960a3f77-ba6a-4513-9df8-fe8a29e390b5",
@@ -31,7 +31,7 @@ def test_agent_mapping():
     assert mapping.get_name("00000000-0000-0000-0000-000000000000") is None
 
 
-def test_agent_mapping_conversion():
+def test_agent_mapping_conversion() -> None:
     """Test AgentMapping conversion methods."""
     mapping_data = {
         "laptop-refresh": "960a3f77-ba6a-4513-9df8-fe8a29e390b5",
@@ -55,7 +55,7 @@ def test_agent_mapping_conversion():
     assert uuid == "960a3f77-ba6a-4513-9df8-fe8a29e390b5"
 
 
-def test_agent_mapping_to_dict():
+def test_agent_mapping_to_dict() -> None:
     """Test AgentMapping to_dict method."""
     mapping_data = {
         "laptop-refresh": "960a3f77-ba6a-4513-9df8-fe8a29e390b5",
@@ -68,7 +68,7 @@ def test_agent_mapping_to_dict():
     assert result_dict == mapping_data
 
 
-def test_utility_functions():
+def test_utility_functions() -> None:
     """Test utility functions."""
     # Test is_agent_name
     assert is_agent_name("laptop-refresh") is True
@@ -83,7 +83,7 @@ def test_utility_functions():
     assert is_agent_uuid("") is False
 
 
-def test_agent_mapping_invalid_data():
+def test_agent_mapping_invalid_data() -> None:
     """Test AgentMapping with invalid data."""
     # Test with invalid mapping (name that looks like UUID)
     invalid_mapping = {

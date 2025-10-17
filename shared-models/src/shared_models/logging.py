@@ -3,7 +3,7 @@
 import logging
 import os
 import sys
-from typing import Optional
+from typing import Any, Optional
 
 import structlog
 
@@ -127,19 +127,19 @@ class ServiceLogger:
 
 
 # Convenience functions for common logging patterns
-def log_request(logger: structlog.BoundLogger, request_id: str, **context):
+def log_request(logger: structlog.BoundLogger, request_id: str, **context: Any) -> None:
     """Log a request with standard context."""
     logger.debug("Request received", request_id=request_id, **context)
 
 
 def log_response(
-    logger: structlog.BoundLogger, request_id: str, status: str, **context
-):
+    logger: structlog.BoundLogger, request_id: str, status: str, **context: Any
+) -> None:
     """Log a response with standard context."""
     logger.debug("Response sent", request_id=request_id, status=status, **context)
 
 
-def log_error(logger: structlog.BoundLogger, error: Exception, **context):
+def log_error(logger: structlog.BoundLogger, error: Exception, **context: Any) -> None:
     """Log an error with standard context."""
     logger.error(
         "Error occurred", error=str(error), error_type=type(error).__name__, **context

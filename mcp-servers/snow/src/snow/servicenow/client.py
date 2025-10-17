@@ -29,7 +29,7 @@ class ServiceNowClient:
     ServiceNow API client for making requests to ServiceNow instance.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """
         Initialize the ServiceNow client with configuration from environment variables.
         """

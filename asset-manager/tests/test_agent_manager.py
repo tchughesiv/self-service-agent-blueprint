@@ -6,7 +6,7 @@ from asset_manager.util import load_config_from_path
 
 
 @pytest.fixture
-def test_subject():
+def test_subject() -> AgentManager:
     config_path = Path("local_testing/config")
     config = load_config_from_path(config_path)
     agent_manager = AgentManager(config)
@@ -14,7 +14,7 @@ def test_subject():
     return agent_manager
 
 
-def test_agent_manager(test_subject: AgentManager):
+def test_agent_manager(test_subject: AgentManager) -> None:
     config = test_subject.config()
     assert config is not None
     assert config["timeout"] == 120.0

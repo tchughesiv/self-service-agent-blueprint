@@ -4,7 +4,7 @@ import logging
 import os
 import subprocess
 import time
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -34,9 +34,9 @@ class OpenShiftChatClient:
         self.test_script = test_script
         self.authoritative_user_id = authoritative_user_id
         self.reset_conversation = reset_conversation
-        self.process = None
+        self.process: Optional[subprocess.Popen[str]] = None
         self.session_active = False
-        self.session_output = []  # Capture all output for token parsing
+        self.session_output: list[str] = []  # Capture all output for token parsing
         self.app_tokens = {
             "input": 0,
             "output": 0,

@@ -5,11 +5,11 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Union
 
 from shared_models import get_enum_value
+from shared_models.models import NormalizedRequest
 
 from .schemas import (
     BaseRequest,
     CLIRequest,
-    NormalizedRequest,
     SlackRequest,
     ToolRequest,
     WebRequest,

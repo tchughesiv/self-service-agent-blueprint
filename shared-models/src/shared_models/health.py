@@ -19,9 +19,9 @@ class HealthCheckResult:
         service_name: str = "unknown",
         version: str = "0.1.0",
         database_connected: bool = False,
-        integrations_available: List[str] = None,
-        integration_errors: Dict[str, str] = None,
-        services: Dict[str, str] = None,
+        integrations_available: List[str] | None = None,
+        integration_errors: Dict[str, str] | None = None,
+        services: Dict[str, str] | None = None,
     ):
         self.status = status
         self.service_name = service_name

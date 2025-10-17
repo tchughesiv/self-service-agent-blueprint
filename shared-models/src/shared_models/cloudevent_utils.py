@@ -181,7 +181,7 @@ class CloudEventHandler:
         return request_data
 
     @staticmethod
-    def extract_response_data(response_data: Dict[str, Any]) -> tuple:
+    def extract_response_data(response_data: Dict[str, Any]) -> tuple[Any, ...]:
         """Extract and validate response data from CloudEvents.
 
         Args:
@@ -216,7 +216,7 @@ class CloudEventHandler:
         return request_id, session_id, agent_id, content, user_id
 
     @staticmethod
-    def extract_request_data(request_data: Dict[str, Any]) -> tuple:
+    def extract_request_data(request_data: Dict[str, Any]) -> tuple[Any, ...]:
         """Extract and validate request data from CloudEvents.
 
         Args:
@@ -239,7 +239,7 @@ class CloudEventHandler:
         return request_id, user_id, message, session_id
 
     @staticmethod
-    def get_event_metadata(event_data: Dict[str, Any]) -> tuple:
+    def get_event_metadata(event_data: Dict[str, Any]) -> tuple[Any, ...]:
         """Extract common event metadata.
 
         Args:

@@ -35,7 +35,7 @@ def get_enum_value(enum_obj: Union[Enum, str, Any]) -> str:
         enum instances via Pydantic field validators before reaching this function.
     """
     if hasattr(enum_obj, "value"):
-        return enum_obj.value
+        return str(enum_obj.value)
     return str(enum_obj)
 
 

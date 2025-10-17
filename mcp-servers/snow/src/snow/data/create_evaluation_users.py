@@ -14,6 +14,7 @@ Environment Variables Required:
 
 import os
 import sys
+from typing import Any
 
 import requests
 from requests.auth import HTTPBasicAuth
@@ -23,7 +24,7 @@ from snow.data.data import MOCK_EMPLOYEE_DATA
 class ServiceNowUserCreator:
     """Create users and laptops in ServiceNow based on mock data."""
 
-    def __init__(self, instance_url, username, password):
+    def __init__(self, instance_url: str, username: str, password: str) -> None:
         """Initialize the ServiceNow user creator.
 
         Args:
@@ -45,7 +46,7 @@ class ServiceNowUserCreator:
         self.location_cache = {}  # Cache location lookups to avoid duplicate API calls
         self.errors = []
 
-    def get_or_create_model(self, model_name):
+    def get_or_create_model(self, model_name: str) -> str:
         """Get or create a product model in ServiceNow.
 
         Args:
@@ -120,7 +121,7 @@ class ServiceNowUserCreator:
             print(f"    ⚠️  {error_msg}")
             return None
 
-    def get_or_create_location(self, location_name):
+    def get_or_create_location(self, location_name: str) -> str:
         """Get or create a location in ServiceNow.
 
         Args:
@@ -197,7 +198,7 @@ class ServiceNowUserCreator:
             print(f"    ⚠️  {error_msg}")
             return None
 
-    def create_user(self, employee_data):
+    def create_user(self, employee_data: dict[str, Any]) -> str:
         """Create a user in ServiceNow.
 
         Args:
@@ -262,7 +263,7 @@ class ServiceNowUserCreator:
             self.errors.append(error_msg)
             return None
 
-    def create_computer(self, employee_data, user_sys_id):
+    def create_computer(self, employee_data: dict[str, Any], user_sys_id: str) -> str:
         """Create a computer/laptop in ServiceNow.
 
         Args:
@@ -407,7 +408,7 @@ class ServiceNowUserCreator:
 
             print()
 
-    def print_summary(self):
+    def print_summary(self) -> None:
         """Print a summary of created resources and errors."""
         print("=" * 80)
         print("Summary")
