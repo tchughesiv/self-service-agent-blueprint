@@ -7,7 +7,7 @@ Provides thread-safe token counting for LLM calls in test scripts.
 
 import threading
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
@@ -21,7 +21,7 @@ class TokenUsage:
     context: Optional[str] = None
     timestamp: Optional[float] = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.timestamp is None:
             import time
 
@@ -41,7 +41,7 @@ class TokenStats:
     max_total_tokens: int = 0
     calls: List[TokenUsage] = field(default_factory=list)
 
-    def add_usage(self, usage: TokenUsage):
+    def add_usage(self, usage: TokenUsage) -> None:
         """Add a token usage record"""
         self.total_input_tokens += usage.input_tokens
         self.total_output_tokens += usage.output_tokens
@@ -62,7 +62,7 @@ class TokenCounter:
     _instance = None
     _lock = threading.Lock()
 
-    def __new__(cls):
+    def __new__(cls) -> "TokenCounter":
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
@@ -70,7 +70,7 @@ class TokenCounter:
                     cls._instance._initialized = False
         return cls._instance
 
-    def __init__(self):
+    def __init__(self) -> None:
         if not getattr(self, "_initialized", False):
             self._stats_lock = threading.Lock()
             self._stats = TokenStats()
@@ -83,7 +83,7 @@ class TokenCounter:
         output_tokens: int,
         model: Optional[str] = None,
         context: Optional[str] = None,
-    ):
+    ) -> None:
         """Add token usage with optional context"""
         total_tokens = input_tokens + output_tokens
         usage = TokenUsage(
@@ -124,7 +124,7 @@ class TokenCounter:
                     calls=self._stats.calls.copy(),
                 )
 
-    def reset(self, context: Optional[str] = None):
+    def reset(self, context: Optional[str] = None) -> None:
         """Reset token counts, optionally for a specific context"""
         with self._stats_lock:
             if context:
@@ -134,7 +134,7 @@ class TokenCounter:
                 self._stats = TokenStats()
                 self._context_stats.clear()
 
-    def print_summary(self, context: Optional[str] = None, prefix: str = ""):
+    def print_summary(self, context: Optional[str] = None, prefix: str = "") -> None:
         """Print a summary of token usage"""
         stats = self.get_stats(context)
 
@@ -199,7 +199,7 @@ def estimate_tokens_from_text(text: str) -> int:
     return max(1, int(base_tokens))
 
 
-def count_tokens_from_messages(messages: list) -> int:
+def count_tokens_from_messages(messages: list[Any]) -> int:
     """Estimate input tokens from the actual messages being sent to LLM"""
     if not messages:
         return 0
@@ -222,11 +222,11 @@ def count_tokens_from_messages(messages: list) -> int:
 
 
 def count_tokens_from_response(
-    response,
+    response: Any,
     model: Optional[str] = None,
     context: Optional[str] = None,
-    input_messages: list = None,
-):
+    input_messages: list[Any] | None = None,
+) -> tuple[int, int]:
     """Extract and count tokens from a LlamaStack response object"""
     try:
         input_tokens = 0
@@ -292,7 +292,7 @@ def add_tokens(
     output_tokens: int,
     model: Optional[str] = None,
     context: Optional[str] = None,
-):
+) -> None:
     """Global function to add tokens to the counter"""
     counter = TokenCounter()
     counter.add_tokens(input_tokens, output_tokens, model, context)
@@ -304,13 +304,13 @@ def get_token_stats(context: Optional[str] = None) -> TokenStats:
     return counter.get_stats(context)
 
 
-def print_token_summary(context: Optional[str] = None, prefix: str = ""):
+def print_token_summary(context: Optional[str] = None, prefix: str = "") -> None:
     """Global function to print token summary"""
     counter = TokenCounter()
     counter.print_summary(context, prefix)
 
 
-def reset_tokens(context: Optional[str] = None):
+def reset_tokens(context: Optional[str] = None) -> None:
     """Global function to reset token counts"""
     counter = TokenCounter()
     counter.reset(context)

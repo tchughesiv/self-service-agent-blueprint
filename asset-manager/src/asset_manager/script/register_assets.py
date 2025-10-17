@@ -6,7 +6,7 @@ from asset_manager.tg_manager import ToolgroupsManager
 from asset_manager.util import load_config_from_path
 
 
-def main():
+def main() -> None:
     config_path = Path("config")
     config = load_config_from_path(config_path)
 

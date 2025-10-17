@@ -4,7 +4,7 @@ from asset_manager.agent_manager import AgentManager
 from asset_manager.util import load_config_from_path
 
 
-def main():
+def main() -> None:
     config_path = Path("local_testing/config")
     config = load_config_from_path(config_path)
     agent_manager = AgentManager(config)

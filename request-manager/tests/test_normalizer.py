@@ -8,12 +8,12 @@ from shared_models.models import IntegrationType
 class TestRequestNormalizer:
     """Test cases for RequestNormalizer."""
 
-    def setup_method(self):
+    def setup_method(self) -> None:
         """Set up test fixtures."""
         self.normalizer = RequestNormalizer()
         self.session_id = "test-session-123"
 
-    def test_normalize_slack_request(self):
+    def test_normalize_slack_request(self) -> None:
         """Test Slack request normalization."""
         slack_request = SlackRequest(
             user_id="user123",
@@ -36,7 +36,7 @@ class TestRequestNormalizer:
         assert normalized.integration_context["slack_user_id"] == "U123456789"
         assert normalized.requires_routing is True
 
-    def test_normalize_slack_request_dm(self):
+    def test_normalize_slack_request_dm(self) -> None:
         """Test Slack request normalization for DM requests (no channel_id)."""
         slack_request = SlackRequest(
             user_id="user123",
@@ -59,7 +59,7 @@ class TestRequestNormalizer:
         assert normalized.integration_context["slack_user_id"] == "U123456789"
         assert normalized.requires_routing is True
 
-    def test_normalize_web_request(self):
+    def test_normalize_web_request(self) -> None:
         """Test web request normalization."""
         web_request = WebRequest(
             user_id="webuser123",
@@ -78,7 +78,7 @@ class TestRequestNormalizer:
         assert normalized.user_context["os"] == "windows"
         assert normalized.user_context["is_mobile"] is False
 
-    def test_normalize_cli_request(self):
+    def test_normalize_cli_request(self) -> None:
         """Test CLI request normalization."""
         cli_request = CLIRequest(
             user_id="cliuser123",
@@ -94,7 +94,7 @@ class TestRequestNormalizer:
         assert normalized.integration_context["cli_session_id"] == "cli-session-456"
         assert normalized.user_context["command_context"]["command"] == "agent"
 
-    def test_normalize_tool_request(self):
+    def test_normalize_tool_request(self) -> None:
         """Test tool request normalization."""
         tool_request = ToolRequest(
             user_id="tooluser123",
@@ -116,7 +116,7 @@ class TestRequestNormalizer:
         assert normalized.requires_routing is False  # Tool specifies target agent
         assert normalized.user_context["automated_request"] is True
 
-    def test_user_agent_parsing(self):
+    def test_user_agent_parsing(self) -> None:
         """Test user agent parsing."""
         test_cases = [
             (
@@ -138,7 +138,7 @@ class TestRequestNormalizer:
             for key, value in expected.items():
                 assert result[key] == value
 
-    def test_tool_agent_mapping(self):
+    def test_tool_agent_mapping(self) -> None:
         """Test tool to agent mapping."""
         mappings = [
             ("snow-integration", "laptop-refresh-agent"),

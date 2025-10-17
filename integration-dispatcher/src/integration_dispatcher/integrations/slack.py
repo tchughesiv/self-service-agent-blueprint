@@ -16,7 +16,7 @@ logger = configure_logging("integration-dispatcher")
 class SlackIntegrationHandler(BaseIntegrationHandler):
     """Handler for Slack message delivery."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.bot_token = os.getenv("SLACK_BOT_TOKEN")
         self.client = AsyncWebClient(token=self.bot_token) if self.bot_token else None

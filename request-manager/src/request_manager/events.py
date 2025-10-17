@@ -4,14 +4,13 @@ import asyncio
 import json
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 import httpx
 from cloudevents.http import CloudEvent, to_structured
 from cloudevents.http.event import CloudEvent as CloudEventType
 from shared_models import EventTypes, configure_logging, get_enum_value
-
-from .schemas import AgentResponse, NormalizedRequest
+from shared_models.models import AgentResponse, NormalizedRequest
 
 logger = configure_logging("request-manager")
 
@@ -303,9 +302,9 @@ class CloudEventHandler:
     """Handles incoming CloudEvents."""
 
     def __init__(self) -> None:
-        self.handlers: Dict[str, callable] = {}
+        self.handlers: Dict[str, Callable[..., Any]] = {}
 
-    def register_handler(self, event_type: str, handler: callable) -> None:
+    def register_handler(self, event_type: str, handler: Callable[..., Any]) -> None:
         """Register a handler for a specific event type."""
         self.handlers[event_type] = handler
 

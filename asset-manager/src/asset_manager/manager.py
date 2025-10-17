@@ -1,5 +1,6 @@
 import logging
 import os
+from typing import Any
 
 from llama_stack_client import LlamaStackClient
 
@@ -9,7 +10,7 @@ class Manager:
         self._client = None
         self._config = config
 
-    def connect_to_llama_stack(self):
+    def connect_to_llama_stack(self) -> None:
         if self._client is None:
             logging.debug("Connecting to LlamaStack")
             llama_stack_host = os.environ["LLAMASTACK_SERVICE_HOST"]
@@ -20,8 +21,8 @@ class Manager:
         else:
             logging.debug("Already connected to LlamaStack")
 
-    def config(self):
+    def config(self) -> Any:
         return self._config
 
-    def is_connected(self):
+    def is_connected(self) -> bool:
         return self._client is not None

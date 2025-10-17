@@ -17,7 +17,7 @@ logger = configure_logging("integration-dispatcher")
 class IntegrationDefaultsService:
     """Service for managing integration defaults with user overrides."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize integration defaults service."""
         self.default_integrations = self._load_default_integrations()
         self.last_health_status = {}
@@ -35,7 +35,7 @@ class IntegrationDefaultsService:
         slack_config.update(updates)
         config["config"] = slack_config  # Update the config
 
-    def _init_slack_client(self):
+    def _init_slack_client(self) -> None:
         """Initialize Slack client."""
         bot_token = os.getenv("SLACK_BOT_TOKEN")
         if bot_token:
@@ -525,7 +525,7 @@ class IntegrationDefaultsService:
         user_overrides: Optional[Dict[str, Any]] = None,
         db: Optional[AsyncSession] = None,
         context: Optional[Dict[str, Any]] = None,
-        exclude_types: Optional[set] = None,
+        exclude_types: Optional[set[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Get integration configurations for a user using integration defaults with overrides.
 

@@ -61,7 +61,7 @@ logger = configure_logging("integration-dispatcher")
 class IntegrationDispatcher:
     """Main dispatcher for managing integrations."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.handlers: Dict[IntegrationType, BaseIntegrationHandler] = {
             IntegrationType.SLACK: SlackIntegrationHandler(),
             IntegrationType.EMAIL: EmailIntegrationHandler(),
@@ -382,7 +382,7 @@ class IntegrationDispatcher:
 dispatcher = IntegrationDispatcher()
 
 
-async def _integration_dispatcher_startup():
+async def _integration_dispatcher_startup() -> None:
     """Custom startup logic for Integration Dispatcher."""
     # Log environment variables (without sensitive data)
     logger.info(
@@ -420,7 +420,7 @@ async def _integration_dispatcher_startup():
 
 
 # Create lifespan using shared utility with custom startup
-def lifespan(app: FastAPI):
+def lifespan(app: FastAPI) -> Any:
     return create_shared_lifespan(
         service_name="integration-dispatcher",
         version=__version__,
@@ -448,7 +448,7 @@ integration_defaults_service = IntegrationDefaultsService()
 if os.getenv("LOG_LEVEL", "INFO").upper() == "DEBUG":
 
     @app.middleware("http")
-    async def debug_requests(request: Request, call_next):
+    async def debug_requests(request: Request, call_next: Any) -> Any:
         logger.debug("Request received", method=request.method, path=request.url.path)
         response = await call_next(request)
         return response
@@ -1092,7 +1092,7 @@ async def general_exception_handler(request: Request, exc: Exception) -> JSONRes
 @app.post("/slack/events")
 async def handle_slack_events(
     request: Request, db: AsyncSession = Depends(get_db_session_dependency)
-):
+) -> Any:
     """Handle Slack events (messages, mentions, etc.)."""
     try:
         body = await request.body()
@@ -1149,7 +1149,7 @@ async def handle_slack_events(
 
 
 @app.post("/slack/interactive")
-async def handle_slack_interactive(request: Request):
+async def handle_slack_interactive(request: Request) -> Any:
     """Handle Slack interactive components (buttons, etc.)."""
     try:
         body = await request.body()
@@ -1209,7 +1209,7 @@ async def handle_slack_commands(
     response_url: str = Form(...),
     trigger_id: str = Form(...),
     api_app_id: str = Form(...),
-):
+) -> Any:
     """Handle Slack slash commands."""
     try:
         # Create command object
@@ -1249,7 +1249,7 @@ async def _record_processed_event(
     session_id: str,
     processed_by: str,
     processing_result: str,
-    error_message: str = None,
+    error_message: str | None = None,
 ) -> None:
     """Record that an event has been processed to prevent duplicate processing."""
     if not event_id:

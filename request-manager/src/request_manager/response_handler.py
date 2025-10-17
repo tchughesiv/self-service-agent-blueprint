@@ -24,7 +24,7 @@ class UnifiedResponseHandler:
         metadata: Optional[Dict[str, Any]] = None,
         processing_time_ms: Optional[int] = None,
         requires_followup: bool = False,
-        followup_actions: Optional[list] = None,
+        followup_actions: Optional[list[str]] = None,
     ) -> Dict[str, Any]:
         """Process an agent response and update the database."""
 

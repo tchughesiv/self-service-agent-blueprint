@@ -27,7 +27,7 @@ class IntegrationResult:
 class BaseIntegrationHandler(ABC):
     """Base class for integration handlers."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.name = self.__class__.__name__
 
     @abstractmethod

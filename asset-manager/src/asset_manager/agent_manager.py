@@ -1,6 +1,7 @@
 import json
 import logging
 from pathlib import Path
+from typing import Any
 
 import httpx
 from llama_stack_client.lib.agents.agent import AgentUtils
@@ -10,7 +11,7 @@ from llama_stack_client.types.shared_params.sampling_params import SamplingParam
 from .manager import Manager
 
 
-def toolgroups(agent) -> list[Toolgroup] | None:
+def toolgroups(agent: dict[str, Any]) -> list[Toolgroup] | None:
     if not agent.get("mcp_servers") and not agent.get("knowledge_bases"):
         return None
 
@@ -32,13 +33,13 @@ def toolgroups(agent) -> list[Toolgroup] | None:
     return toolgroups
 
 
-def tool_config(agent) -> ToolConfig | None:
+def tool_config(agent: dict[str, Any]) -> ToolConfig | None:
     if not agent.get("tool_choice"):
         return None
     return ToolConfig(tool_choice=agent["tool_choice"])
 
 
-def sampling_params(agent) -> SamplingParams | None:
+def sampling_params(agent: dict[str, Any]) -> SamplingParams | None:
     """Extract and format sampling parameters from agent config using proper SamplingParams type."""
     if not agent.get("sampling_params"):
         return None
@@ -70,13 +71,15 @@ def sampling_params(agent) -> SamplingParams | None:
 
 
 class AgentManager(Manager):
-    def __init__(self, config):
+    def __init__(self, config: dict[str, Any]) -> None:
         self._client = None
         self._config = config
-        self._agents = []
-        self._config_path = None  # Will be set when we know the config path
+        self._agents: list[Any] = []
+        self._config_path: Path | None = (
+            None  # Will be set when we know the config path
+        )
 
-    def set_config_path(self, config_path: Path):
+    def set_config_path(self, config_path: Path) -> None:
         """Set the config path so we can locate prompt files"""
         self._config_path = config_path
 
@@ -108,14 +111,14 @@ class AgentManager(Manager):
         print(f"No prompt file found for: {model_suffix}")
         raise FileNotFoundError(f"No prompt file found for agent {agent_name}")
 
-    def create_agents(self):
+    def create_agents(self) -> None:
         if self._client is None:
             self.connect_to_llama_stack()
         logging.debug("Creating agents")
         for agent in self._config["agents"]:
             self.create_agent(agent)
 
-    def create_agent(self, agent: dict):
+    def create_agent(self, agent: dict[str, Any]) -> str:
         # Get the model name
         model = self.model(agent)
 
@@ -147,7 +150,7 @@ class AgentManager(Manager):
         )
         return agentic_system_create_response.agent_id
 
-    def delete_agents(self):
+    def delete_agents(self) -> None:
         if self._client is None:
             self.connect_to_llama_stack()
         logging.debug("Deleting agents")
@@ -155,7 +158,7 @@ class AgentManager(Manager):
         for _, agent_id in agents.items():
             self._client.agents.delete(agent_id)
 
-    def agents(self):
+    def agents(self) -> dict[str, str]:
         if self._client is None:
             self.connect_to_llama_stack()
 
@@ -165,7 +168,7 @@ class AgentManager(Manager):
         data = json.loads(json_string)
 
         # create dictionary with agent name as key
-        agents = {}
+        agents: dict[str, str] = {}
         for agent in data["data"]:
             if isinstance(agent, dict):
                 agent_id = agent.get("agent_id")
@@ -179,7 +182,7 @@ class AgentManager(Manager):
 
         return agents
 
-    def model(self, agent) -> str | None:
+    def model(self, agent: dict[str, Any]) -> str | None:
         if agent.get("model"):
             print(agent["model"])
             return agent["model"]
@@ -194,15 +197,19 @@ class AgentManager(Manager):
             return model_id
         return None
 
-    def create_session(self, agent_id: str, session_name: str = None):
+    def create_session(self, agent_id: str, session_name: str | None = None) -> Any:
         """Create a new session for an agent"""
         if self._client is None:
             self.connect_to_llama_stack()
         return self._client.agents.session.create(agent_id, session_name=session_name)
 
     def create_agent_turn(
-        self, agent_id: str, session_id: str, stream: bool = True, messages: list = None
-    ):
+        self,
+        agent_id: str,
+        session_id: str,
+        stream: bool = True,
+        messages: list[Any] | None = None,
+    ) -> Any:
         """Send a turn to an agent"""
         if self._client is None:
             self.connect_to_llama_stack()
