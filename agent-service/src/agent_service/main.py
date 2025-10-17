@@ -1194,7 +1194,7 @@ class AgentService:
 _agent_service: Optional[AgentService] = None
 
 
-async def _agent_service_startup():
+async def _agent_service_startup() -> None:
     """Custom startup logic for Agent Service."""
     global _agent_service
 
@@ -1209,7 +1209,7 @@ async def _agent_service_startup():
         raise
 
 
-async def _agent_service_shutdown():
+async def _agent_service_shutdown() -> None:
     """Custom shutdown logic for Agent Service."""
     global _agent_service
 
@@ -1219,7 +1219,7 @@ async def _agent_service_shutdown():
 
 
 # Create lifespan using shared utility with custom startup/shutdown
-def lifespan(app: FastAPI):
+def lifespan(app: FastAPI) -> Any:
     return create_shared_lifespan(
         service_name="agent-service",
         version=__version__,
@@ -1284,7 +1284,7 @@ async def list_agents() -> Dict[str, Any]:
 
 
 @app.post("/process")
-async def handle_direct_request(request: Request, stream: bool = False):
+async def handle_direct_request(request: Request, stream: bool = False) -> Any:
     """Handle direct HTTP requests with optional streaming support."""
     if not _agent_service:
         raise HTTPException(
@@ -1309,7 +1309,7 @@ async def handle_direct_request(request: Request, stream: bool = False):
 
         if stream:
             # Return streaming response
-            async def generate_stream():
+            async def generate_stream() -> Any:
                 try:
                     # Process the request using the agent service
                     agent_response = await _agent_service.process_request(
@@ -1356,7 +1356,7 @@ async def handle_direct_request(request: Request, stream: bool = False):
 
 
 @app.post("/process/stream")
-async def handle_direct_request_stream(request: Request):
+async def handle_direct_request_stream(request: Request) -> Any:
     """Handle direct HTTP requests with streaming responses (legacy endpoint)."""
     # Redirect to unified endpoint with streaming enabled
     return await handle_direct_request(request, stream=True)
@@ -1730,9 +1730,9 @@ async def _update_request_log_unified(
     request_id: str,
     response_content: str,
     agent_id: str,
-    response_metadata: dict = None,
-    processing_time_ms: int = None,
-    db: AsyncSession = None,
+    response_metadata: dict[str, Any] | None = None,
+    processing_time_ms: int | None = None,
+    db: AsyncSession | None = None,
 ) -> None:
     """Update RequestLog for any API type."""
     try:

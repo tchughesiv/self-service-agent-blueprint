@@ -1,6 +1,6 @@
 """Database utility functions for Request Manager."""
 
-from typing import Optional
+from typing import Any, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,9 +11,9 @@ async def create_request_log_entry_unified(
     user_id: str,
     content: str,
     request_type: str,
-    integration_type,
-    integration_context: dict = None,
-    db: AsyncSession = None,
+    integration_type: str,
+    integration_context: dict[str, Any] | None = None,
+    db: AsyncSession | None = None,
 ) -> None:
     """Create RequestLog entry for any API type."""
     try:
@@ -144,7 +144,7 @@ async def record_processed_event(
 async def cleanup_old_sessions(
     db: AsyncSession,
     user_id: str,
-    integration_type,
+    integration_type: str,
     keep_recent_count: int = 1,
     max_age_hours: int = 24,
 ) -> int:

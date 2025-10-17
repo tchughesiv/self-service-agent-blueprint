@@ -6,7 +6,7 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Dict
+from typing import Any, Dict
 
 # Add the src directory to Python path and import shared_models modules
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
@@ -30,11 +30,11 @@ logger = logging.getLogger(__name__)
 class IntegrationDefaultsMigration:
     """Migration helper for integration defaults implementation."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize migration helper."""
         self.db_manager = get_database_manager()
 
-    async def analyze_existing_configs(self) -> Dict[str, any]:
+    async def analyze_existing_configs(self) -> Dict[str, Any]:
         """Analyze existing user integration configurations."""
         logger.info("Analyzing existing user integration configurations...")
 
@@ -45,7 +45,7 @@ class IntegrationDefaultsMigration:
             configs = result.scalars().all()
 
             # Analyze configurations
-            analysis: dict = {
+            analysis: dict[str, Any] = {
                 "total_configs": len(configs),
                 "users_with_configs": set(),
                 "integration_types": {},
@@ -215,12 +215,12 @@ class IntegrationDefaultsMigration:
 
             return reset_results
 
-    async def close(self):
+    async def close(self) -> None:
         """Close database connections."""
         await self.db_manager.close()
 
 
-async def main():
+async def main() -> None:
     """Main migration function."""
     logger.info("Starting integration defaults migration process")
 

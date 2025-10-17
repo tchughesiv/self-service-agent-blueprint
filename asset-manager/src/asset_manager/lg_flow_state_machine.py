@@ -7,7 +7,7 @@ conversational flows using LangGraph with persistent checkpoint storage.
 """
 import logging
 from pathlib import Path
-from typing import Annotated, Dict, List, Optional, TypedDict
+from typing import Annotated, Any, Dict, List, Optional, TypedDict
 
 import yaml
 from asset_manager.util import resolve_asset_manager_path
@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 
 # Dynamic state definition created from YAML configuration
-def create_agent_state_class(state_schema: dict):
+def create_agent_state_class(state_schema: dict[str, Any]) -> Any:
     """Create a dynamic AgentState TypedDict class based on YAML configuration."""
     # Collect all field definitions
     fields = {}
@@ -51,9 +51,9 @@ def create_agent_state_class(state_schema: dict):
         if field_type == "string":
             fields[field_name] = Optional[str]
         elif field_type == "list":
-            fields[field_name] = List[Dict]
+            fields[field_name] = List[Dict[str, Any]]
         elif field_type == "dict":
-            fields[field_name] = Optional[Dict]
+            fields[field_name] = Optional[Dict[str, Any]]
         elif field_type == "boolean":
             fields[field_name] = Optional[bool]
         else:
@@ -80,7 +80,7 @@ class StateMachine:
         state_schema = self.config.get("state_schema", {})
         self.AgentState = create_agent_state_class(state_schema)
 
-    def _load_config(self) -> dict:
+    def _load_config(self) -> dict[str, Any]:
         """Load state machine configuration from YAML file."""
         try:
             with open(self.config_path, "r") as f:
@@ -110,14 +110,14 @@ class StateMachine:
 
     def _build_response_kwargs(
         self,
-        state: dict,
-        state_config: dict,
+        state: dict[str, Any],
+        state_config: dict[str, Any],
         temperature: float,
         authoritative_user_id: str,
-        allowed_tools: list = None,
-        action_config: dict = None,
-        token_context: str = None,
-    ) -> dict:
+        allowed_tools: list[str] | None = None,
+        action_config: dict[str, Any] | None = None,
+        token_context: str | None = None,
+    ) -> dict[str, Any]:
         """Build kwargs for create_response_with_retry.
 
         Args:
@@ -169,7 +169,10 @@ class StateMachine:
         return response_kwargs
 
     def _format_text(
-        self, text: str, state_data: dict, authoritative_user_id: str = None
+        self,
+        text: str,
+        state_data: dict[str, Any],
+        authoritative_user_id: str | None = None,
     ) -> str:
         """Format text by replacing placeholders with state data."""
         import re
@@ -247,12 +250,12 @@ class StateMachine:
 
     def process_llm_processor_state(
         self,
-        state: dict,
-        state_config: dict,
-        agent,
-        authoritative_user_id: str = None,
-        token_context: str = None,
-    ) -> tuple[dict, str]:
+        state: dict[str, Any],
+        state_config: dict[str, Any],
+        agent: Any,
+        authoritative_user_id: str | None = None,
+        token_context: str | None = None,
+    ) -> tuple[dict[str, Any], str]:
         """Process llm_processor type states - completely generic and configuration-driven.
 
         Returns:
@@ -334,7 +337,10 @@ class StateMachine:
         return state, next_state
 
     def _get_prompt_for_state(
-        self, state: dict, state_config: dict, authoritative_user_id: str = None
+        self,
+        state: dict[str, Any],
+        state_config: dict[str, Any],
+        authoritative_user_id: str | None = None,
     ) -> str:
         """Get the appropriate prompt based on conditional logic or default."""
 
@@ -362,7 +368,9 @@ class StateMachine:
         prompt_text = state_config.get("prompt", "")
         return self._format_text(prompt_text, state, authoritative_user_id)
 
-    def _evaluate_condition(self, state: dict, condition_config: dict) -> bool:
+    def _evaluate_condition(
+        self, state: dict[str, Any], condition_config: dict[str, Any]
+    ) -> bool:
         """Evaluate whether a condition is met based on state data."""
         check_field = condition_config.get("check_field")
         check_phrases = condition_config.get("check_phrases", [])
@@ -398,7 +406,7 @@ class StateMachine:
         field_value_lower = str(field_value).lower()
         return any(phrase.lower() in field_value_lower for phrase in check_phrases)
 
-    def _get_nested_field_value(self, state: dict, field_path: str):
+    def _get_nested_field_value(self, state: dict[str, Any], field_path: str) -> Any:
         """Get a nested field value using dot notation (e.g., 'laptop_eligibility.response')."""
         try:
             value = state
@@ -411,7 +419,9 @@ class StateMachine:
         except (KeyError, TypeError, AttributeError):
             return None
 
-    def _store_response_data(self, state: dict, state_config: dict, response: str):
+    def _store_response_data(
+        self, state: dict[str, Any], state_config: dict[str, Any], response: str
+    ) -> None:
         """Store response data according to configuration."""
         data_storage = state_config.get("data_storage", {})
         for key, source in data_storage.items():
@@ -420,10 +430,10 @@ class StateMachine:
 
     def _analyze_response_and_transition(
         self,
-        state: dict,
-        state_config: dict,
+        state: dict[str, Any],
+        state_config: dict[str, Any],
         response: str,
-        authoritative_user_id: str = None,
+        authoritative_user_id: str | None = None,
     ) -> str:
         """Analyze LLM response and determine next state transition."""
 
@@ -440,10 +450,10 @@ class StateMachine:
 
     def _process_response_analysis(
         self,
-        state: dict,
-        analysis_config: dict,
+        state: dict[str, Any],
+        analysis_config: dict[str, Any],
         response: str,
-        authoritative_user_id: str = None,
+        authoritative_user_id: str | None = None,
     ) -> str:
         """Process response analysis with conditions and actions."""
         response_lower = response.lower()
@@ -481,11 +491,11 @@ class StateMachine:
 
     def _execute_actions(
         self,
-        state: dict,
-        actions: list,
+        state: dict[str, Any],
+        actions: list[dict[str, Any]],
         response: str,
         response_lower: str,
-        authoritative_user_id: str = None,
+        authoritative_user_id: str | None = None,
     ) -> str:
         """Execute a list of actions completely generically based on configuration."""
         next_state = None
@@ -553,7 +563,7 @@ class StateMachine:
 
         return next_state
 
-    def _get_last_user_message(self, state: dict) -> str:
+    def _get_last_user_message(self, state: dict[str, Any]) -> str:
         """Get the last user message from the conversation."""
         messages = state.get("messages", [])
         for msg in reversed(messages):
@@ -576,7 +586,7 @@ class StateMachine:
         state_config = states.get(state_name, {})
         return state_config.get("type") == "waiting"
 
-    def create_initial_state(self) -> dict:
+    def create_initial_state(self) -> dict[str, Any]:
         """Create initial state with default field values from configuration."""
         settings = self.config.get("settings", {})
         initial_state_name = settings.get("initial_state", "collect_employee_id")
@@ -616,7 +626,7 @@ class StateMachine:
 
         return state
 
-    def reset_state_for_new_conversation(self) -> dict:
+    def reset_state_for_new_conversation(self) -> dict[str, Any]:
         """Reset state for a new conversation based on end state configuration."""
         end_state_config = self.config.get("states", {}).get("end", {})
         reset_behavior = end_state_config.get("reset_behavior", {})
@@ -666,12 +676,12 @@ class StateMachine:
 
     def process_intent_classifier_state(
         self,
-        state: dict,
-        state_config: dict,
-        agent,
-        authoritative_user_id: str = None,
-        token_context: str = None,
-    ) -> tuple[dict, str]:
+        state: dict[str, Any],
+        state_config: dict[str, Any],
+        agent: Any,
+        authoritative_user_id: str | None = None,
+        token_context: str | None = None,
+    ) -> tuple[dict[str, Any], str]:
         """Process intent_classifier type states.
 
         NOTE: Intent classifiers should always be preceded by a waiting state in the YAML.
@@ -789,12 +799,12 @@ class StateMachine:
 
     def process_llm_validator_state(
         self,
-        state: dict,
-        state_config: dict,
-        agent,
-        authoritative_user_id: str = None,
-        token_context: str = None,
-    ) -> tuple[dict, str]:
+        state: dict[str, Any],
+        state_config: dict[str, Any],
+        agent: Any,
+        authoritative_user_id: str | None = None,
+        token_context: str | None = None,
+    ) -> tuple[dict[str, Any], str]:
         """Process llm_validator type states (like laptop selection validation).
 
         Returns:
@@ -890,8 +900,8 @@ class StateMachine:
         return state, next_state
 
     def process_terminal_state(
-        self, state: dict, state_config: dict
-    ) -> tuple[dict, str]:
+        self, state: dict[str, Any], state_config: dict[str, Any]
+    ) -> tuple[dict[str, Any], str]:
         """Process terminal type states.
 
         Returns:
@@ -901,11 +911,11 @@ class StateMachine:
 
     def process_state(
         self,
-        state: dict,
-        agent,
-        authoritative_user_id: str = None,
-        token_context: str = None,
-    ) -> tuple[dict, str]:
+        state: dict[str, Any],
+        agent: Any,
+        authoritative_user_id: str | None = None,
+        token_context: str | None = None,
+    ) -> tuple[dict[str, Any], str]:
         """Process the current state based on its configuration.
 
         Returns:
@@ -947,9 +957,9 @@ class ConversationSession:
     def __init__(
         self,
         agent,
-        thread_id: str = None,
-        checkpoint_db_path: str = None,
-        authoritative_user_id: str = None,
+        thread_id: str | None = None,
+        checkpoint_db_path: str | None = None,
+        authoritative_user_id: str | None = None,
     ):
         """
         Initialize a new conversation session with persistent checkpoint storage.
@@ -997,7 +1007,7 @@ class ConversationSession:
         # Store current token context for this session
         self.current_token_context = None
 
-    def _create_graph(self):
+    def _create_graph(self) -> Any:
         """Create the LangGraph workflow with one node per YAML state."""
         # Use the dynamic AgentState from the state machine
         workflow = StateGraph(self.state_machine.AgentState)
@@ -1015,7 +1025,7 @@ class ConversationSession:
 
             # Create node function with closure to capture state_name
             def make_node_func(name, stype):
-                def node_func(state: dict):
+                def node_func(state: dict[str, Any]) -> Any:
                     """Node function that returns Command for routing (or state for terminal nodes)."""
                     logger.info(
                         f"Thread {self.thread_id} processing node: {name}, type: {stype}"
@@ -1084,7 +1094,7 @@ class ConversationSession:
             workflow.add_node(state_name, make_node_func(state_name, state_type))
 
         # Add a resume dispatcher node that routes to the correct starting point
-        def resume_dispatcher(state: dict):
+        def resume_dispatcher(state: dict[str, Any]) -> Any:
             """Dispatcher that resumes from last waiting node or starts from initial state"""
             last_waiting_node = state.get("_last_waiting_node")
 
@@ -1272,7 +1282,7 @@ class ConversationSession:
             logger.error(f"Error processing message for thread {self.thread_id}: {e}")
             return f"Error processing message: {e}"
 
-    def close(self):
+    def close(self) -> None:
         """Clean up resources, especially the SQLite context manager."""
         if hasattr(self, "checkpointer_cm") and self.checkpointer_cm is not None:
             try:

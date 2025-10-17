@@ -3,7 +3,7 @@
 import logging
 import os
 import sys
-from typing import Optional
+from typing import Any, Optional
 
 import structlog
 
@@ -127,19 +127,19 @@ class ServiceLogger:
 
 
 # Convenience functions for common logging patterns
-def log_request(logger: structlog.BoundLogger, request_id: str, **context):
+def log_request(logger: structlog.BoundLogger, request_id: str, **context: Any) -> None:
     """Log a request with standard context."""
     logger.debug("Request received", request_id=request_id, **context)
 
 
 def log_response(
-    logger: structlog.BoundLogger, request_id: str, status: str, **context
-):
+    logger: structlog.BoundLogger, request_id: str, status: str, **context: Any
+) -> None:
     """Log a response with standard context."""
     logger.debug("Response sent", request_id=request_id, status=status, **context)
 
 
-def log_error(logger: structlog.BoundLogger, error: Exception, **context):
+def log_error(logger: structlog.BoundLogger, error: Exception, **context: Any) -> None:
     """Log an error with standard context."""
     logger.error(
         "Error occurred", error=str(error), error_type=type(error).__name__, **context
@@ -147,19 +147,21 @@ def log_error(logger: structlog.BoundLogger, error: Exception, **context):
 
 
 def log_health_check(
-    logger: structlog.BoundLogger, service: str, status: str, **context
-):
+    logger: structlog.BoundLogger, service: str, status: str, **context: Any
+) -> None:
     """Log a health check with standard context."""
     logger.info("Health check", service=service, status=status, **context)
 
 
-def log_database_operation(logger: structlog.BoundLogger, operation: str, **context):
+def log_database_operation(
+    logger: structlog.BoundLogger, operation: str, **context: Any
+) -> None:
     """Log a database operation with standard context."""
     logger.debug("Database operation", operation=operation, **context)
 
 
 def log_integration_event(
-    logger: structlog.BoundLogger, integration: str, event: str, **context
-):
+    logger: structlog.BoundLogger, integration: str, event: str, **context: Any
+) -> None:
     """Log an integration event with standard context."""
     logger.info("Integration event", integration=integration, event=event, **context)

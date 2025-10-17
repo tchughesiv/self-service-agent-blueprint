@@ -10,15 +10,15 @@ from fastapi import HTTPException, status
 from shared_clients import get_agent_client, get_integration_dispatcher_client
 from shared_clients.stream_processor import LlamaStackStreamProcessor
 from shared_models import CloudEventSender, configure_logging, get_enum_value
+from shared_models.models import AgentResponse, NormalizedRequest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .normalizer import RequestNormalizer
-from .schemas import AgentResponse, NormalizedRequest
 
 logger = configure_logging("request-manager")
 
 # Global registry for response futures (event-driven approach)
-_response_futures_registry = {}
+_response_futures_registry: dict[str, Any] = {}
 
 
 def resolve_response_future(request_id: str, response_data: Dict[str, Any]) -> None:
@@ -180,7 +180,7 @@ class CommunicationStrategy(ABC):
 class EventingStrategy(CommunicationStrategy):
     """Communication strategy using Knative eventing."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         broker_url = os.getenv("BROKER_URL", "http://knative-broker:8080")
         self.event_sender = CloudEventSender(broker_url, "request-manager")
 
@@ -349,7 +349,7 @@ class EventingStrategy(CommunicationStrategy):
 class DirectHttpStrategy(CommunicationStrategy):
     """Communication strategy using direct HTTP calls."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.agent_client = get_agent_client()
         self.integration_client = get_integration_dispatcher_client()
 
@@ -390,14 +390,14 @@ class DirectHttpStrategy(CommunicationStrategy):
         )
         return True
 
-    async def stream_response(self, agent_response: AgentResponse):
+    async def stream_response(self, agent_response: AgentResponse) -> None:
         """Stream response using optimized streaming for direct HTTP mode."""
         if not self.integration_client:
             logger.error("Integration client not initialized")
             return None
 
         # Use optimized streaming for better performance
-        async def generate_stream():
+        async def generate_stream() -> Any:
             try:
                 # Stream start event
                 yield LlamaStackStreamProcessor.create_sse_start_event(

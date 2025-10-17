@@ -66,7 +66,7 @@ class LlamaStackStreamProcessor:
         errors = []
         agent_id = None
         processing_time_ms = None
-        metadata = {}
+        metadata: dict[str, Any] = {}
         stop_reason = None
         # Token usage tracking
         input_tokens = 0
@@ -239,8 +239,8 @@ class LlamaStackStreamProcessor:
 
     @staticmethod
     def create_stream_config(
-        chunk_size: int = None,
-        stream_delay: float = None,
+        chunk_size: int | None = None,
+        stream_delay: float | None = None,
         enable_streaming: bool = True,
     ) -> Dict[str, Any]:
         """Create standardized stream configuration with adaptive defaults."""
@@ -265,8 +265,8 @@ class LlamaStackStreamProcessor:
 
     @staticmethod
     async def stream_content_optimized(
-        content: str, content_type: str = "content", **kwargs
-    ):
+        content: str, content_type: str = "content", **kwargs: Any
+    ) -> None:
         """Optimized streaming with adaptive performance based on content."""
         import json
 
