@@ -34,7 +34,7 @@ import logging
 import os
 import random
 from pathlib import Path
-from typing import List
+from typing import Any, List
 
 from deepeval.dataset import ConversationalGolden
 from deepeval.simulator import ConversationSimulator
@@ -148,7 +148,7 @@ async def _model_callback(input: str, turns: List[Turn], thread_id: str) -> Turn
 
 def _convert_test_case_to_conversation_format(
     test_case: ConversationalTestCase, authoritative_user_id: str
-) -> dict:
+) -> dict[str, Any]:
     """
     Convert a ConversationalTestCase to the conversation results format
 
@@ -176,7 +176,7 @@ def _convert_test_case_to_conversation_format(
 
 
 def _save_conversation_to_file(
-    conversation: dict, base_filename: str = "generated_conversation"
+    conversation: dict[str, Any], base_filename: str = "generated_conversation"
 ) -> str:
     """
     Save conversation to a uniquely named file in results/conversation_results

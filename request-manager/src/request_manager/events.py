@@ -302,9 +302,9 @@ class CloudEventHandler:
     """Handles incoming CloudEvents."""
 
     def __init__(self) -> None:
-        self.handlers: Dict[str, Callable] = {}
+        self.handlers: Dict[str, Callable[..., Any]] = {}
 
-    def register_handler(self, event_type: str, handler: Callable) -> None:
+    def register_handler(self, event_type: str, handler: Callable[..., Any]) -> None:
         """Register a handler for a specific event type."""
         self.handlers[event_type] = handler
 

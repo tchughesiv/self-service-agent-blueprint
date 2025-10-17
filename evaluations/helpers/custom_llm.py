@@ -20,7 +20,7 @@ class CustomLLM(DeepEvalBaseLLM):
         self,
         api_key: str,
         base_url: str,
-        model_name: str = None,
+        model_name: str | None = None,
     ):
         """
         Initialize the CustomLLM with API credentials and configuration.

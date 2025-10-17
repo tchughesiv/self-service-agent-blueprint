@@ -20,7 +20,7 @@ USER_ID = os.environ.get("USER_ID", None)
 AUTHORITATIVE_USER_ID = os.environ.get("AUTHORITATIVE_USER_ID", None)
 
 
-async def main():
+async def main() -> None:
     """
     Main chat application loop using the shared CLIChatClient.
     """

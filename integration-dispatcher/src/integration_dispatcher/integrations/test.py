@@ -14,7 +14,7 @@ logger = configure_logging("integration-dispatcher")
 class TestIntegrationHandler(BaseIntegrationHandler):
     """Handler for test message delivery - logs to console."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.enabled = os.getenv("TEST_INTEGRATION_ENABLED", "true").lower() == "true"
 

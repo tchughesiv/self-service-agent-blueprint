@@ -267,7 +267,7 @@ class RequestLogService:
         request_type: str,
         integration_type: str,
         db: Any,  # AsyncSession
-        integration_context: Dict[str, Any] = None,
+        integration_context: Dict[str, Any] | None = None,
         **kwargs,
     ) -> None:
         """Create a unified request log entry.
@@ -309,7 +309,7 @@ class RequestLogService:
         agent_id: str,
         processing_time_ms: int,
         db: Any,  # AsyncSession
-        response_metadata: Dict[str, Any] = None,
+        response_metadata: Dict[str, Any] | None = None,
         **kwargs,
     ) -> None:
         """Update a request log entry with response information.

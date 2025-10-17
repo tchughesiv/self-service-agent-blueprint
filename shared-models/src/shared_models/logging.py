@@ -147,19 +147,21 @@ def log_error(logger: structlog.BoundLogger, error: Exception, **context: Any) -
 
 
 def log_health_check(
-    logger: structlog.BoundLogger, service: str, status: str, **context
-):
+    logger: structlog.BoundLogger, service: str, status: str, **context: Any
+) -> None:
     """Log a health check with standard context."""
     logger.info("Health check", service=service, status=status, **context)
 
 
-def log_database_operation(logger: structlog.BoundLogger, operation: str, **context):
+def log_database_operation(
+    logger: structlog.BoundLogger, operation: str, **context: Any
+) -> None:
     """Log a database operation with standard context."""
     logger.debug("Database operation", operation=operation, **context)
 
 
 def log_integration_event(
-    logger: structlog.BoundLogger, integration: str, event: str, **context
-):
+    logger: structlog.BoundLogger, integration: str, event: str, **context: Any
+) -> None:
     """Log an integration event with standard context."""
     logger.info("Integration event", integration=integration, event=event, **context)

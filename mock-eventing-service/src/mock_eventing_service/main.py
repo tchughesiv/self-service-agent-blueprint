@@ -43,7 +43,7 @@ class MockEventingService:
             filter_attributes=subscription.filter_attributes,
         )
 
-    def remove_subscription(self, event_type: str, subscriber_url: str):
+    def remove_subscription(self, event_type: str, subscriber_url: str) -> None:
         """Remove an event subscription."""
         self.subscriptions = [
             sub
@@ -477,7 +477,7 @@ async def list_events(limit: int = 100) -> Dict[str, Any]:
 
 
 @app.delete("/events")
-async def clear_events():
+async def clear_events() -> dict[str, str]:
     """Clear event history."""
     mock_service.event_history.clear()
     mock_service.delivery_attempts.clear()
@@ -485,7 +485,7 @@ async def clear_events():
 
 
 @app.post("/reset")
-async def reset_service():
+async def reset_service() -> dict[str, str]:
     """Reset the mock service to initial state."""
     mock_service.subscriptions.clear()
     mock_service.event_history.clear()

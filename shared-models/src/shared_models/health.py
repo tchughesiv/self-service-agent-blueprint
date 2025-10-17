@@ -64,7 +64,7 @@ class HealthChecker:
             return False
 
     async def check_integrations(
-        self, integration_handlers: Dict[str, Any] = None
+        self, integration_handlers: Dict[str, Any] | None = None
     ) -> tuple[List[str], Dict[str, str]]:
         """Check integration handlers health."""
         if not integration_handlers:
@@ -125,8 +125,8 @@ class HealthChecker:
     async def perform_health_check(
         self,
         db: Optional[AsyncSession] = None,
-        integration_handlers: Dict[str, Any] = None,
-        additional_checks: Dict[str, callable] = None,
+        integration_handlers: Dict[str, Any] | None = None,
+        additional_checks: Dict[str, callable] | None = None,
     ) -> HealthCheckResult:
         """Perform comprehensive health check."""
         logger.debug("Starting health check", service=self.service_name)

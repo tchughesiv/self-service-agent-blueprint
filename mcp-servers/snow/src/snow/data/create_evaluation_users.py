@@ -38,15 +38,19 @@ class ServiceNowUserCreator:
             "Accept": "application/json",
             "Content-Type": "application/json",
         }
-        self.created_users = []
-        self.created_computers = []
-        self.created_models = []
-        self.created_locations = []
-        self.model_cache = {}  # Cache model lookups to avoid duplicate API calls
-        self.location_cache = {}  # Cache location lookups to avoid duplicate API calls
-        self.errors = []
+        self.created_users: list[str] = []
+        self.created_computers: list[str] = []
+        self.created_models: list[str] = []
+        self.created_locations: list[str] = []
+        self.model_cache: dict[str, str] = (
+            {}
+        )  # Cache model lookups to avoid duplicate API calls
+        self.location_cache: dict[str, str] = (
+            {}
+        )  # Cache location lookups to avoid duplicate API calls
+        self.errors: list[str] = []
 
-    def get_or_create_model(self, model_name: str) -> str:
+    def get_or_create_model(self, model_name: str) -> str | None:
         """Get or create a product model in ServiceNow.
 
         Args:
@@ -80,7 +84,7 @@ class ServiceNowUserCreator:
             if response.status_code == 200:
                 result = response.json().get("result", [])
                 if result:
-                    model_sys_id = result[0].get("sys_id")
+                    model_sys_id = str(result[0].get("sys_id", ""))
                     print(
                         f"    ℹ️  Found existing model: {model_name} (sys_id: {model_sys_id})"
                     )
@@ -105,7 +109,7 @@ class ServiceNowUserCreator:
 
             if create_response.status_code == 201:
                 result = create_response.json().get("result", {})
-                model_sys_id = result.get("sys_id")
+                model_sys_id = str(result.get("sys_id", ""))
                 print(f"    ✅ Created model: {model_name} (sys_id: {model_sys_id})")
                 self.model_cache[model_name] = model_sys_id
                 self.created_models.append({"name": model_name, "sys_id": model_sys_id})
@@ -198,7 +202,7 @@ class ServiceNowUserCreator:
             print(f"    ⚠️  {error_msg}")
             return None
 
-    def create_user(self, employee_data: dict[str, Any]) -> str:
+    def create_user(self, employee_data: dict[str, Any]) -> str | None:
         """Create a user in ServiceNow.
 
         Args:
@@ -263,7 +267,9 @@ class ServiceNowUserCreator:
             self.errors.append(error_msg)
             return None
 
-    def create_computer(self, employee_data: dict[str, Any], user_sys_id: str) -> str:
+    def create_computer(
+        self, employee_data: dict[str, Any], user_sys_id: str
+    ) -> str | None:
         """Create a computer/laptop in ServiceNow.
 
         Args:
@@ -457,7 +463,7 @@ class ServiceNowUserCreator:
         print("=" * 80)
 
 
-def main():
+def main() -> None:
     """Main function to create evaluation users."""
     # Get credentials from environment
     instance_url = os.getenv("SERVICENOW_INSTANCE_URL")

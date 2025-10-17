@@ -180,7 +180,7 @@ class CommunicationStrategy(ABC):
 class EventingStrategy(CommunicationStrategy):
     """Communication strategy using Knative eventing."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         broker_url = os.getenv("BROKER_URL", "http://knative-broker:8080")
         self.event_sender = CloudEventSender(broker_url, "request-manager")
 
@@ -349,7 +349,7 @@ class EventingStrategy(CommunicationStrategy):
 class DirectHttpStrategy(CommunicationStrategy):
     """Communication strategy using direct HTTP calls."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.agent_client = get_agent_client()
         self.integration_client = get_integration_dispatcher_client()
 
@@ -390,14 +390,14 @@ class DirectHttpStrategy(CommunicationStrategy):
         )
         return True
 
-    async def stream_response(self, agent_response: AgentResponse):
+    async def stream_response(self, agent_response: AgentResponse) -> None:
         """Stream response using optimized streaming for direct HTTP mode."""
         if not self.integration_client:
             logger.error("Integration client not initialized")
             return None
 
         # Use optimized streaming for better performance
-        async def generate_stream():
+        async def generate_stream() -> Any:
             try:
                 # Stream start event
                 yield LlamaStackStreamProcessor.create_sse_start_event(

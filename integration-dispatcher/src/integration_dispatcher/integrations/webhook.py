@@ -11,7 +11,7 @@ from .base import BaseIntegrationHandler, IntegrationResult
 class WebhookIntegrationHandler(BaseIntegrationHandler):
     """Handler for webhook delivery."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
     async def deliver(
