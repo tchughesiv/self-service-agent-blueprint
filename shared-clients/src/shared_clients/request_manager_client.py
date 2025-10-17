@@ -24,11 +24,11 @@ class RequestManagerClient:
 
     def __init__(
         self,
-        request_manager_url: str = None,
-        user_id: str = None,
+        request_manager_url: str | None = None,
+        user_id: str | None = None,
         timeout: float = 180.0,
         use_responses: bool = True,
-    ):
+    ) -> None:
         """
         Initialize the Request Manager client.
 
@@ -51,7 +51,7 @@ class RequestManagerClient:
             headers={"Accept-Encoding": "gzip, deflate, br"},  # Enable compression
         )
 
-    def _format_response(self, result: dict) -> str:
+    def _format_response(self, result: dict[str, Any]) -> str:
         """Format the response based on the mode."""
         if self.use_responses:
             # For responses mode, check if result is the response object directly
@@ -75,7 +75,7 @@ class RequestManagerClient:
         request_type: str = "message",
         metadata: Optional[Dict[str, Any]] = None,
         endpoint: str = "generic",
-        use_responses: bool = None,
+        use_responses: bool | None = None,
     ) -> Dict[str, Any]:
         """
         Send a request to the Request Manager service.
@@ -148,7 +148,7 @@ class RequestManagerClient:
         response.raise_for_status()
         return response.json()
 
-    async def close(self):
+    async def close(self) -> None:
         """Close the HTTP client."""
         await self.client.aclose()
 
@@ -158,11 +158,11 @@ class CLIChatClient(RequestManagerClient):
 
     def __init__(
         self,
-        request_manager_url: str = None,
-        user_id: str = None,
+        request_manager_url: str | None = None,
+        user_id: str | None = None,
         timeout: float = 120.0,  # Reduced from 180s for better performance
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         """
         Initialize the CLI chat client.
 
@@ -249,7 +249,7 @@ class CLIChatClient(RequestManagerClient):
         except Exception as e:
             return f"Error: {e}"
 
-    async def reset_session(self):
+    async def reset_session(self) -> None:
         """Reset the current session."""
         # For now, just generate a new user_id to effectively reset the session
         self.user_id = str(uuid.uuid4())
@@ -348,10 +348,10 @@ class CLIChatClient(RequestManagerClient):
 
     async def chat_loop(
         self,
-        initial_message: str = None,
+        initial_message: str | None = None,
         debug: bool = False,
         test_mode: bool = False,
-    ):
+    ) -> None:
         """
         Run a chat loop for interactive or automated testing.
 
@@ -426,9 +426,9 @@ class CLIChatClient(RequestManagerClient):
 
     async def chat_loop_test_mode(
         self,
-        initial_message: str = None,
+        initial_message: str | None = None,
         debug: bool = False,
-    ):
+    ) -> None:
         """
         Run a test-mode chat loop that reads from stdin for automated testing.
         This is a convenience wrapper around chat_loop with test_mode=True.

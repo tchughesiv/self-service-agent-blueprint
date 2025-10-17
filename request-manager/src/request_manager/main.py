@@ -53,7 +53,7 @@ from .schemas import (
 logger = configure_logging("request-manager")
 
 
-async def _request_manager_startup():
+async def _request_manager_startup() -> None:
     """Custom startup logic for Request Manager."""
     # Initialize unified processor
     global unified_processor
@@ -72,7 +72,7 @@ async def _request_manager_startup():
 
 
 # Create lifespan using shared utility with custom startup
-def lifespan(app: FastAPI):
+def lifespan(app: FastAPI) -> Any:
     return create_shared_lifespan(
         service_name="request-manager",
         version=__version__,

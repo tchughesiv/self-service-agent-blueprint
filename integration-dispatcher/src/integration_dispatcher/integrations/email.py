@@ -17,7 +17,7 @@ logger = configure_logging("integration-dispatcher")
 class EmailIntegrationHandler(BaseIntegrationHandler):
     """Handler for email delivery."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.smtp_host = os.getenv("SMTP_HOST", "localhost")
         self.smtp_port = int(os.getenv("SMTP_PORT", "587"))

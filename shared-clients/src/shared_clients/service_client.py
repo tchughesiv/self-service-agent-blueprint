@@ -39,7 +39,7 @@ class ServiceClient:
         logger.debug("Making POST request", url=url)
         return await self.client.post(url, **kwargs)
 
-    async def stream_post(self, path: str, **kwargs):
+    async def stream_post(self, path: str, **kwargs: Any) -> Any:
         """Make a streaming POST request for Server-Sent Events."""
         url = f"{self.base_url}{path}"
         logger.debug("Making streaming POST request", url=url)
@@ -58,7 +58,7 @@ class ServiceClient:
         logger.debug("Making DELETE request", url=url)
         return await self.client.delete(url, **kwargs)
 
-    async def close(self):
+    async def close(self) -> None:
         """Close the HTTP client."""
         await self.client.aclose()
 
@@ -91,7 +91,9 @@ class AgentServiceClient(ServiceClient):
             logger.error("Failed to process request with agent service", error=str(e))
             return None
 
-    async def process_request_stream(self, request_data: Union[Dict[str, Any], Any]):
+    async def process_request_stream(
+        self, request_data: Union[Dict[str, Any], Any]
+    ) -> Any:
         """Process a request with the agent service using streaming."""
         try:
             # Handle both Pydantic models and dictionaries
@@ -256,7 +258,7 @@ def initialize_service_clients(
     integration_dispatcher_url: Optional[str] = None,
     agent_timeout: float = 120.0,
     integration_timeout: float = 30.0,
-):
+) -> None:
     """Initialize the global service client instances."""
     global _agent_client, _request_manager_client, _integration_dispatcher_client
 
@@ -273,7 +275,7 @@ def initialize_service_clients(
     logger.debug("Initialized service clients")
 
 
-async def cleanup_service_clients():
+async def cleanup_service_clients() -> None:
     """Clean up the global service client instances."""
     global _agent_client, _request_manager_client, _integration_dispatcher_client
 

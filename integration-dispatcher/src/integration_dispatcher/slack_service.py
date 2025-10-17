@@ -29,7 +29,7 @@ logger = configure_logging("integration-dispatcher")
 class SlackService:
     """Service for handling Slack events and interactions."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.signing_secret = os.getenv("SLACK_SIGNING_SECRET")
         self.request_manager_client = RequestManagerClient(
             timeout=60.0
@@ -46,7 +46,9 @@ class SlackService:
             AsyncWebClient(token=self.bot_token) if self.bot_token else None
         )
 
-    def _create_slack_message_id(self, event: Dict, event_id: str = None) -> str:
+    def _create_slack_message_id(
+        self, event: Dict[str, Any], event_id: str | None = None
+    ) -> str:
         """Create a unique identifier for a Slack message using Slack's event_id."""
         if event_id:
             # Use Slack's event_id which is globally unique and designed for deduplication
@@ -127,7 +129,11 @@ class SlackService:
             return False
 
     async def handle_message_event(
-        self, event: Dict, team_id: str = None, db_session=None, event_id: str = None
+        self,
+        event: Dict[str, Any],
+        team_id: str | None = None,
+        db_session: Any = None,
+        event_id: str | None = None,
     ) -> None:
         """Handle incoming Slack message."""
         try:
@@ -345,7 +351,7 @@ class SlackService:
         except Exception as e:
             logger.error("Error handling Slack message", error=str(e), event=event)
 
-    async def handle_slash_command(self, command: SlackSlashCommand) -> Dict:
+    async def handle_slash_command(self, command: SlackSlashCommand) -> Dict[str, Any]:
         """Handle Slack slash command."""
         try:
             if not command.text.strip():
@@ -404,7 +410,9 @@ class SlackService:
                 command=command.dict(),
             )
 
-    async def handle_button_interaction(self, payload: SlackInteractionPayload) -> Dict:
+    async def handle_button_interaction(
+        self, payload: SlackInteractionPayload
+    ) -> Dict[str, Any]:
         """Handle button interactions."""
         try:
             logger.info(
@@ -547,7 +555,9 @@ class SlackService:
             logger.error("Error handling button interaction", error=str(e))
             return {"text": "❌ Error processing interaction"}
 
-    async def handle_modal_submission(self, payload: SlackInteractionPayload) -> Dict:
+    async def handle_modal_submission(
+        self, payload: SlackInteractionPayload
+    ) -> Dict[str, Any]:
         """Handle modal form submissions."""
         try:
             callback_id = payload.view.get("callback_id", "")
@@ -813,7 +823,7 @@ class SlackService:
         user_id: str,
         content: str,
         integration_type: str,
-        metadata: Optional[Dict] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Forward request to Request Manager."""
         try:

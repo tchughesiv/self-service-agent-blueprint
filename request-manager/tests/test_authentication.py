@@ -11,11 +11,11 @@ from request_manager.main import app, get_current_user
 class TestWebApiKeyAuthentication:
     """Test cases for web API key authentication."""
 
-    def setup_method(self):
+    def setup_method(self) -> None:
         """Set up test fixtures."""
         self.client = TestClient(app)
 
-    def test_verify_web_api_key_valid(self):
+    def test_verify_web_api_key_valid(self) -> None:
         """Test valid web API key verification."""
         # Mock the environment
         with patch.dict(
@@ -35,7 +35,7 @@ class TestWebApiKeyAuthentication:
             result = request_manager.main.verify_web_api_key("web-test-user")
             assert result == "test@company.com"
 
-    def test_verify_web_api_key_invalid(self):
+    def test_verify_web_api_key_invalid(self) -> None:
         """Test invalid web API key verification."""
         with patch.dict(
             os.environ,
@@ -53,7 +53,7 @@ class TestWebApiKeyAuthentication:
             result = request_manager.main.verify_web_api_key("invalid-key")
             assert result is None
 
-    def test_verify_web_api_key_disabled(self):
+    def test_verify_web_api_key_disabled(self) -> None:
         """Test web API key verification when disabled."""
         with patch.dict(
             os.environ,
@@ -71,7 +71,7 @@ class TestWebApiKeyAuthentication:
             result = request_manager.main.verify_web_api_key("web-test-user")
             assert result is None
 
-    def test_verify_web_api_key_empty(self):
+    def test_verify_web_api_key_empty(self) -> None:
         """Test web API key verification with empty key."""
         with patch.dict(
             os.environ,
@@ -89,7 +89,7 @@ class TestWebApiKeyAuthentication:
             result = request_manager.main.verify_web_api_key("")
             assert result is None
 
-    def test_verify_web_api_key_none(self):
+    def test_verify_web_api_key_none(self) -> None:
         """Test web API key verification with None key."""
         with patch.dict(
             os.environ,
@@ -111,12 +111,12 @@ class TestWebApiKeyAuthentication:
 class TestJWTValidation:
     """Test cases for JWT token validation."""
 
-    def setup_method(self):
+    def setup_method(self) -> None:
         """Set up test fixtures."""
         self.client = TestClient(app)
 
     @pytest.mark.asyncio
-    async def test_validate_jwt_token_disabled(self):
+    async def test_validate_jwt_token_disabled(self) -> None:
         """Test JWT validation when disabled."""
         with patch.dict(os.environ, {"JWT_ENABLED": "false", "JWT_ISSUERS": "[]"}):
             import importlib
@@ -129,7 +129,7 @@ class TestJWTValidation:
             assert result is None
 
     @pytest.mark.asyncio
-    async def test_validate_jwt_token_empty(self):
+    async def test_validate_jwt_token_empty(self) -> None:
         """Test JWT validation with empty token."""
         with patch.dict(
             os.environ,
@@ -148,7 +148,7 @@ class TestJWTValidation:
             assert result is None
 
     @pytest.mark.asyncio
-    async def test_validate_jwt_token_none(self):
+    async def test_validate_jwt_token_none(self) -> None:
         """Test JWT validation with None token."""
         with patch.dict(
             os.environ,
@@ -167,7 +167,7 @@ class TestJWTValidation:
             assert result is None
 
     @pytest.mark.asyncio
-    async def test_validate_jwt_token_invalid_format(self):
+    async def test_validate_jwt_token_invalid_format(self) -> None:
         """Test JWT validation with invalid token format."""
         with patch.dict(
             os.environ,
@@ -187,7 +187,7 @@ class TestJWTValidation:
             assert result is None
 
     @pytest.mark.asyncio
-    async def test_validate_jwt_token_no_matching_issuer(self):
+    async def test_validate_jwt_token_no_matching_issuer(self) -> None:
         """Test JWT validation with no matching issuer."""
         with patch.dict(
             os.environ,
@@ -211,7 +211,7 @@ class TestJWTValidation:
                 assert result is None
 
     @pytest.mark.asyncio
-    async def test_validate_jwt_token_issuer_mismatch(self):
+    async def test_validate_jwt_token_issuer_mismatch(self) -> None:
         """Test JWT validation with issuer mismatch."""
         with patch.dict(
             os.environ,
@@ -242,7 +242,7 @@ class TestJWTValidation:
                 assert result is None
 
     @pytest.mark.asyncio
-    async def test_validate_jwt_token_audience_mismatch(self):
+    async def test_validate_jwt_token_audience_mismatch(self) -> None:
         """Test JWT validation with audience mismatch."""
         with patch.dict(
             os.environ,
@@ -274,7 +274,7 @@ class TestJWTValidation:
                 assert result is None
 
     @pytest.mark.asyncio
-    async def test_validate_jwt_token_no_user_id(self):
+    async def test_validate_jwt_token_no_user_id(self) -> None:
         """Test JWT validation with no user ID in token."""
         with patch.dict(
             os.environ,
@@ -301,7 +301,7 @@ class TestJWTValidation:
                 assert result is None
 
     @pytest.mark.asyncio
-    async def test_validate_jwt_token_success(self):
+    async def test_validate_jwt_token_success(self) -> None:
         """Test successful JWT validation."""
         with patch.dict(
             os.environ,
@@ -341,12 +341,12 @@ class TestJWTValidation:
 class TestGetCurrentUser:
     """Test cases for get_current_user function."""
 
-    def setup_method(self):
+    def setup_method(self) -> None:
         """Set up test fixtures."""
         self.client = TestClient(app)
 
     @pytest.mark.asyncio
-    async def test_get_current_user_no_authorization(self):
+    async def test_get_current_user_no_authorization(self) -> None:
         """Test get_current_user with no authorization header."""
         request = MagicMock()
         request.headers = {}
@@ -355,7 +355,7 @@ class TestGetCurrentUser:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_get_current_user_empty_credentials(self):
+    async def test_get_current_user_empty_credentials(self) -> None:
         """Test get_current_user with empty credentials."""
         request = MagicMock()
         request.headers = {}
@@ -366,7 +366,7 @@ class TestGetCurrentUser:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_get_current_user_jwt_success(self):
+    async def test_get_current_user_jwt_success(self) -> None:
         """Test get_current_user with successful JWT authentication."""
         with patch.dict(
             os.environ,
@@ -402,7 +402,7 @@ class TestGetCurrentUser:
                 assert result["email"] == "user@test.com"
 
     @pytest.mark.asyncio
-    async def test_get_current_user_api_key_success(self):
+    async def test_get_current_user_api_key_success(self) -> None:
         """Test get_current_user with successful API key authentication."""
         with patch.dict(
             os.environ,
@@ -430,7 +430,7 @@ class TestGetCurrentUser:
             assert result["auth_method"] == "api_key"
 
     @pytest.mark.asyncio
-    async def test_get_current_user_legacy_headers(self):
+    async def test_get_current_user_legacy_headers(self) -> None:
         """Test get_current_user with legacy headers."""
         with patch.dict(
             os.environ, {"JWT_ENABLED": "false", "API_KEYS_ENABLED": "false"}
@@ -458,7 +458,7 @@ class TestGetCurrentUser:
             assert result["auth_method"] == "legacy_headers"
 
     @pytest.mark.asyncio
-    async def test_get_current_user_no_valid_auth(self):
+    async def test_get_current_user_no_valid_auth(self) -> None:
         """Test get_current_user with no valid authentication method."""
         with patch.dict(
             os.environ, {"JWT_ENABLED": "false", "API_KEYS_ENABLED": "false"}
@@ -481,11 +481,11 @@ class TestGetCurrentUser:
 class TestWebEndpointAuthentication:
     """Test cases for web endpoint authentication."""
 
-    def setup_method(self):
+    def setup_method(self) -> None:
         """Set up test fixtures."""
         self.client = TestClient(app)
 
-    def test_web_endpoint_no_authorization(self):
+    def test_web_endpoint_no_authorization(self) -> None:
         """Test web endpoint with no authorization header."""
         response = self.client.post(
             "/api/v1/requests/web",
@@ -497,7 +497,7 @@ class TestWebEndpointAuthentication:
         )
         assert response.status_code == 401
 
-    def test_web_endpoint_invalid_authorization(self):
+    def test_web_endpoint_invalid_authorization(self) -> None:
         """Test web endpoint with invalid authorization."""
         response = self.client.post(
             "/api/v1/requests/web",
@@ -510,7 +510,7 @@ class TestWebEndpointAuthentication:
         )
         assert response.status_code == 401
 
-    def test_web_endpoint_user_id_mismatch(self):
+    def test_web_endpoint_user_id_mismatch(self) -> None:
         """Test web endpoint with user ID mismatch."""
         with patch.dict(
             os.environ,
@@ -540,11 +540,11 @@ class TestWebEndpointAuthentication:
 class TestCLIEndpointAuthentication:
     """Test cases for CLI endpoint authentication."""
 
-    def setup_method(self):
+    def setup_method(self) -> None:
         """Set up test fixtures."""
         self.client = TestClient(app)
 
-    def test_cli_endpoint_no_authorization(self):
+    def test_cli_endpoint_no_authorization(self) -> None:
         """Test CLI endpoint with no authorization header."""
         response = self.client.post(
             "/api/v1/requests/cli",

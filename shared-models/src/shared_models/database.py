@@ -17,7 +17,7 @@ T = TypeVar("T", bound=DeclarativeBase)
 class DatabaseConfig:
     """Database configuration class."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         # PostgreSQL connection parameters
         self.host = os.getenv("POSTGRES_HOST", "pgvector")
         self.port = int(os.getenv("POSTGRES_PORT", "5432"))
@@ -67,7 +67,7 @@ class DatabaseConfig:
 
         return True
 
-    def get_alembic_config(self) -> dict:
+    def get_alembic_config(self) -> dict[str, Any]:
         """Get configuration for Alembic."""
         return {
             "sqlalchemy.url": self.sync_connection_string,
@@ -78,7 +78,7 @@ class DatabaseConfig:
 class DatabaseManager:
     """Database connection and session manager."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.config = DatabaseConfig()
 
         # Create async engine with connection pooling for better performance
@@ -171,7 +171,7 @@ class DatabaseManager:
             return False
 
     async def wait_for_migration(
-        self, expected_version: str = None, timeout: int = 300
+        self, expected_version: str | None = None, timeout: int = 300
     ) -> bool:
         """Wait for database migration to complete to a specific version."""
         import asyncio

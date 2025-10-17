@@ -14,7 +14,7 @@ Usage:
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from shared_models import configure_logging, get_enum_value
 from shared_models.models import RequestSession, SessionStatus
@@ -98,8 +98,8 @@ class BaseSessionManager:
         agent_id: Optional[str] = None,
         conversation_thread_id: Optional[str] = None,
         status: Optional[SessionStatus] = None,
-        conversation_context: Optional[Dict] = None,
-        user_context: Optional[Dict] = None,
+        conversation_context: Optional[Dict[str, Any]] = None,
+        user_context: Optional[Dict[str, Any]] = None,
     ) -> Optional[SessionResponse]:
         """Update Request Manager session information in database."""
         update_data = {
@@ -185,7 +185,7 @@ class ResponsesSessionManager(BaseSessionManager):
 
         self._initialize_conversation_state()
 
-    def _initialize_conversation_state(self):
+    def _initialize_conversation_state(self) -> None:
         """Initialize conversation state for responses mode."""
         try:
             from .langgraph import ResponsesAgentManager
@@ -438,8 +438,12 @@ class ResponsesSessionManager(BaseSessionManager):
             return False
 
     def _create_session_for_agent(
-        self, agent, agent_name: str, session_name: str = None, **kwargs
-    ):
+        self,
+        agent: Any,
+        agent_name: str,
+        session_name: str | None = None,
+        **kwargs: Any,
+    ) -> Any:
         """Create a new session for the given agent."""
         from .langgraph import ConversationSession
 
@@ -466,8 +470,8 @@ class ResponsesSessionManager(BaseSessionManager):
         )
 
     def _build_session_data(
-        self, agent, agent_name: str, session, session_name: str
-    ) -> dict:
+        self, agent: Any, agent_name: str, session: Any, session_name: str
+    ) -> dict[str, Any]:
         """Build session data dictionary for updating current session."""
         return {
             "agent_name": agent_name,
@@ -475,7 +479,7 @@ class ResponsesSessionManager(BaseSessionManager):
             "session_name": session_name,
         }
 
-    def _generate_session_name(self, agent_name: str = None) -> str:
+    def _generate_session_name(self, agent_name: str | None = None) -> str:
         """Generate a unique session name."""
         unique_id = str(uuid.uuid4())[:8]
         if agent_name:
@@ -768,8 +772,8 @@ class ResponsesSessionManager(BaseSessionManager):
             return f"Error: {str(e)}"
 
     async def _update_database_session_state(
-        self, agent_name: str, thread_id: str, session_id: str = None
-    ):
+        self, agent_name: str, thread_id: str, session_id: str | None = None
+    ) -> None:
         """Update the database with current session state."""
         try:
             logger.debug(
@@ -840,7 +844,7 @@ class ResponsesSessionManager(BaseSessionManager):
                 exc_info=e,
             )
 
-    async def _reset_conversation_state(self):
+    async def _reset_conversation_state(self) -> None:
         """Reset the conversation state."""
         try:
             logger.debug(
@@ -914,7 +918,7 @@ class ResponsesSessionManager(BaseSessionManager):
         """Get the current agent name for the user session."""
         return self.current_agent_name
 
-    async def close(self):
+    async def close(self) -> None:
         """Close the session manager and clean up resources."""
         if self.conversation_session:
             self.conversation_session.close()

@@ -1,5 +1,6 @@
 import logging
 import os
+from typing import Any
 
 import yaml
 from asset_manager.util import load_config_from_path, resolve_asset_manager_path
@@ -17,9 +18,9 @@ class Agent:
     def __init__(
         self,
         agent_name: str,
-        config: dict,
-        global_config: dict = None,
-        system_message: str = None,
+        config: dict[str, Any],
+        global_config: dict[str, Any] | None = None,
+        system_message: str | None = None,
     ):
         """Initialize agent with provided configuration."""
         self.agent_name = agent_name
@@ -66,7 +67,7 @@ class Agent:
             "Could not determine model from agent configuration or LlamaStack - no LLM models available"
         )
 
-    def _get_response_config(self) -> dict:
+    def _get_response_config(self) -> dict[str, Any]:
         """Get response configuration from agent config with defaults."""
         base_config = {
             "stream": False,
@@ -89,7 +90,7 @@ class Agent:
 
         return ""
 
-    def _create_openai_client(self):
+    def _create_openai_client(self) -> Any:
         """Create OpenAI client pointing to LlamaStack instance."""
         import openai
 
@@ -129,10 +130,10 @@ class Agent:
 
     def _get_mcp_tools_to_use(
         self,
-        requested_servers: list = None,
-        authoritative_user_id: str = None,
-        allowed_tools: list = None,
-    ) -> list:
+        requested_servers: list[str] | None = None,
+        authoritative_user_id: str | None = None,
+        allowed_tools: list[str] | None = None,
+    ) -> list[Any]:
         """Get complete tools array for LlamaStack responses API."""
         tools_to_use = []
 
@@ -208,16 +209,16 @@ class Agent:
 
     def create_response_with_retry(
         self,
-        messages: list,
+        messages: list[Any],
         max_retries: int = 3,
-        temperature: float = None,
-        additional_system_messages: list = None,
-        authoritative_user_id: str = None,
-        allowed_tools: list = None,
+        temperature: float | None = None,
+        additional_system_messages: list[str] | None = None,
+        authoritative_user_id: str | None = None,
+        allowed_tools: list[str] | None = None,
         skip_all_tools: bool = False,
         skip_mcp_servers_only: bool = False,
-        current_state_name: str = None,
-        token_context: str = None,
+        current_state_name: str | None = None,
+        token_context: str | None = None,
     ) -> str:
         """Create a response with retry logic for empty responses and errors."""
         response = None
@@ -332,7 +333,7 @@ class Agent:
         current_state_name: str,
         skip_all_tools: bool,
         skip_mcp_servers_only: bool,
-        tools_to_use: list,
+        tools_to_use: list[Any],
     ) -> None:
         """Print detailed debug information for empty responses.
 
@@ -374,15 +375,15 @@ class Agent:
 
     def create_response(
         self,
-        messages: list,
-        temperature: float = None,
-        additional_system_messages: list = None,
-        authoritative_user_id: str = None,
-        allowed_tools: list = None,
+        messages: list[Any],
+        temperature: float | None = None,
+        additional_system_messages: list[str] | None = None,
+        authoritative_user_id: str | None = None,
+        allowed_tools: list[str] | None = None,
         skip_all_tools: bool = False,
         skip_mcp_servers_only: bool = False,
-        current_state_name: str = None,
-        token_context: str = None,
+        current_state_name: str | None = None,
+        token_context: str | None = None,
     ) -> str:
         """Create a response using LlamaStack responses API.
 
@@ -546,7 +547,7 @@ class Agent:
 class ResponsesAgentManager:
     """Manages multiple agent instances for the application."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.agents_dict = {}
 
         # Load the configuration using centralized path resolution
@@ -576,7 +577,7 @@ class ResponsesAgentManager:
                     agent_name, agent_config, global_config
                 )
 
-    def get_agent(self, agent_id: str):
+    def get_agent(self, agent_id: str) -> Any:
         """Get an agent by ID, returning default if not found."""
         if agent_id in self.agents_dict:
             return self.agents_dict[agent_id]
@@ -590,6 +591,6 @@ class ResponsesAgentManager:
             f"No agent found with ID '{agent_id}' and no agents are loaded"
         )
 
-    def agents(self):
+    def agents(self) -> dict[str, str]:
         """Return a dict mapping agent names to agent names (for compatibility with AgentManager)."""
         return {name: name for name in self.agents_dict.keys()}

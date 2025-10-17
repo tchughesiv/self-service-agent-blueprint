@@ -2,7 +2,7 @@ import logging
 import os
 import uuid
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import openai
 
@@ -10,14 +10,16 @@ from .manager import Manager
 
 
 class KnowledgeBaseManager(Manager):
-    def __init__(self, config):
+    def __init__(self, config: dict[str, Any]) -> None:
         self._client = None
         self._openai_client = None
         self._config = config
         self._knowledge_bases_path = Path("config/knowledge_bases")
-        self._vector_store_registry = {}  # Map kb_name to vector_store_id
+        self._vector_store_registry: dict[str, str] = (
+            {}
+        )  # Map kb_name to vector_store_id
 
-    def connect_to_openai_client(self):
+    def connect_to_openai_client(self) -> None:
         """Initialize OpenAI client configured to use LlamaStack"""
         if self._openai_client is None:
             logging.debug("Connecting to OpenAI client via LlamaStack")
@@ -34,7 +36,7 @@ class KnowledgeBaseManager(Manager):
         else:
             logging.debug("Already connected to OpenAI client")
 
-    def register_knowledge_bases(self):
+    def register_knowledge_bases(self) -> None:
         """Register all knowledge bases by processing directories in knowledge_bases path"""
         if self._client is None:
             self.connect_to_llama_stack()
@@ -74,7 +76,7 @@ class KnowledgeBaseManager(Manager):
                 else:
                     logging.error(f"Failed to register {kb_name} via both APIs")
 
-    def register_knowledge_base_llamastack(self, kb_directory: Path):
+    def register_knowledge_base_llamastack(self, kb_directory: Path) -> str | None:
         """Register a single knowledge base from a directory via LlamaStack API"""
         vector_db_id = kb_directory.name
 
@@ -115,9 +117,11 @@ class KnowledgeBaseManager(Manager):
             logging.error(f"Failed to create knowledge base {vector_db_id}: {str(e)}")
             return None
 
-    def _insert_documents_from_directory(self, directory: Path, vector_db_id: str):
+    def _insert_documents_from_directory(
+        self, directory: Path, vector_db_id: str
+    ) -> None:
         """Insert all txt files from a directory into the vector database"""
-        rag_documents = []
+        rag_documents: list[dict[str, Any]] = []
         doc_counter = 0
 
         # Find all .txt files in the directory
@@ -260,7 +264,7 @@ class KnowledgeBaseManager(Manager):
         """List all registered vector stores (kb_name -> vector_store_id mapping)"""
         return self._vector_store_registry.copy()
 
-    def unregister_knowledge_bases(self):
+    def unregister_knowledge_bases(self) -> None:
         """Unregister all registered vector databases"""
         if self._client is None:
             self.connect_to_llama_stack()
@@ -288,7 +292,7 @@ class KnowledgeBaseManager(Manager):
 
     def list_knowledge_bases(self) -> List[str]:
         """List all available knowledge base directories"""
-        knowledge_bases = []
+        knowledge_bases: list[str] = []
 
         if not self._knowledge_bases_path.exists():
             return knowledge_bases
@@ -299,7 +303,7 @@ class KnowledgeBaseManager(Manager):
 
         return knowledge_bases
 
-    def get_knowledge_base_by_vector_db_id(self, vector_db_id: str):
+    def get_knowledge_base_by_vector_db_id(self, vector_db_id: str) -> Any | None:
         """Get a knowledge base by its vector database ID"""
         if self._client is None:
             self.connect_to_llama_stack()

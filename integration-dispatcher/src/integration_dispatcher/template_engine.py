@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 class TemplateEngine:
     """Template engine for rendering integration messages."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.jinja_env = jinja2.Environment(
             loader=jinja2.DictLoader({}),
             autoescape=jinja2.select_autoescape(["html", "xml"]),
@@ -30,7 +30,7 @@ class TemplateEngine:
         content: str,
         variables: Dict[str, Any],
         db: AsyncSession,
-        template_name: str = None,
+        template_name: str | None = None,
     ) -> Dict[str, str]:
         """
         Render templates for an integration type.

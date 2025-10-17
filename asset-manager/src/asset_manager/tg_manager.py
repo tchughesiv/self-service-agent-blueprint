@@ -1,17 +1,18 @@
 import logging
+from typing import Any
 
 from .manager import Manager
 
 
 class ToolgroupsManager(Manager):
-    def __init__(self, config):
+    def __init__(self, config: dict[str, Any]) -> None:
         self._client = None
         self._config = config
 
-    def is_connected(self):
+    def is_connected(self) -> bool:
         return self._client is not None
 
-    def unregister_toolgroups(self):
+    def unregister_toolgroups(self) -> None:
         """Unregister all registered toolgroups"""
         if self._client is None:
             self.connect_to_llama_stack()
@@ -21,7 +22,7 @@ class ToolgroupsManager(Manager):
         for tg in self._config["toolgroups"]:
             self.unregister_mcp_toolgroup(tg)
 
-    def unregister_mcp_toolgroup(self, tg: dict):
+    def unregister_mcp_toolgroup(self, tg: dict[str, Any]) -> str | None:
         """Unregister a single toolgroup_id"""
         toolgroup_id = f"mcp::{tg.get('name')}"
 
@@ -38,7 +39,7 @@ class ToolgroupsManager(Manager):
             logging.error(f"Failed to unregister toolgroup_id {toolgroup_id}: {str(e)}")
             return None
 
-    def register_mcp_toolgroups(self):
+    def register_mcp_toolgroups(self) -> None:
         """Register all toolgroups by processing directories in toolgroups path"""
         if self._client is None:
             self.connect_to_llama_stack()
@@ -48,7 +49,7 @@ class ToolgroupsManager(Manager):
         for tg in self._config["toolgroups"]:
             self.register_mcp_toolgroup(tg)
 
-    def register_mcp_toolgroup(self, tg: dict):
+    def register_mcp_toolgroup(self, tg: dict[str, Any]) -> str | None:
         """Register a single toolgroup_id from a directory"""
         toolgroup_id = f"mcp::{tg.get('name')}"
 
