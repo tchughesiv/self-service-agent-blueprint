@@ -324,7 +324,8 @@ class CloudEventHandler:
         handler = self.handlers[event_type]
 
         try:
-            return await handler(event)
+            result = await handler(event)
+            return result if isinstance(result, dict) else None
         except Exception as e:
             logger.error("Error handling event", event_type=event_type, error=str(e))
             return None

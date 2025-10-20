@@ -103,18 +103,20 @@ def _evaluate_conversations(
     )
     if not api_key_found:
         logger.error("No API key configured. Cannot proceed with evaluation.")
-        return
+        return 1
 
+    # At this point, api_key_found is guaranteed to be non-None
+    assert api_key_found is not None
     custom_model = CustomLLM(
-        api_key=api_key_found, base_url=current_endpoint, model_name=model_name
+        api_key=api_key_found, base_url=current_endpoint, model_name=model_name  # type: ignore[arg-type]
     )
     if not custom_model:
         logger.error("Could not create model object. Cannot proceed with evaluation.")
-        return
+        return 1
 
     if not os.path.exists(results_dir):
         logger.error(f"Results directory {results_dir} does not exist")
-        return
+        return 1
 
     os.makedirs(output_dir, exist_ok=True)
 
@@ -123,7 +125,7 @@ def _evaluate_conversations(
 
     if not json_files:
         logger.warning(f"No JSON files found in {results_dir}")
-        return
+        return 0
 
     print(f"Found {len(json_files)} conversation files to evaluate")
 

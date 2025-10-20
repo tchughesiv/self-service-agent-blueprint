@@ -5,17 +5,20 @@ from typing import Any
 
 import httpx
 from llama_stack_client.lib.agents.agent import AgentUtils
-from llama_stack_client.types.shared.agent_config import ToolConfig, Toolgroup
+from llama_stack_client.types.agents.session_create_response import (
+    SessionCreateResponse,
+)
+from llama_stack_client.types.shared.agent_config import ToolConfig
 from llama_stack_client.types.shared_params.sampling_params import SamplingParams
 
 from .manager import Manager
 
 
-def toolgroups(agent: dict[str, Any]) -> list[Toolgroup] | None:
+def toolgroups(agent: dict[str, Any]) -> list[Any] | None:
     if not agent.get("mcp_servers") and not agent.get("knowledge_bases"):
         return None
 
-    toolgroups: list[Toolgroup] = []
+    toolgroups: list[Any] = []
     kbs = agent.get("knowledge_bases")
     if kbs:
         toolgroups.append(
@@ -123,7 +126,7 @@ class AgentManager(Manager):
         model = self.model(agent)
 
         # Load prompt with model suffix if config path is set, otherwise use pre-loaded instructions
-        if self._config_path:
+        if self._config_path and model is not None:
             try:
                 instructions = self.load_prompt_with_model_suffix(agent["name"], model)
             except FileNotFoundError:
@@ -136,7 +139,7 @@ class AgentManager(Manager):
             model=model,
             instructions=instructions,
             tools=toolgroups(agent),
-            tool_config=tool_config(agent),
+            tool_config=tool_config(agent),  # type: ignore[arg-type]
             max_infer_iters=agent["max_infer_iters"],
             input_shields=agent["input_shields"],
             output_shields=agent["output_shields"],
@@ -145,6 +148,10 @@ class AgentManager(Manager):
         )
         agent_config["name"] = agent["name"]
 
+        if self._client is None:
+            logging.error("Client not connected. Cannot create agent.")
+            return ""
+
         agentic_system_create_response = self._client.agents.create(
             agent_config=agent_config
         )
@@ -152,7 +159,9 @@ class AgentManager(Manager):
 
     def delete_agents(self) -> None:
         if self._client is None:
-            self.connect_to_llama_stack()
+            logging.error("Client not connected. Cannot delete agents.")
+            return
+
         logging.debug("Deleting agents")
         agents = self.agents()
         for _, agent_id in agents.items():
@@ -161,6 +170,10 @@ class AgentManager(Manager):
     def agents(self) -> dict[str, str]:
         if self._client is None:
             self.connect_to_llama_stack()
+
+        if self._client is None:
+            logging.error("Client not connected. Cannot list agents.")
+            return {}
 
         # there does not seem to be a list method available do it manually
         response = self._client.get("v1/agents", cast_to=httpx.Response)
@@ -184,23 +197,30 @@ class AgentManager(Manager):
 
     def model(self, agent: dict[str, Any]) -> str | None:
         if agent.get("model"):
-            print(agent["model"])
-            return agent["model"]
+            model = agent["model"]
+            print(model)
+            return str(model) if model is not None else None
 
         # Select the first LLM model
         if self._client is None:
-            self.connect_to_llama_stack()
+            logging.error("Client not connected. Cannot get model.")
+            return ""
+
         models = self._client.models.list()
-        model_id = next(m for m in models if m.model_type == "llm").identifier
+        model_id = next(m for m in models if m.api_model_type == "llm").identifier
         if model_id:
             print(model_id)
             return model_id
         return None
 
-    def create_session(self, agent_id: str, session_name: str | None = None) -> Any:
+    def create_session(
+        self, agent_id: str, session_name: str
+    ) -> SessionCreateResponse | None:
         """Create a new session for an agent"""
         if self._client is None:
-            self.connect_to_llama_stack()
+            logging.error("Client not connected. Cannot create session.")
+            return None
+
         return self._client.agents.session.create(agent_id, session_name=session_name)
 
     def create_agent_turn(
@@ -212,7 +232,12 @@ class AgentManager(Manager):
     ) -> Any:
         """Send a turn to an agent"""
         if self._client is None:
-            self.connect_to_llama_stack()
+            logging.error("Client not connected. Cannot create turn.")
+            return None
+
         return self._client.agents.turn.create(
-            agent_id=agent_id, session_id=session_id, stream=stream, messages=messages
+            agent_id=agent_id,
+            session_id=session_id,
+            stream=stream,
+            messages=messages or [],
         )

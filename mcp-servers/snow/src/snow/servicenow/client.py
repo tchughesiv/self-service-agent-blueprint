@@ -195,7 +195,8 @@ class ServiceNowClient:
                 full_url, headers=headers, params=params, timeout=self.config.timeout
             )
             response.raise_for_status()
-            return response.json()
+            result = response.json()
+            return result if isinstance(result, dict) else None
 
         except requests.exceptions.RequestException as e:
             logger.error(f"ServiceNow API Error: {e}")

@@ -90,7 +90,7 @@ class SlackIntegrationHandler(BaseIntegrationHandler):
                     metadata={
                         "channel": response["channel"],
                         "ts": response["ts"],
-                        "message_id": response.get("message", {}).get("ts"),
+                        "message_id": response.get("message", {}).get("ts"),  # type: ignore[call-overload]
                     },
                 )
             else:
@@ -211,7 +211,8 @@ class SlackIntegrationHandler(BaseIntegrationHandler):
             if not dm_response["ok"]:
                 raise Exception("Failed to open DM channel")
 
-            return dm_response["channel"]["id"]
+            channel_id = dm_response["channel"]["id"]
+            return str(channel_id) if channel_id is not None else ""
 
         except Exception as e:
             raise Exception(f"Failed to get DM channel: {str(e)}")
@@ -226,7 +227,8 @@ class SlackIntegrationHandler(BaseIntegrationHandler):
             if not dm_response["ok"]:
                 raise Exception("Failed to open DM channel")
 
-            return dm_response["channel"]["id"]
+            channel_id = dm_response["channel"]["id"]
+            return str(channel_id) if channel_id is not None else ""
 
         except Exception as e:
             raise Exception(f"Failed to get DM channel for user {user_id}: {str(e)}")

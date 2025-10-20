@@ -59,7 +59,9 @@ class EmailIntegrationHandler(BaseIntegrationHandler):
             # Add custom headers
             msg["X-Request-ID"] = request.request_id
             msg["X-Session-ID"] = request.session_id
-            msg["X-Agent-ID"] = request.agent_id or "unknown"
+            msg["X-Agent-ID"] = (
+                request.agent_id if request.agent_id is not None else "system"
+            )
 
             # Create email content
             email_format = email_config.get("format", "html")

@@ -34,7 +34,7 @@ import logging
 import os
 import random
 from pathlib import Path
-from typing import Any, List
+from typing import Any, List, Optional
 
 from deepeval.dataset import ConversationalGolden  # type: ignore
 from deepeval.simulator import ConversationSimulator  # type: ignore
@@ -47,7 +47,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Initialize the OpenShift client (for agent under test) - will be updated with test_script in main
-client = None
+client: Optional[OpenShiftChatClient] = None
 
 # Track app tokens separately from evaluation tokens
 total_app_tokens = {"input": 0, "output": 0, "total": 0, "calls": 0}
@@ -123,13 +123,20 @@ async def _model_callback(input: str, turns: List[Turn], thread_id: str) -> Turn
         )
 
         logger.info(f"Sending to agent: {input}")
+
+        if client is None:
+            logger.error("OpenShift client not initialized")
+            return Turn(
+                id="error",
+                input=input,
+                output="I apologize, but the system is not properly initialized.",
+                thread_id=thread_id,
+            )
+
         response = client.send_message(input)
 
         # Check if we got a valid response
-        if response is None:
-            logger.error("Agent returned None response")
-            response = "I apologize, but I didn't receive a response from the system."
-        elif isinstance(response, str) and not response.strip():
+        if isinstance(response, str) and not response.strip():
             logger.error("Agent returned empty response")
             response = "I apologize, but I received an empty response from the system."
 

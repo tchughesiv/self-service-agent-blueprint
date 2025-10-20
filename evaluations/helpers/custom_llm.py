@@ -86,7 +86,8 @@ class CustomLLM(DeepEvalBaseLLM):
                 response, self.model_name, "custom_llm_evaluation"
             )
 
-            return response.choices[0].message.content
+            content = response.choices[0].message.content
+            return str(content) if content is not None else ""
         except Exception as e:
             logger.error(f"Error generating response: {e}")
             raise
@@ -137,7 +138,8 @@ class CustomLLM(DeepEvalBaseLLM):
                 response, self.model_name, "custom_llm_evaluation_async"
             )
 
-            return response.choices[0].message.content
+            content = response.choices[0].message.content
+            return str(content) if content is not None else ""
 
         except Exception as e:
             logger.error(f"Error generating async response: {e}")

@@ -251,7 +251,7 @@ class IntegrationDispatcher:
         db: AsyncSession,
     ) -> Dict[str, Any]:
         """Dispatch to a single integration."""
-        handler = self.handlers.get(config.integration_type)
+        handler = self.handlers.get(config.integration_type)  # type: ignore[call-overload]
         if not handler:
             raise ValueError(
                 f"No handler for integration type: {config.integration_type}"
@@ -259,7 +259,7 @@ class IntegrationDispatcher:
 
         # Render templates
         template_content = await self.template_engine.render(
-            integration_type=config.integration_type,
+            integration_type=config.integration_type,  # type: ignore[arg-type]
             subject=request.subject,
             content=request.content,
             variables=request.template_variables,
@@ -286,9 +286,9 @@ class IntegrationDispatcher:
 
         # Attempt delivery
         try:
-            delivery_log.first_attempt_at = datetime.now(timezone.utc)
-            delivery_log.last_attempt_at = datetime.now(timezone.utc)
-            delivery_log.attempts = 1
+            delivery_log.first_attempt_at = datetime.now(timezone.utc)  # type: ignore[assignment]
+            delivery_log.last_attempt_at = datetime.now(timezone.utc)  # type: ignore[assignment]
+            delivery_log.attempts = 1  # type: ignore[assignment]
 
             integration_result = await handler.deliver(
                 request, config, template_content
@@ -299,7 +299,7 @@ class IntegrationDispatcher:
             delivery_log.integration_metadata = integration_result.metadata
 
             if integration_result.success:
-                delivery_log.delivered_at = datetime.now(timezone.utc)
+                delivery_log.delivered_at = datetime.now(timezone.utc)  # type: ignore[assignment]
                 logger.info(
                     "Integration delivery successful",
                     user_id=request.user_id,
@@ -341,8 +341,8 @@ class IntegrationDispatcher:
             }
 
         except Exception as e:
-            delivery_log.status = DeliveryStatus.FAILED.value
-            delivery_log.error_message = f"Handler error: {str(e)}"
+            delivery_log.status = DeliveryStatus.FAILED.value  # type: ignore[assignment]
+            delivery_log.error_message = f"Handler error: {str(e)}"  # type: ignore[assignment]
             await db.commit()
             raise
 
@@ -505,7 +505,7 @@ async def detailed_health_check(
         service_name="integration-dispatcher",
         version=__version__,
         db=db,
-        custom_health_logic=_integration_health_logic,
+        custom_health_logic=_integration_health_logic,  # type: ignore[arg-type]
     )
 
     return HealthCheck(
@@ -568,9 +568,21 @@ async def handle_cloudevent(
         # Parse CloudEvent from request using shared utility
         event_data = await parse_cloudevent_from_request(request)
 
+        # Extract CloudEvent fields with explicit handling
         event_id = event_data.get("id")
         event_type = event_data.get("type")
         event_source = event_data.get("source")
+
+        # Log warning if critical fields are missing
+        if not event_id:
+            logger.warning("CloudEvent missing event ID")
+            event_id = "unknown"
+        if not event_type:
+            logger.warning("CloudEvent missing event type")
+            event_type = "unknown"
+        if not event_source:
+            logger.warning("CloudEvent missing event source")
+            event_source = "unknown"
 
         logger.info(
             "CloudEvent received",
@@ -610,8 +622,8 @@ async def handle_cloudevent(
                 event_id,
                 event_type,
                 event_source,
-                None,
-                None,
+                "unknown",  # request_id
+                "unknown",  # session_id
                 "integration-dispatcher",
                 "ignored",
                 "unhandled event type",
@@ -681,16 +693,23 @@ async def handle_cloudevent(
         )
 
         # ✅ RECORD SUCCESSFUL EVENT PROCESSING
-        await _record_processed_event(
-            db,
-            event_id,
-            event_type,
-            event_source,
-            delivery_request.request_id,
-            delivery_request.session_id,
-            "integration-dispatcher",
-            "success",
-        )
+        if delivery_request.request_id and delivery_request.session_id:
+            await _record_processed_event(
+                db,
+                event_id,
+                event_type,
+                event_source,
+                delivery_request.request_id,
+                delivery_request.session_id,
+                "integration-dispatcher",
+                "success",
+            )
+        else:
+            logger.warning(
+                "Cannot record processed event - missing request_id or session_id",
+                request_id=delivery_request.request_id,
+                session_id=delivery_request.session_id,
+            )
 
         return await create_cloudevent_response(
             status="processed",
@@ -711,13 +730,23 @@ async def handle_cloudevent(
         )
 
         # ✅ RECORD FAILED EVENT PROCESSING
+        request_id = event_data.get("request_id")
+        session_id = event_data.get("session_id")
+
+        if not request_id:
+            logger.warning("CloudEvent missing request_id for error recording")
+            request_id = "unknown"
+        if not session_id:
+            logger.warning("CloudEvent missing session_id for error recording")
+            session_id = "unknown"
+
         await _record_processed_event(
             db,
-            event_id,
-            event_type,
-            event_source,
-            event_data.get("request_id") if "event_data" in locals() else None,
-            event_data.get("session_id") if "event_data" in locals() else None,
+            str(event_id),
+            str(event_type),
+            str(event_source),
+            request_id,
+            session_id,
             "integration-dispatcher",
             "error",
             str(e),
@@ -836,12 +865,12 @@ async def create_user_integration(
 
     if existing_config:
         # Update existing configuration
-        existing_config.enabled = config_data.enabled
-        existing_config.config = config_data.config
-        existing_config.priority = config_data.priority
-        existing_config.retry_count = config_data.retry_count
-        existing_config.retry_delay_seconds = config_data.retry_delay_seconds
-        existing_config.updated_at = datetime.now(timezone.utc)
+        existing_config.enabled = config_data.enabled  # type: ignore[assignment]
+        existing_config.config = config_data.config  # type: ignore[assignment]
+        existing_config.priority = config_data.priority  # type: ignore[assignment]
+        existing_config.retry_count = config_data.retry_count  # type: ignore[assignment]
+        existing_config.retry_delay_seconds = config_data.retry_delay_seconds  # type: ignore[assignment]
+        existing_config.updated_at = datetime.now(timezone.utc)  # type: ignore[assignment]
 
         # Ensure Slack configs have necessary identifiers
         if existing_config.integration_type.value == "SLACK":
@@ -914,7 +943,7 @@ async def update_user_integration(
     if config.integration_type.value == "SLACK":
         dispatcher._ensure_slack_config_has_identifiers(config, user_id)
 
-    config.updated_at = datetime.now(timezone.utc)
+    config.updated_at = datetime.now(timezone.utc)  # type: ignore[assignment]
 
     await db.commit()
     await db.refresh(config)

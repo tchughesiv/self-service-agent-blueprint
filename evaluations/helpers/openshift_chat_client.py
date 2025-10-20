@@ -206,11 +206,7 @@ class OpenShiftChatClient:
 
             try:
                 if self.process is not None and self.process.stdout is not None:
-                    line_bytes = self.process.stdout.readline()
-                    if isinstance(line_bytes, bytes):
-                        line = line_bytes.decode("utf-8")
-                    else:
-                        line = line_bytes or ""
+                    line = self.process.stdout.readline()
                 else:
                     line = ""
                 if not line:

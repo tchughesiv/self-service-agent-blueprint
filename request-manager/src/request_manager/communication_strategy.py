@@ -121,7 +121,7 @@ async def create_or_get_session_shared(
             )
 
         # Update activity timestamp
-        existing_session.last_request_at = datetime.now(timezone.utc)
+        existing_session.last_request_at = datetime.now(timezone.utc)  # type: ignore[assignment]
         await db.commit()
         logger.info(
             "Reusing existing session",
@@ -389,7 +389,9 @@ class DirectHttpStrategy(CommunicationStrategy):
         )
         return True
 
-    async def stream_response(self, agent_response: AgentResponse) -> None:
+    async def stream_response(
+        self, agent_response: AgentResponse
+    ) -> Any:  # Returns StreamingResponse
         """Stream response using optimized streaming for direct HTTP mode."""
         if not self.integration_client:
             logger.error("Integration client not initialized")
@@ -413,9 +415,23 @@ class DirectHttpStrategy(CommunicationStrategy):
                     yield chunk_data
 
                 # Stream completion event
-                yield LlamaStackStreamProcessor.create_sse_complete_event(
-                    agent_response.agent_id or "", agent_response.processing_time_ms
-                )
+                if (
+                    agent_response.agent_id is None
+                    or agent_response.processing_time_ms is None
+                ):
+                    logger.error(
+                        "Cannot send completion event - missing agent_id or processing_time_ms",
+                        agent_id=agent_response.agent_id,
+                        processing_time_ms=agent_response.processing_time_ms,
+                    )
+                    yield LlamaStackStreamProcessor.create_sse_error_event(
+                        "Missing required response data"
+                    )
+                else:
+                    yield LlamaStackStreamProcessor.create_sse_complete_event(
+                        agent_response.agent_id,
+                        agent_response.processing_time_ms,
+                    )
 
             except Exception as e:
                 logger.error("Error in streaming response", error=str(e))
