@@ -67,7 +67,7 @@ class AgentService:
 
     def __init__(self, config: AgentConfig) -> None:
         self.config = config
-        self.client: Optional[LlamaStackClient] = None
+        self.client: LlamaStackClient
         self.http_client = httpx.AsyncClient(timeout=30.0)
         self.agent_mapping: AgentMapping = create_agent_mapping(
             {}
@@ -102,7 +102,7 @@ class AgentService:
             await self._build_agent_mapping()
         except Exception as e:
             logger.error("Failed to connect to Llama Stack", exc_info=e)
-            raise
+            raise RuntimeError(f"AgentService initialization failed: {e}") from e
 
     def _is_reset_command(self, content: str) -> bool:
         """Check if the content is a reset command."""
@@ -244,32 +244,23 @@ class AgentService:
             agents_response = self.client.agents.list()
             raw_mapping = {}
 
-            logger.info(
-                "Retrieved agents from LlamaStack", count=len(agents_response.data)
-            )
+            # Handle both dict and object formats from the API
+            agents_data = agents_response.data
 
-            for agent in agents_response.data:
-                # Handle both dict and object formats
-                if isinstance(agent, dict):
-                    agent_name = agent.get("agent_config", {}).get("name") or agent.get(
-                        "name", "unknown"
-                    )
-                    agent_id = agent.get("agent_id", agent.get("id", "unknown"))
-                else:
-                    agent_name = (
-                        getattr(agent.agent_config, "name", "unknown")
-                        if hasattr(agent, "agent_config")
-                        else getattr(agent, "name", "unknown")
-                    )
-                    agent_id = getattr(
-                        agent, "agent_id", getattr(agent, "id", "unknown")
-                    )
+            logger.info("Retrieved agents from LlamaStack", count=len(agents_data))
+
+            for agent in agents_data:
+                # The API returns dict format, so we can safely access as dict
+                agent_name = agent.get("agent_config", {}).get("name") or agent.get(  # type: ignore[attr-defined]
+                    "name", "unknown"
+                )
+                agent_id = agent.get("agent_id", agent.get("id", "unknown"))
 
                 raw_mapping[agent_name] = agent_id
                 logger.debug("Mapped agent", name=agent_name, id=agent_id)
 
             # Create type-safe mapping
-            self.agent_mapping = create_agent_mapping(raw_mapping)
+            self.agent_mapping = create_agent_mapping(dict(raw_mapping))  # type: ignore[arg-type]
 
             # Add to request cache if request_id provided
             if request_id:
@@ -308,6 +299,14 @@ class AgentService:
         from .routing import detect_and_validate_agent_routing
 
         # Get current agent name for routing detection
+        if agent_response.agent_id is None:
+            logger.error(
+                "Agent response missing agent_id - this should not happen",
+                request_id=request.request_id,
+                session_id=request.session_id,
+            )
+            return agent_response  # Return as-is if we can't determine agent
+
         current_agent_name = self.agent_mapping.get_name(agent_response.agent_id)
         if not current_agent_name:
             logger.warning(
@@ -515,7 +514,7 @@ class AgentService:
             else:
                 logger.info("No toolgroups found for agent", agent_id=agent_id)
 
-            response_stream = self.client.agents.turn.create(**turn_params)
+            response_stream = self.client.agents.turn.create(**turn_params)  # type: ignore[call-overload]
 
             # Use shared stream processor
             from shared_clients.stream_processor import LlamaStackStreamProcessor
@@ -581,7 +580,7 @@ class AgentService:
             return self._create_error_response(
                 request=request,
                 content=f"I apologize, but I encountered an error processing your request: {str(e)}",
-                agent_id=None,
+                agent_id="unknown",
             )
 
     async def _determine_agent(self, request: NormalizedRequest) -> str:
@@ -606,7 +605,7 @@ class AgentService:
                     agent_name=request.target_agent_id,
                     agent_id=agent_uuid,
                 )
-                return agent_uuid
+                return str(agent_uuid)
             else:
                 available_agents = self.agent_mapping.get_all_names()
                 logger.error(
@@ -655,7 +654,7 @@ class AgentService:
                             current_agent=stored_agent_id,
                             agent_id=agent_uuid,
                         )
-                        return agent_uuid
+                        return str(agent_uuid)
                     else:
                         logger.warning(
                             "Session's current agent not found in mapping, resetting to routing agent",
@@ -718,7 +717,7 @@ class AgentService:
             logger.info(
                 "Resolved agent name to ID", agent_name=agent_name, agent_id=agent_uuid
             )
-            return agent_uuid
+            return str(agent_uuid)
         else:
             available_agents = self.agent_mapping.get_all_names()
             logger.error(
@@ -790,7 +789,9 @@ class AgentService:
                             agent_id=agent_id,
                             llama_stack_session_id=existing_session.conversation_thread_id,
                         )
-                        return existing_session.conversation_thread_id
+                        return LlamaStackSessionId(
+                            existing_session.conversation_thread_id
+                        )
                     except Exception as e:
                         logger.warning(
                             "Database session no longer valid in LlamaStack, will create new one",
@@ -836,7 +837,7 @@ class AgentService:
                 agent_id=agent_id,
             )
 
-            return llama_stack_session_id
+            return LlamaStackSessionId(llama_stack_session_id)
 
         except Exception as e:
             logger.error("Failed to create agent session", exc_info=e)
@@ -915,6 +916,10 @@ class AgentService:
 
             headers, body = to_structured(event)
 
+            if self.config.broker_url is None:
+                logger.error("Broker URL not configured")
+                return False
+
             response_http = await self.http_client.post(
                 self.config.broker_url,
                 headers=headers,
@@ -945,7 +950,7 @@ class AgentService:
         Args:
             request: The normalized request
             content: Response content
-            agent_id: Agent identifier
+            agent_id: Agent identifier (required)
             response_type: Type of response (default: "message")
             metadata: Optional metadata dictionary
             processing_time_ms: Processing time in milliseconds (if None and start_time provided, will calculate)
@@ -959,7 +964,7 @@ class AgentService:
                 (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
             )
 
-        return AgentResponse(
+        response = AgentResponse(
             request_id=request.request_id,
             session_id=request.session_id,
             user_id=request.user_id,
@@ -972,6 +977,7 @@ class AgentService:
             followup_actions=followup_actions or [],
             created_at=datetime.now(timezone.utc),
         )
+        return response
 
     def _create_error_response(
         self,
@@ -1007,6 +1013,14 @@ class AgentService:
 
     async def _update_request_log(self, response: AgentResponse) -> None:
         """Update RequestLog in database with response content."""
+        if response.agent_id is None:
+            logger.error(
+                "Cannot update request log - response missing agent_id",
+                request_id=response.request_id,
+                session_id=response.session_id,
+            )
+            return
+
         await _update_request_log_unified(
             request_id=response.request_id,
             response_content=response.content,
@@ -1045,10 +1059,21 @@ class AgentService:
                 )
 
                 # Create response with automatic timing calculation
+                if session_manager.current_agent_name is None:
+                    logger.error(
+                        "Cannot create agent response - no agent assigned",
+                        request_id=request.request_id,
+                        session_id=request.session_id,
+                    )
+                    return self._create_error_response(
+                        request=request,
+                        content="Error: No agent assigned to handle this request",
+                    )
+
                 return self._create_agent_response(
                     request=request,
                     content=response_content,
-                    agent_id=session_manager.current_agent_name or "responses",
+                    agent_id=session_manager.current_agent_name,
                     start_time=start_time,
                 )
 
@@ -1101,6 +1126,10 @@ class AgentService:
             )
 
             headers, body = to_structured(event)
+
+            if self.config.broker_url is None:
+                logger.error("Broker URL not configured")
+                return False
 
             response = await self.http_client.post(
                 self.config.broker_url,
@@ -1253,10 +1282,12 @@ async def detailed_health_check(
     db: AsyncSession = Depends(get_db_session_dependency),
 ) -> Dict[str, Any]:
     """Detailed health check with database dependency for monitoring."""
-    return await simple_health_check(
-        service_name="agent-service",
-        version=__version__,
-        db=db,
+    return dict(
+        await simple_health_check(
+            service_name="agent-service",
+            version=__version__,
+            db=db,
+        )
     )
 
 
@@ -1284,7 +1315,9 @@ async def list_agents() -> Dict[str, Any]:
 
 
 @app.post("/process")
-async def handle_direct_request(request: Request, stream: bool = False) -> Any:
+async def handle_direct_request(
+    request: Request, stream: bool = False
+) -> Any:  # Returns StreamingResponse or JSONResponse
     """Handle direct HTTP requests with optional streaming support."""
     if not _agent_service:
         raise HTTPException(
@@ -1331,9 +1364,25 @@ async def handle_direct_request(request: Request, stream: bool = False) -> Any:
                         yield chunk_data
 
                     # Send completion event
-                    yield LlamaStackStreamProcessor.create_sse_complete_event(
-                        agent_response.agent_id, agent_response.processing_time_ms
-                    )
+                    if (
+                        agent_response.agent_id is None
+                        or agent_response.processing_time_ms is None
+                    ):
+                        logger.error(
+                            "Cannot send completion event - missing agent_id or processing_time_ms",
+                            request_id=agent_response.request_id,
+                            session_id=agent_response.session_id,
+                            agent_id=agent_response.agent_id,
+                            processing_time_ms=agent_response.processing_time_ms,
+                        )
+                        yield LlamaStackStreamProcessor.create_sse_error_event(
+                            "Missing required response data"
+                        )
+                    else:
+                        yield LlamaStackStreamProcessor.create_sse_complete_event(
+                            agent_response.agent_id,
+                            agent_response.processing_time_ms,
+                        )
 
                 except Exception as e:
                     logger.error("Error in streaming response", exc_info=e)
@@ -1356,7 +1405,9 @@ async def handle_direct_request(request: Request, stream: bool = False) -> Any:
 
 
 @app.post("/process/stream")
-async def handle_direct_request_stream(request: Request) -> Any:
+async def handle_direct_request_stream(
+    request: Request,
+) -> Any:  # Returns StreamingResponse
     """Handle direct HTTP requests with streaming responses (legacy endpoint)."""
     # Redirect to unified endpoint with streaming enabled
     return await handle_direct_request(request, stream=True)
@@ -1394,10 +1445,12 @@ async def handle_cloudevent(request: Request) -> Dict[str, Any]:
             )
 
         logger.warning("Unhandled CloudEvent type", event_type=event_type)
-        return await create_cloudevent_response(
-            status="ignored",
-            message="Unhandled event type",
-            details={"event_type": event_type},
+        return dict(
+            await create_cloudevent_response(
+                status="ignored",
+                message="Unhandled event type",
+                details={"event_type": event_type},
+            )
         )
 
     except Exception as e:
@@ -1411,14 +1464,28 @@ async def handle_cloudevent(request: Request) -> Dict[str, Any]:
 def _create_normalized_request_from_data(
     request_data: Dict[str, Any],
 ) -> NormalizedRequest:
-    """Create a NormalizedRequest from request data with proper defaults."""
+    """Create a NormalizedRequest from request data with proper validation."""
+    # Validate required fields
+    required_fields = [
+        "request_id",
+        "session_id",
+        "user_id",
+        "integration_type",
+        "request_type",
+        "content",
+    ]
+    missing_fields = [field for field in required_fields if not request_data.get(field)]
+
+    if missing_fields:
+        raise ValueError(f"Missing required fields in request data: {missing_fields}")
+
     return NormalizedRequest(
-        request_id=request_data.get("request_id", "unknown"),
-        session_id=request_data.get("session_id", "unknown"),
-        user_id=request_data.get("user_id", "unknown"),
-        integration_type=request_data.get("integration_type", "CLI"),
-        request_type=request_data.get("request_type", "general"),
-        content=request_data.get("content", ""),
+        request_id=request_data["request_id"],
+        session_id=request_data["session_id"],
+        user_id=request_data["user_id"],
+        integration_type=request_data["integration_type"],
+        request_type=request_data["request_type"],
+        content=request_data["content"],
         integration_context=request_data.get("integration_context", {}),
         user_context=request_data.get("user_context", {}),
         target_agent_id=request_data.get("target_agent_id"),
@@ -1527,6 +1594,10 @@ async def _handle_responses_request_event_from_data(
                 detail="Missing required fields: request_manager_session_id, user_id, message",
             )
 
+        # At this point, we know these are not None due to the check above
+        assert user_id is not None
+        assert message is not None
+
         # Get database session
         db_manager = get_database_manager()
 
@@ -1546,13 +1617,26 @@ async def _handle_responses_request_event_from_data(
             )
 
             # Get current agent name for response metadata
-            current_agent_name = session_manager.current_agent_name or "responses"
+            current_agent_name = session_manager.current_agent_name
             current_thread_id = session_manager.get_current_thread_id()
 
             # Clean up the session manager
             await session_manager.close()
 
         # Return response in the expected format
+        if current_agent_name is None:
+            logger.error(
+                "Cannot create response - no agent assigned",
+                user_id=user_id,
+                request_manager_session_id=request_manager_session_id,
+            )
+            return {
+                "status": "error",
+                "error": "No agent assigned to handle this request",
+                "request_manager_session_id": request_manager_session_id,
+                "user_id": user_id,
+            }
+
         return {
             "status": "success",
             "response": {

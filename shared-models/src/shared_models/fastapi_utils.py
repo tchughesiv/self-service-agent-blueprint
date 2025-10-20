@@ -38,7 +38,7 @@ async def create_health_check_endpoint(
 
     try:
         # Perform standard health checks
-        result = checker.perform_health_check(
+        result = await checker.perform_health_check(
             db=db, additional_checks=additional_checks
         )
 

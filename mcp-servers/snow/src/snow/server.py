@@ -111,9 +111,10 @@ def _extract_authoritative_user_id(ctx: Context) -> str | None:
             request = request_context.request
             if hasattr(request, "headers"):
                 headers = request.headers
-                return headers.get("AUTHORITATIVE_USER_ID") or headers.get(
+                user_id = headers.get("AUTHORITATIVE_USER_ID") or headers.get(
                     "authoritative_user_id"
                 )
+                return str(user_id) if user_id is not None else None
     except Exception as e:
         logging.debug(f"Error extracting headers from request context: {e}")
 

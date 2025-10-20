@@ -231,11 +231,13 @@ class RequestNormalizer:
         """Extract target agent ID from tool request if specified."""
         # Check if tool context specifies a target agent
         if request.tool_context and "target_agent_id" in request.tool_context:
-            return request.tool_context["target_agent_id"]
+            agent_id = request.tool_context["target_agent_id"]
+            return str(agent_id) if agent_id is not None else None
 
         # Check metadata for agent specification
         if request.metadata and "target_agent_id" in request.metadata:
-            return request.metadata["target_agent_id"]
+            agent_id = request.metadata["target_agent_id"]
+            return str(agent_id) if agent_id is not None else None
 
         # Tool-specific routing logic could go here
         # For example, certain tools might always route to specific agents
@@ -250,7 +252,7 @@ class RequestNormalizer:
     def _parse_user_agent(self, user_agent: str) -> Dict[str, Any]:
         """Parse user agent string for browser/OS information."""
         # Simple user agent parsing - could be enhanced with a proper library
-        context = {"raw_user_agent": user_agent}
+        context: Dict[str, Any] = {"raw_user_agent": user_agent}
 
         user_agent_lower = user_agent.lower()
 

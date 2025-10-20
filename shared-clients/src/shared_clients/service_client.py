@@ -121,7 +121,8 @@ class AgentServiceClient(ServiceClient):
         try:
             response = await self.get("/agents")
             response.raise_for_status()
-            return response.json()
+            result = response.json()
+            return result if isinstance(result, dict) else None
         except Exception as e:
             logger.error("Failed to list agents", error=str(e))
             return None
@@ -131,7 +132,8 @@ class AgentServiceClient(ServiceClient):
         try:
             response = await self.get(f"/api/v1/sessions/{session_id}")
             response.raise_for_status()
-            return response.json()
+            result = response.json()
+            return result if isinstance(result, dict) else None
         except Exception as e:
             logger.error("Failed to get session", session_id=session_id, error=str(e))
             return None
@@ -143,7 +145,8 @@ class AgentServiceClient(ServiceClient):
         try:
             response = await self.post("/api/v1/sessions", json=session_data)
             response.raise_for_status()
-            return response.json()
+            result = response.json()
+            return result if isinstance(result, dict) else None
         except Exception as e:
             logger.error("Failed to create session", error=str(e))
             return None
@@ -155,7 +158,8 @@ class AgentServiceClient(ServiceClient):
         try:
             response = await self.put(f"/api/v1/sessions/{session_id}", json=updates)
             response.raise_for_status()
-            return response.json()
+            result = response.json()
+            return result if isinstance(result, dict) else None
         except Exception as e:
             logger.error(
                 "Failed to update session", session_id=session_id, error=str(e)
@@ -183,7 +187,8 @@ class RequestManagerClient(ServiceClient):
         try:
             response = await self.post("/api/v1/requests/slack", json=request_data)
             response.raise_for_status()
-            return response.json()
+            result = response.json()
+            return result if isinstance(result, dict) else None
         except Exception as e:
             logger.error("Failed to send Slack request", error=str(e))
             return None
@@ -195,7 +200,8 @@ class RequestManagerClient(ServiceClient):
         try:
             response = await self.post("/api/v1/requests/web", json=request_data)
             response.raise_for_status()
-            return response.json()
+            result = response.json()
+            return result if isinstance(result, dict) else None
         except Exception as e:
             logger.error("Failed to send web request", error=str(e))
             return None
@@ -207,7 +213,8 @@ class RequestManagerClient(ServiceClient):
         try:
             response = await self.post("/api/v1/requests/cli", json=request_data)
             response.raise_for_status()
-            return response.json()
+            result = response.json()
+            return result if isinstance(result, dict) else None
         except Exception as e:
             logger.error("Failed to send CLI request", error=str(e))
             return None

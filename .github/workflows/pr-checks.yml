@@ -23,14 +23,14 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          pip install flake8 black isort
+          pip install flake8 black isort mypy
 
       - name: Run flake8 (warning only)
         run: |
           echo "🔍 Running flake8 checks..."
           flake8 --max-line-length=99 --extend-ignore=E203,W503 . || {
             echo "::warning::Flake8 found code style issues"
-            echo "Run 'flake8 .' locally to see details"
+            echo "Run 'make lint' locally to see details"
             exit 1
           }
 
@@ -39,7 +39,16 @@ jobs:
           echo "🎨 Checking code formatting..."
           black --check --diff . || {
             echo "::warning::Code formatting issues found"
-            echo "Run 'black .' locally to fix formatting"
+            echo "Run 'make format' locally to fix formatting"
+            exit 1
+          }
+
+      - name: Run mypy static analysis
+        run: |
+          echo "🔍 Running mypy static analysis..."
+          uv run mypy . || {
+            echo "::warning::MyPy found static analysis issues"
+            echo "Run 'make lint' locally to see details"
             exit 1
           }
 
@@ -48,7 +57,7 @@ jobs:
           echo "📦 Checking import sorting..."
           isort --check-only --diff . || {
             echo "::warning::Import sorting issues found"
-            echo "Run 'isort .' locally to fix imports"
+            echo "Run 'make format' locally to fix imports"
             exit 1
           }
 
@@ -74,7 +83,7 @@ jobs:
           version: "0.8.9"
 
       - name: Install the project
-        run: uv sync
+        run: make install-all
   
       - name: Run tests
-        run: uv run pytest tests
+        run: make test-all

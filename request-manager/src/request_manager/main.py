@@ -139,15 +139,16 @@ def verify_api_key(api_key: str, tool_id: Optional[str] = None) -> bool:
     return False
 
 
-def verify_web_api_key(api_key: str) -> Optional[str]:
+def verify_web_api_key(api_key: Optional[str]) -> Optional[str]:
     """Verify web API key and return associated user email."""
     if not API_KEYS_ENABLED or not api_key:
         return None
 
-    return WEB_API_KEYS.get(api_key)
+    api_key_value = WEB_API_KEYS.get(api_key)
+    return str(api_key_value) if api_key_value is not None else None
 
 
-async def validate_jwt_token(token: str) -> Optional[Dict[str, Any]]:
+async def validate_jwt_token(token: Optional[str]) -> Optional[Dict[str, Any]]:
     """Validate JWT token and return user information."""
     if not JWT_ENABLED or not token:
         return None
@@ -875,7 +876,7 @@ async def _forward_response_to_integration_dispatcher(
         # Send response event using shared utilities
         success = await event_sender.send_response_event(
             delivery_event_data,
-            event_data.get("request_id"),
+            event_data.get("request_id"),  # type: ignore[arg-type]
             event_data.get("agent_id"),
             event_data.get("session_id"),
         )

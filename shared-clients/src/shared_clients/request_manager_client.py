@@ -58,15 +58,18 @@ class RequestManagerClient:
             # or wrapped in a "response" key
             if "content" in result and "agent_id" in result:
                 # Result is the response object directly
-                return result.get("content", "No response content")
+                content = result.get("content")
+                return str(content) if content is not None else "No response content"
             else:
                 # Result is wrapped in a "response" key
                 response_data = result.get("response", {})
-                return response_data.get("content", "No response content")
+                content = response_data.get("content")
+                return str(content) if content is not None else "No response content"
         else:
             # For traditional agents mode, extract just the content
             response_data = result.get("response", {})
-            return response_data.get("content", "No response content")
+            content = response_data.get("content")
+            return str(content) if content is not None else "No response content"
 
     async def send_request(
         self,
@@ -119,7 +122,12 @@ class RequestManagerClient:
         # Parse response
 
         try:
-            return response.json()
+            result = response.json()
+            return (
+                result
+                if isinstance(result, dict)
+                else {"error": "Invalid JSON response format"}
+            )
         except Exception as e:
             # Return the raw text if JSON parsing fails
             return {
@@ -146,7 +154,12 @@ class RequestManagerClient:
             headers=headers,
         )
         response.raise_for_status()
-        return response.json()
+        result = response.json()
+        return (
+            result
+            if isinstance(result, dict)
+            else {"error": "Invalid JSON response format"}
+        )
 
     async def close(self) -> None:
         """Close the HTTP client."""

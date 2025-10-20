@@ -51,12 +51,13 @@ class Agent:
     def _get_model_for_agent(self) -> str:
         """Get the model to use for the agent from configuration."""
         if self.config and self.config.get("model"):
-            logger.info(f"Using configured model: {self.config['model']}")
-            return self.config["model"]
+            model = self.config["model"]
+            logger.info(f"Using configured model: {model}")
+            return str(model) if model is not None else ""
 
         try:
             models = self.llama_client.models.list()
-            model_id = next(m.identifier for m in models if m.model_type == "llm")
+            model_id = next(m.identifier for m in models if m.api_model_type == "llm")
             if model_id:
                 logger.info(f"Using first available LLM model: {model_id}")
                 return model_id
@@ -86,7 +87,8 @@ class Agent:
     def _get_default_system_message(self) -> str:
         """Get default system message for the agent."""
         if self.config and self.config.get("system_message"):
-            return self.config["system_message"]
+            message = self.config["system_message"]
+            return str(message) if message is not None else ""
 
         return ""
 
@@ -115,7 +117,7 @@ class Agent:
                 logger.info(
                     f"Found existing vector store: {latest_store.id} with name: {latest_store.name}"
                 )
-                return latest_store.id
+                return str(latest_store.id) if latest_store.id is not None else kb_name
             else:
                 logger.warning(
                     f"No vector store found for knowledge base '{kb_name}', using fallback"
@@ -126,7 +128,7 @@ class Agent:
             logger.error(
                 f"Error finding vector store for knowledge base '{kb_name}': {e}"
             )
-            return None
+            return kb_name  # Return the kb_name as fallback
 
     def _get_mcp_tools_to_use(
         self,
@@ -221,7 +223,7 @@ class Agent:
         token_context: str | None = None,
     ) -> str:
         """Create a response with retry logic for empty responses and errors."""
-        response = None
+        response = "I apologize, but I'm having difficulty generating a response right now. Please try again."
         last_error = None
 
         for attempt in range(max_retries + 1):  # +1 for initial attempt plus retries
@@ -437,14 +439,14 @@ class Agent:
             # Only pass tools if tools_to_use is not empty
             if tools_to_use:
                 response = self.llama_client.responses.create(
-                    input=messages_with_system,
+                    input=messages_with_system,  # type: ignore[arg-type]
                     model=self.model,
                     **response_config,
                     tools=tools_to_use,
                 )
             else:
                 response = self.llama_client.responses.create(
-                    input=messages_with_system,
+                    input=messages_with_system,  # type: ignore[arg-type]
                     model=self.model,
                     **response_config,
                 )

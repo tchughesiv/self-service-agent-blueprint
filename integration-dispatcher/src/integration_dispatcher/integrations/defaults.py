@@ -21,7 +21,7 @@ class IntegrationDefaultsService:
         """Initialize integration defaults service."""
         self.default_integrations = self._load_default_integrations()
         self.last_health_status: Dict[str, Any] = {}
-        self.slack_client = None
+        self.slack_client: Optional[AsyncWebClient] = None
         self._init_slack_client()
 
         logger.info(
@@ -104,10 +104,8 @@ class IntegrationDefaultsService:
 
     async def _get_validated_slack_user_id(self, user_email: str) -> Optional[str]:
         """Get validated Slack user ID from stored mapping."""
-        if not self.slack_client:
-            logger.warning("Slack client not available for user validation")
-            return None
-
+        # First try to get from database
+        stored_user_id = None
         try:
             from shared_models.database import get_database_manager
             from shared_models.models import IntegrationType, UserIntegrationMapping
@@ -132,37 +130,62 @@ class IntegrationDefaultsService:
                         last_validated_at=mapping.last_validated_at,
                     )
 
-                if not mapping:
-                    logger.warning(
-                        "No Slack user mapping found for email",
-                        user_email=user_email,
+                    # Use shared TTL validation logic
+                    is_valid = await self._validate_mapping_with_ttl(
+                        mapping, "email lookup"
                     )
-                    return None
 
-                # Use shared TTL validation logic
-                is_valid = await self._validate_mapping_with_ttl(
-                    mapping, "email lookup"
-                )
-
-                if is_valid:
-                    await db.commit()
-                    return mapping.integration_user_id
-                else:
-                    await db.commit()
-                    return None
+                    if is_valid:
+                        await db.commit()
+                        stored_user_id = str(mapping.integration_user_id)
+                    else:
+                        await db.commit()
+                        # Will fall back to Slack API
 
         except Exception as e:
             logger.error(
-                "Error getting validated Slack user ID",
+                "Error getting validated Slack user ID from database",
                 user_email=user_email,
                 error=str(e),
             )
+            # Will fall back to Slack API
+
+        # Return stored user ID if found and valid
+        if stored_user_id:
+            return stored_user_id
+
+        # If no stored mapping found or validation failed, try Slack API if client is available
+        if not self.slack_client:
+            logger.warning("Slack client not available for user validation")
+            return None
+
+        # Try to find user by email using Slack API
+        try:
+            response = await self.slack_client.users_lookupByEmail(email=user_email)
+            if response["ok"]:
+                user = response["user"]
+                slack_user_id = user["id"]
+                logger.info(
+                    f"Found Slack user via API for {user_email}: {slack_user_id}"
+                )
+                return str(slack_user_id)
+            else:
+                logger.warning(
+                    f"Slack API lookup failed for {user_email}: {response.get('error', 'Unknown error')}"
+                )
+                return None
+        except Exception as e:
+            logger.error(f"Error looking up Slack user via API for {user_email}: {e}")
             return None
 
     async def _validate_slack_user_mapping(
         self, user_email: str, slack_user_id: str
     ) -> bool:
         """Validate that the email still matches the Slack user ID."""
+        if self.slack_client is None:
+            logger.warning("Slack client not available for user validation")
+            return False
+
         try:
             # Get user info from Slack API
             response = await self.slack_client.users_info(user=slack_user_id)
@@ -578,7 +601,7 @@ class IntegrationDefaultsService:
         # Convert to user integration format
         integrations = []
         for default_config in default_configs:
-            config = {
+            config: dict[str, Any] = {
                 "user_id": user_id,
                 "integration_type": default_config.integration_type,
                 "enabled": default_config.enabled,
@@ -804,4 +827,5 @@ class IntegrationDefaultsService:
         Returns:
             True if enabled by default, False otherwise
         """
-        return self.default_integrations.get(integration_type, {}).get("enabled", False)
+        enabled = self.default_integrations.get(integration_type, {}).get("enabled")
+        return bool(enabled) if enabled is not None else False

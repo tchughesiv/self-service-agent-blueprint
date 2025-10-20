@@ -42,7 +42,7 @@ class LoggingConfig:
 
     def configure_structlog(self) -> None:
         """Configure structured logging."""
-        processors = [
+        processors: list[Any] = [
             structlog.stdlib.filter_by_level,
             structlog.stdlib.add_logger_name,
             structlog.stdlib.add_log_level,
@@ -84,7 +84,8 @@ class LoggingConfig:
 
     def get_logger(self, name: Optional[str] = None) -> structlog.BoundLogger:
         """Get a configured logger."""
-        return structlog.get_logger(name)
+        logger = structlog.get_logger(name)
+        return logger  # type: ignore[no-any-return]
 
 
 def configure_logging(service_name: str = "unknown") -> structlog.BoundLogger:
@@ -110,7 +111,8 @@ def get_service_logger(service_name: str) -> structlog.BoundLogger:
     Returns:
         Configured logger for the service
     """
-    return structlog.get_logger().bind(service=service_name)
+    logger = structlog.get_logger().bind(service=service_name)
+    return logger  # type: ignore[no-any-return]
 
 
 class ServiceLogger:

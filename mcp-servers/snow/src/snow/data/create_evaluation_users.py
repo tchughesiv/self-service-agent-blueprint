@@ -160,11 +160,14 @@ class ServiceNowUserCreator:
                 result = response.json().get("result", [])
                 if result:
                     location_sys_id = result[0].get("sys_id")
-                    print(
-                        f"    ℹ️  Found existing location: {location_name} (sys_id: {location_sys_id})"
+                    sys_id_str = (
+                        str(location_sys_id) if location_sys_id is not None else None
                     )
-                    self.location_cache[location_name] = location_sys_id
-                    return location_sys_id
+                    print(
+                        f"    ℹ️  Found existing location: {location_name} (sys_id: {sys_id_str})"
+                    )
+                    self.location_cache[location_name] = sys_id_str or ""
+                    return sys_id_str
 
             # Location not found, create it
             location_payload = {
@@ -183,14 +186,17 @@ class ServiceNowUserCreator:
             if create_response.status_code == 201:
                 result = create_response.json().get("result", {})
                 location_sys_id = result.get("sys_id")
+                sys_id_str = (
+                    str(location_sys_id) if location_sys_id is not None else None
+                )
                 print(
-                    f"    ✅ Created location: {location_name} (sys_id: {location_sys_id})"
+                    f"    ✅ Created location: {location_name} (sys_id: {sys_id_str})"
                 )
-                self.location_cache[location_name] = location_sys_id
+                self.location_cache[location_name] = sys_id_str or ""
                 self.created_locations.append(
-                    {"name": location_name, "sys_id": location_sys_id}
+                    {"name": location_name, "sys_id": sys_id_str}
                 )
-                return location_sys_id
+                return sys_id_str
             else:
                 error_msg = f"Failed to create location {location_name}: {create_response.status_code} - {create_response.text}"
                 print(f"    ⚠️  {error_msg}")
@@ -243,18 +249,19 @@ class ServiceNowUserCreator:
             if response.status_code == 201:
                 result = response.json().get("result", {})
                 user_sys_id = result.get("sys_id")
+                sys_id_str = str(user_sys_id) if user_sys_id is not None else None
                 print(
                     f"  ✅ Created user: {employee_data['name']} ({employee_data['email']})"
                 )
-                print(f"     User sys_id: {user_sys_id}")
+                print(f"     User sys_id: {sys_id_str}")
                 self.created_users.append(
                     {
                         "email": employee_data["email"],
-                        "sys_id": user_sys_id,
+                        "sys_id": sys_id_str,
                         "name": employee_data["name"],
                     }
                 )
-                return user_sys_id
+                return sys_id_str
             else:
                 error_msg = f"Failed to create user {employee_data['email']}: {response.status_code} - {response.text}"
                 print(f"  ❌ {error_msg}")
@@ -312,18 +319,21 @@ class ServiceNowUserCreator:
             if response.status_code == 201:
                 result = response.json().get("result", {})
                 computer_sys_id = result.get("sys_id")
+                sys_id_str = (
+                    str(computer_sys_id) if computer_sys_id is not None else None
+                )
                 print(
                     f"  ✅ Created laptop: {employee_data['laptop_model']} (S/N: {employee_data['laptop_serial_number']})"
                 )
-                print(f"     Computer sys_id: {computer_sys_id}")
+                print(f"     Computer sys_id: {sys_id_str}")
                 self.created_computers.append(
                     {
                         "serial_number": employee_data["laptop_serial_number"],
-                        "sys_id": computer_sys_id,
+                        "sys_id": sys_id_str,
                         "model": employee_data["laptop_model"],
                     }
                 )
-                return computer_sys_id
+                return sys_id_str
             else:
                 error_msg = f"Failed to create laptop for {employee_data['email']}: {response.status_code} - {response.text}"
                 print(f"  ❌ {error_msg}")
@@ -366,7 +376,8 @@ class ServiceNowUserCreator:
             if response.status_code == 200:
                 result = response.json().get("result", [])
                 if result:
-                    return result[0].get("sys_id")
+                    sys_id = result[0].get("sys_id")
+                    return str(sys_id) if sys_id is not None else None
             return None
 
         except Exception:
