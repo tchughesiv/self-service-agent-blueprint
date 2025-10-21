@@ -18,11 +18,11 @@ def main() -> None:
 
     print("deleting agents...")
     agent_manager.delete_agents()
-    print("agents", len(agent_manager.agents().data))
+    print("agents", len(agent_manager.agents()))
 
     print("creating agents...")
     agent_manager.create_agents()
-    print("agents", len(agent_manager.agents().data))
+    print("agents", len(agent_manager.agents()))
 
 
 if __name__ == "__main__":
