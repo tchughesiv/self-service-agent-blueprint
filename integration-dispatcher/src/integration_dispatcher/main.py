@@ -149,7 +149,7 @@ class IntegrationDispatcher:
         # Start with user-specific configs (these override smart defaults)
         for user_config in user_configs:
             # For Slack configs, ensure they have channel information
-            if user_config.integration_type.value == "SLACK":
+            if user_config.integration_type == IntegrationType.SLACK:
                 self._ensure_slack_config_has_identifiers(user_config, user_id)
 
             final_configs.append(user_config)
@@ -874,7 +874,7 @@ async def create_user_integration(
         existing_config.updated_at = datetime.now(timezone.utc)  # type: ignore[assignment]
 
         # Ensure Slack configs have necessary identifiers
-        if existing_config.integration_type.value == "SLACK":
+        if existing_config.integration_type == IntegrationType.SLACK:
             dispatcher._ensure_slack_config_has_identifiers(existing_config, user_id)
 
         await db.commit()
@@ -884,7 +884,7 @@ async def create_user_integration(
         # Create new configuration
         config = UserIntegrationConfig(
             user_id=user_id,
-            integration_type=get_enum_value(config_data.integration_type),
+            integration_type=config_data.integration_type,
             enabled=config_data.enabled,
             config=config_data.config,
             priority=config_data.priority,
@@ -893,7 +893,7 @@ async def create_user_integration(
         )
 
         # Ensure Slack configs have necessary identifiers
-        if config.integration_type.value == "SLACK":
+        if config.integration_type == IntegrationType.SLACK:
             dispatcher._ensure_slack_config_has_identifiers(config, user_id)
 
         db.add(config)
@@ -941,7 +941,7 @@ async def update_user_integration(
         setattr(config, field, value)
 
     # Ensure Slack configs have necessary identifiers
-    if config.integration_type.value == "SLACK":
+    if config.integration_type == IntegrationType.SLACK:
         dispatcher._ensure_slack_config_has_identifiers(config, user_id)
 
     config.updated_at = datetime.now(timezone.utc)  # type: ignore[assignment]
