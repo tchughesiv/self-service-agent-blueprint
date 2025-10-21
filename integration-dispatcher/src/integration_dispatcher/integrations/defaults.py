@@ -507,7 +507,7 @@ class IntegrationDefaultsService:
             }
 
             # Apply context-specific configuration
-            if default_config.integration_type.value == "SLACK":
+            if default_config.integration_type == IntegrationType.SLACK:
                 # For Slack, include channel information from context or use user ID for DM
                 channel_id = None
                 if context:
@@ -659,7 +659,7 @@ class IntegrationDefaultsService:
                         config["config"].update(user_override["config"])
 
             # Apply context-specific configuration
-            if default_config.integration_type.value == "SLACK":
+            if default_config.integration_type == IntegrationType.SLACK:
                 # For Slack, include channel information from context or use user ID for DM
                 channel_id = None
                 slack_user_id = None
