@@ -4,6 +4,8 @@ import os
 from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator, Dict, List, Optional, Type, TypeVar
 
+import psycopg
+import psycopg_pool
 import structlog
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -31,6 +33,11 @@ class DatabaseConfig:
         self.pool_timeout = int(os.getenv("DB_POOL_TIMEOUT", "30"))
         self.pool_recycle = int(os.getenv("DB_POOL_RECYCLE", "3600"))
 
+        # Sync connection pool settings (for PostgresSaver/LangGraph)
+        self.sync_pool_min_size = int(os.getenv("DB_SYNC_POOL_MIN_SIZE", "1"))
+        self.sync_pool_max_size = int(os.getenv("DB_SYNC_POOL_MAX_SIZE", "5"))
+        self.sync_pool_timeout = int(os.getenv("DB_SYNC_POOL_TIMEOUT", "30"))
+
         # Debug settings
         self.echo_sql = os.getenv("SQL_DEBUG", "false").lower() == "true"
 
@@ -49,7 +56,7 @@ class DatabaseConfig:
     @property
     def sync_connection_string(self) -> str:
         """Get the synchronous database connection string (for Alembic)."""
-        return f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}"
+        return f"postgresql+psycopg://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}"
 
     def validate(self) -> bool:
         """Validate database configuration."""
@@ -107,6 +114,9 @@ class DatabaseManager:
             expire_on_commit=False,
         )
 
+        # Create sync connection pool for PostgresSaver
+        self._sync_pool: Optional[psycopg_pool.ConnectionPool] = None
+
     async def log_database_config(self) -> None:
         """Log database configuration and test connection at startup."""
         try:
@@ -143,9 +153,67 @@ class DatabaseManager:
             )
             raise
 
+    def _get_sync_pool(self) -> psycopg_pool.ConnectionPool:
+        """Get or create the sync connection pool for PostgresSaver."""
+        if self._sync_pool is None:
+            # Build connection string for sync pool
+            conn_string = f"postgresql://{self.config.user}:{self.config.password}@{self.config.host}:{self.config.port}/{self.config.database}"
+
+            self._sync_pool = psycopg_pool.ConnectionPool(
+                conn_string,
+                min_size=self.config.sync_pool_min_size,  # Configurable minimum connections
+                max_size=self.config.sync_pool_max_size,  # Configurable maximum connections
+                kwargs={
+                    "row_factory": psycopg.rows.dict_row,
+                    "autocommit": True,
+                },
+                check=psycopg_pool.ConnectionPool.check_connection,  # Validate connections
+                timeout=self.config.sync_pool_timeout,  # Configurable timeout
+            )
+            logger.debug(
+                "Created sync connection pool for PostgresSaver",
+                min_size=self.config.sync_pool_min_size,
+                max_size=self.config.sync_pool_max_size,
+                timeout=self.config.sync_pool_timeout,
+            )
+
+        return self._sync_pool
+
+    def get_sync_connection(self) -> psycopg.Connection[dict[str, Any]]:
+        """Get a synchronous connection for LangGraph PostgresSaver.
+
+        Uses connection pooling for better performance and resource management.
+        """
+        pool = self._get_sync_pool()
+
+        if self.config.echo_sql:
+            logger.debug(
+                "Getting sync connection from pool",
+                host=self.config.host,
+                database=self.config.database,
+            )
+
+        # Type ignore needed because psycopg_pool returns Connection[tuple[Any, ...]]
+        # but we configure it with row_factory=psycopg.rows.dict_row
+        return pool.getconn()  # type: ignore[return-value]
+
+    def put_sync_connection(self, conn: psycopg.Connection[dict[str, Any]]) -> None:
+        """Return a sync connection to the pool."""
+        if self._sync_pool is not None:
+            # Type ignore needed because psycopg_pool expects Connection[tuple[Any, ...]]
+            # but we're using Connection[dict[str, Any]] with row_factory
+            self._sync_pool.putconn(conn)  # type: ignore[arg-type]
+
     async def close(self) -> None:
         """Close database connections."""
         await self.engine.dispose()
+
+        # Close sync connection pool
+        if self._sync_pool is not None:
+            self._sync_pool.close()
+            self._sync_pool = None
+            logger.debug("Sync connection pool closed")
+
         logger.info("Database connections closed")
 
     @asynccontextmanager
@@ -242,6 +310,22 @@ class DatabaseManager:
             timeout=timeout,
         )
         return False
+
+    async def execute_query(
+        self, db: AsyncSession, query: str, params: Optional[Dict[str, Any]] = None
+    ) -> List[Dict[str, Any]]:
+        """Execute a raw SQL query and return results as dictionaries."""
+        try:
+            result = await db.execute(text(query), params or {})
+            rows = result.fetchall()
+            columns = result.keys()
+            return [dict(zip(columns, row)) for row in rows]
+        except Exception as e:
+            if self.config.echo_sql:
+                logger.error("Failed to execute query", query=query, error=str(e))
+            else:
+                logger.error("Failed to execute query", error=str(e))
+            return []
 
 
 class DatabaseUtils:
@@ -383,20 +467,6 @@ class DatabaseUtils:
                 error=str(e),
             )
             return 0
-
-    @staticmethod
-    async def execute_query(
-        db: AsyncSession, query: str, params: Optional[Dict[str, Any]] = None
-    ) -> List[Dict[str, Any]]:
-        """Execute a raw SQL query and return results as dictionaries."""
-        try:
-            result = await db.execute(text(query), params or {})
-            rows = result.fetchall()
-            columns = result.keys()
-            return [dict(zip(columns, row)) for row in rows]
-        except Exception as e:
-            logger.error("Failed to execute query", query=query, error=str(e))
-            return []
 
 
 class DatabaseHealthChecker:

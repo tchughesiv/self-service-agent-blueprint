@@ -63,7 +63,7 @@ Prompt configuration files define state machine behavior for agents, including:
 
 Prompt configuration files are stored in:
 ```
-asset-manager/config/lg-prompts/
+agent-service/config/lg-prompts/
 ```
 
 ## Basic Structure

@@ -6,10 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is a self-service agent blueprint implementing a complete AI agent management system with LlamaStack integration, eventing-based communication (Knative eventing or Mock eventing), and multi-channel support (Slack, API, CLI). The project consists of:
 
-- **agent-service/**: AI agent processing service that handles LlamaStack interactions
+- **agent-service/**: AI agent processing service with knowledge base management and LangGraph state machine
 - **request-manager/**: Request routing, session management, and unified communication processing
 - **integration-dispatcher/**: Multi-channel delivery (Slack, Email, etc.)
-- **asset-manager/**: Agent and knowledge base registration
 - **mcp-servers/**: MCP (Model Context Protocol) servers for external tool integration
 - **mock-eventing-service/**: Lightweight mock service for testing without Knative infrastructure
 - **shared-models/**: Database models, Pydantic schemas, and Alembic migrations
@@ -39,7 +38,6 @@ make build-integration-dispatcher-image
 
 # Run tests
 make test-all
-make test-asset-manager
 make test-request-manager
 ```
 
@@ -84,13 +82,12 @@ make helm-uninstall NAMESPACE=your-namespace
 
 ### Core Components
 
-1. **Agent Service**: Processes AI requests via LlamaStack, handles streaming responses
+1. **Agent Service**: Processes AI requests via LlamaStack, handles streaming responses, and manages knowledge bases
 2. **Request Manager**: Routes requests, manages sessions, unified communication processing with strategy pattern
 3. **Integration Dispatcher**: Delivers responses to multiple channels (Slack, Email, etc.)
-4. **Asset Manager**: Registers knowledge bases with LlamaStack; MCP servers configured in agent YAML files
-5. **MCP Servers**: External tool integration (employee-info, ServiceNow)
-6. **Mock Eventing Service**: Lightweight service that mimics Knative broker behavior for testing
-7. **Shared Database**: PostgreSQL with Alembic migrations for session/request persistence
+4. **MCP Servers**: External tool integration (employee-info, ServiceNow)
+5. **Mock Eventing Service**: Lightweight service that mimics Knative broker behavior for testing
+6. **Shared Database**: PostgreSQL with Alembic migrations for session/request persistence
 
 ### Communication Architecture
 
@@ -146,19 +143,19 @@ The system uses an **Integration Defaults** approach with **User Overrides** to 
 
 ### Testing with LlamaStack
 
-For local testing (see `asset-manager/local_testing/README.md`):
+For local testing:
 
 ```bash
 # 1. Run Ollama server
 OLLAMA_HOST=0.0.0.0 ollama serve
 
 # 2. Start LlamaStack container
-cd asset-manager/local_testing/
+cd local_testing/
 ./run_llamastack.sh
 
 # 3. Test asset registration (knowledge bases)
-cd asset-manager/
-python -m asset_manager.script.register_assets
+cd agent-service/
+python -m agent_service.scripts.register_assets
 ```
 
 ### Development Workflow
@@ -190,7 +187,7 @@ make helm-install-test NAMESPACE=dev
 - **`TOOL_INTEGRATION_GUIDE.md`**: Tool integration patterns
 
 ### Component Documentation
-- **`asset-manager/README.md`**: Asset manager service documentation
+- **`agent-service/`**: Agent service with knowledge base management and LangGraph
 - **`mcp-servers/employee-info/README.md`**: Employee information service documentation
 - **`mcp-servers/snow/README.md`**: ServiceNow integration documentation
 

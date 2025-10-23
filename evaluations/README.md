@@ -969,7 +969,7 @@ session.close_session()                    # Clean up
 The framework executes a command similar to:
 
 ```bash
-oc exec -it deploy/self-service-agent -- bash -c \
+oc exec -it deploy/self-service-agent-request-manager -- bash -c \
   "AGENT_MESSAGE_TERMINATOR=:DONE AUTHORITATIVE_USER_ID=alice.johnson@company.com \
    /app/.venv/bin/python /app/test/chat.py"
 ```

@@ -69,7 +69,7 @@ requestManagement:
 
   # Database Performance Configuration for concurrent requests
   database:
-    # Connection pool settings optimized for concurrent requests
+    # Async connection pool (for SQLAlchemy) - optimized for concurrent requests
     poolSize: 10
     maxOverflow: 20
     poolTimeout: 30
@@ -78,3 +78,7 @@ requestManagement:
     statementTimeout: 30000
     # Idle transaction timeout (5 minutes)
     idleTransactionTimeout: 300000
+    # Sync connection pool (for PostgresSaver/LangGraph) - moderate for testing
+    syncPoolMinSize: 2
+    syncPoolMaxSize: 8
+    syncPoolTimeout: 30

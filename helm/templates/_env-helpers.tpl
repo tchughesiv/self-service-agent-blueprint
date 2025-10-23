@@ -45,6 +45,13 @@ Generate database environment variables from pgvector secret
   value: {{ if hasKey .Values.requestManagement "database" }}{{ .Values.requestManagement.database.statementTimeout | default "30000" | quote }}{{ else }}"30000"{{ end }}
 - name: DB_IDLE_TRANSACTION_TIMEOUT
   value: {{ if hasKey .Values.requestManagement "database" }}{{ .Values.requestManagement.database.idleTransactionTimeout | default "300000" | quote }}{{ else }}"300000"{{ end }}
+{{/* Sync Connection Pool (PostgresSaver/LangGraph) */}}
+- name: DB_SYNC_POOL_MIN_SIZE
+  value: {{ if hasKey .Values.requestManagement "database" }}{{ .Values.requestManagement.database.syncPoolMinSize | default "1" | quote }}{{ else }}"1"{{ end }}
+- name: DB_SYNC_POOL_MAX_SIZE
+  value: {{ if hasKey .Values.requestManagement "database" }}{{ .Values.requestManagement.database.syncPoolMaxSize | default "5" | quote }}{{ else }}"5"{{ end }}
+- name: DB_SYNC_POOL_TIMEOUT
+  value: {{ if hasKey .Values.requestManagement "database" }}{{ .Values.requestManagement.database.syncPoolTimeout | default "30" | quote }}{{ else }}"30"{{ end }}
 {{- end }}
 
 {{/*

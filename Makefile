@@ -10,7 +10,6 @@ CONTAINER_TOOL ?= podman
 REGISTRY ?= quay.io/ecosystem-appeng
 PYTHON_VERSION ?= 3.12
 ARCH ?= linux/amd64
-AGENT_IMG ?= $(REGISTRY)/self-service-agent:$(VERSION)
 REQUEST_MGR_IMG ?= $(REGISTRY)/self-service-agent-request-manager:$(VERSION)
 AGENT_SERVICE_IMG ?= $(REGISTRY)/self-service-agent-service:$(VERSION)
 INTEGRATION_DISPATCHER_IMG ?= $(REGISTRY)/self-service-agent-integration-dispatcher:$(VERSION)
@@ -112,7 +111,6 @@ help:
 	@echo ""
 	@echo "Build Commands:"
 	@echo "  build-all-images                     - Build all container images (checks lockfiles first)"
-	@echo "  build-agent-image                    - Build the unified self-service agent container image (checks lockfiles first)"
 	@echo "  build-agent-service-image            - Build the agent service container image (checks lockfiles first)"
 	@echo "  build-integration-dispatcher-image   - Build the integration dispatcher container image (checks lockfiles first)"
 	@echo "  build-mcp-snow-image                 - Build the snow MCP server container image (checks lockfiles first)"
@@ -134,7 +132,6 @@ help:
 	@echo "  install-all                         - Install dependencies for all projects"
 	@echo "  install                             - Install dependencies for self-service agent"
 	@echo "  install-agent-service               - Install dependencies for agent service"
-	@echo "  install-asset-manager               - Install dependencies for asset manager"
 	@echo "  install-integration-dispatcher      - Install dependencies for integration dispatcher"
 	@echo "  install-mcp-snow                    - Install dependencies for snow MCP server"
 	@echo "  install-request-manager             - Install dependencies for request manager"
@@ -145,7 +142,6 @@ help:
 	@echo "  reinstall-all                       - Force reinstall dependencies for all projects (uv sync --reinstall)"
 	@echo "  reinstall                           - Force reinstall self-service agent dependencies (uv sync --reinstall)"
 	@echo "  reinstall-agent-service             - Force reinstall agent service dependencies"
-	@echo "  reinstall-asset-manager             - Force reinstall asset manager dependencies"
 	@echo "  reinstall-integration-dispatcher    - Force reinstall integration dispatcher dependencies"
 	@echo "  reinstall-mcp-snow                  - Force reinstall snow MCP dependencies"
 	@echo "  reinstall-request-manager           - Force reinstall request manager dependencies"
@@ -154,7 +150,6 @@ help:
 	@echo ""
 	@echo "Push Commands:"
 	@echo "  push-all-images                     - Push all container images to registry"
-	@echo "  push-agent-image                    - Push the unified self-service agent container image to registry"
 	@echo "  push-agent-service-image            - Push the agent service container image to registry"
 	@echo "  push-integration-dispatcher-image   - Push the integration dispatcher container image to registry"
 	@echo "  push-mcp-snow-image                 - Push the snow MCP server container image to registry"
@@ -171,7 +166,6 @@ help:
 	@echo "  check-lockfile-<service>            - Check lockfile for specific service"
 	@echo "  update-lockfile-<service>           - Update lockfile for specific service"
 	@echo "  test-agent-service                  - Run tests for agent service"
-	@echo "  test-asset-manager                  - Run tests for asset manager"
 	@echo "  test-integration-dispatcher         - Run tests for integration dispatcher"
 	@echo "  test-mcp-snow                       - Run tests for snow MCP server"
 	@echo "  test-request-manager                - Run tests for request manager"
@@ -192,7 +186,6 @@ help:
 	@echo "    NAMESPACE                         - Target namespace (required, no default)"
 	@echo ""
 	@echo "  Image Configuration:"
-	@echo "    AGENT_IMG                         - Full agent image name (default: \$${REGISTRY}/self-service-agent:\$${VERSION})"
 	@echo "    AGENT_SERVICE_IMG                 - Full agent service image name (default: \$${REGISTRY}/self-service-agent-service:\$${VERSION})"
 	@echo "    INTEGRATION_DISPATCHER_IMG        - Full integration dispatcher image name (default: \$${REGISTRY}/self-service-agent-integration-dispatcher:\$${VERSION})"
 	@echo "    MCP_SNOW_IMG                      - Full snow MCP image name (default: \$${REGISTRY}/self-service-agent-snow-mcp:\$${VERSION})"
@@ -309,12 +302,9 @@ endef
 
 # Build container images
 .PHONY: build-all-images
-build-all-images: build-agent-image build-request-mgr-image build-agent-service-image build-integration-dispatcher-image build-mcp-snow-image build-mock-eventing-image
+build-all-images: build-request-mgr-image build-agent-service-image build-integration-dispatcher-image build-mcp-snow-image build-mock-eventing-image
 	@echo "All container images built successfully!"
 
-.PHONY: build-agent-image
-build-agent-image: check-lockfile-root
-	$(call build_image,$(AGENT_IMG),unified self-service agent image,Containerfile.template,.)
 
 
 .PHONY: build-request-mgr-image
@@ -345,12 +335,9 @@ build-mock-eventing-image: check-lockfile-mock-eventing check-lockfile-shared-mo
 
 # Push container images
 .PHONY: push-all-images
-push-all-images: push-agent-image push-request-mgr-image push-agent-service-image push-integration-dispatcher-image push-mcp-snow-image push-mock-eventing-image
+push-all-images: push-request-mgr-image push-agent-service-image push-integration-dispatcher-image push-mcp-snow-image push-mock-eventing-image
 	@echo "All container images pushed successfully!"
 
-.PHONY: push-agent-image
-push-agent-image:
-	$(call push_image,$(AGENT_IMG) $(PUSH_EXTRA_AGRS),self-service agent image)
 
 
 .PHONY: push-request-mgr-image
@@ -386,16 +373,6 @@ lint: format
 	uv run isort --check-only --diff .
 	@echo "Linting completed successfully!"
 
-lint-strict:
-	@echo "Running strict linting on entire codebase..."
-	@echo "1. Running flake8 for code style and basic issues..."
-	uv run flake8 .
-	@echo "2. Running mypy for comprehensive type checking..."
-	uv run mypy .
-	@echo "3. Running isort to check import organization..."
-	uv run isort --check-only --diff .
-	@echo "Strict linting completed!"
-
 .PHONY: format
 format:
 	@echo "Running isort import sorting on entire codebase..."
@@ -406,7 +383,7 @@ format:
 
 # Install dependencies
 .PHONY: install-all
-install-all: install-shared-models install-shared-clients install install-asset-manager install-request-manager install-agent-service install-integration-dispatcher install-mcp-snow install-mock-eventing
+install-all: install-shared-models install-shared-clients install install-request-manager install-agent-service install-integration-dispatcher install-mcp-snow install-mock-eventing
 	@echo "All dependencies installed successfully!"
 
 .PHONY: install-shared-models
@@ -435,14 +412,9 @@ reinstall:
 	@echo "All dependencies reinstalled with latest code!"
 
 .PHONY: reinstall-all
-reinstall-all: reinstall-shared-models reinstall-shared-clients reinstall reinstall-asset-manager reinstall-request-manager reinstall-agent-service reinstall-integration-dispatcher reinstall-mcp-snow
+reinstall-all: reinstall-shared-models reinstall-shared-clients reinstall reinstall-request-manager reinstall-agent-service reinstall-integration-dispatcher reinstall-mcp-snow
 	@echo "All project dependencies reinstalled successfully!"
 
-.PHONY: reinstall-asset-manager
-reinstall-asset-manager:
-	@echo "Force reinstalling asset manager dependencies..."
-	cd asset-manager && uv sync --reinstall
-	@echo "Asset manager dependencies reinstalled successfully!"
 
 .PHONY: reinstall-request-manager
 reinstall-request-manager:
@@ -480,11 +452,6 @@ reinstall-shared-clients:
 	cd shared-clients && uv sync --reinstall
 	@echo "Shared clients dependencies reinstalled successfully!"
 
-.PHONY: install-asset-manager
-install-asset-manager:
-	@echo "Installing asset manager dependencies..."
-	cd asset-manager && uv sync
-	@echo "Asset manager dependencies installed successfully!"
 
 .PHONY: install-request-manager
 install-request-manager:
@@ -518,7 +485,7 @@ install-mock-eventing:
 
 # Test code
 .PHONY: test-all
-test-all: test-shared-models test-shared-clients test test-asset-manager test-request-manager test-agent-service test-integration-dispatcher test-mcp-snow
+test-all: test-shared-models test-shared-clients test test-request-manager test-agent-service test-integration-dispatcher test-mcp-snow
 	@echo "All tests completed successfully!"
 
 # Lockfile management
@@ -572,7 +539,6 @@ check-lockfiles:
 	@echo
 	$(call check_lockfile,mock-eventing-service)
 	@echo
-	$(call check_lockfile,asset-manager)
 	@echo
 	@echo "🎉 All lockfiles are up-to-date!"
 
@@ -598,12 +564,11 @@ update-lockfiles:
 	@echo
 	$(call update_lockfile,mock-eventing-service)
 	@echo
-	$(call update_lockfile,asset-manager)
 	@echo
 	@echo "🎉 All lockfiles updated successfully!"
 
 # Individual service lockfile targets
-.PHONY: check-lockfile-root check-lockfile-shared-models check-lockfile-shared-clients check-lockfile-agent-service check-lockfile-request-manager check-lockfile-integration-dispatcher check-lockfile-mcp-snow check-lockfile-mock-eventing check-lockfile-asset-manager
+.PHONY: check-lockfile-root check-lockfile-shared-models check-lockfile-shared-clients check-lockfile-agent-service check-lockfile-request-manager check-lockfile-integration-dispatcher check-lockfile-mcp-snow check-lockfile-mock-eventing
 check-lockfile-root:
 	@echo "📦 Checking root project..."
 	@if uv lock --check; then \
@@ -633,10 +598,8 @@ check-lockfile-mcp-snow:
 check-lockfile-mock-eventing:
 	$(call check_lockfile,mock-eventing-service)
 
-check-lockfile-asset-manager:
-	$(call check_lockfile,asset-manager)
 
-.PHONY: update-lockfile-shared-models update-lockfile-shared-clients update-lockfile-agent-service update-lockfile-request-manager update-lockfile-integration-dispatcher update-lockfile-mcp-snow update-lockfile-mock-eventing update-lockfile-asset-manager
+.PHONY: update-lockfile-shared-models update-lockfile-shared-clients update-lockfile-agent-service update-lockfile-request-manager update-lockfile-integration-dispatcher update-lockfile-mcp-snow update-lockfile-mock-eventing
 update-lockfile-shared-models:
 	$(call update_lockfile,shared-models)
 
@@ -658,8 +621,6 @@ update-lockfile-mcp-snow:
 update-lockfile-mock-eventing:
 	$(call update_lockfile,mock-eventing-service)
 
-update-lockfile-asset-manager:
-	$(call update_lockfile,asset-manager)
 
 .PHONY: test-shared-models
 test-shared-models:
@@ -679,11 +640,6 @@ test:
 	uv run python -m pytest test/ || echo "No tests found in self-service agent test directory"
 	@echo "Self-service agent test check completed!"
 
-.PHONY: test-asset-manager
-test-asset-manager:
-	@echo "Running asset manager tests..."
-	cd asset-manager && uv run python -m pytest tests/ || echo "No tests found for asset-manager"
-	@echo "Asset manager tests completed successfully!"
 
 .PHONY: test-request-manager
 test-request-manager:
@@ -770,7 +726,6 @@ define helm_install_common
 	@kubectl delete job -l app.kubernetes.io/name=self-service-agent -n $(NAMESPACE) --ignore-not-found || true
 	@echo "Installing $(MAIN_CHART_NAME) helm chart $(1)"
 	@helm upgrade --install $(MAIN_CHART_NAME) helm -n $(NAMESPACE) \
-		--set image.repository=self-service-agent \
 		--set image.requestManager=self-service-agent-request-manager \
 		--set image.agentService=self-service-agent-service \
 		--set image.integrationDispatcher=self-service-agent-integration-dispatcher \
@@ -791,8 +746,6 @@ define helm_install_common
 		$(GENERIC_ARGS) \
 		$(if $(filter-out "",$(2)),$(2),) \
 		$(EXTRA_HELM_ARGS)
-	@echo "Waiting for main chart deployment..."
-	@kubectl rollout status deploy/$(MAIN_CHART_NAME) -n $(NAMESPACE) --timeout 10m
 	@echo "Waiting for request manager deployment..."
 	@kubectl rollout status deploy/$(MAIN_CHART_NAME)-request-manager -n $(NAMESPACE) --timeout 10m
 	@echo "Waiting for integration dispatcher deployment..."

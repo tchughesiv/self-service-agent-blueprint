@@ -7,6 +7,7 @@ import os
 import sys
 from pathlib import Path
 
+import psycopg
 from alembic import command
 from alembic.config import Config
 
@@ -76,7 +77,11 @@ def run_migrations() -> None:
     logger.debug(
         f"Database config: host={db_config.host}, port={db_config.port}, db={db_config.database}"
     )
-    logger.debug(f"Connection string: {db_config.sync_connection_string}")
+
+    # Only log connection string in debug mode
+    if os.getenv("SQL_DEBUG", "false").lower() == "true":
+        logger.debug(f"Connection string: {db_config.sync_connection_string}")
+
     alembic_cfg.set_main_option("sqlalchemy.url", db_config.sync_connection_string)
 
     try:
@@ -89,6 +94,60 @@ def run_migrations() -> None:
         # Run migrations
         command.upgrade(alembic_cfg, "head")
         logger.info("Database migrations completed successfully")
+
+        # Setup LangGraph PostgreSQL checkpoint tables
+        print("Setting up LangGraph PostgreSQL checkpoint tables...")
+        logger.info("Setting up LangGraph PostgreSQL checkpoint tables...")
+        try:
+            from langgraph.checkpoint.postgres import PostgresSaver
+
+            # Create a connection for PostgresSaver setup
+            conn = psycopg.connect(
+                db_config.sync_connection_string.replace(
+                    "postgresql+psycopg://", "postgresql://"
+                ),
+                row_factory=psycopg.rows.dict_row,
+                autocommit=True,
+                connect_timeout=60,  # 60 second timeout for migration job
+            )
+
+            try:
+                # Setup PostgresSaver with extended timeout
+                print("Running PostgresSaver.setup()...")
+                logger.info("Running PostgresSaver.setup()...")
+                postgres_saver = PostgresSaver(conn)
+                postgres_saver.setup()
+                print(
+                    "✅ LangGraph PostgreSQL checkpoint tables setup completed successfully"
+                )
+                logger.info(
+                    "✅ LangGraph PostgreSQL checkpoint tables setup completed successfully"
+                )
+            except psycopg.Error as db_error:
+                logger.error(f"Database error during PostgresSaver setup: {db_error}")
+                logger.error(f"Error code: {getattr(db_error, 'pgcode', 'unknown')}")
+                raise
+            except Exception as setup_error:
+                logger.error(
+                    f"Unexpected error during PostgresSaver setup: {setup_error}"
+                )
+                logger.error(f"Exception type: {type(setup_error).__name__}")
+                raise
+            finally:
+                try:
+                    conn.close()
+                    logger.debug("PostgresSaver connection closed successfully")
+                except Exception as close_error:
+                    logger.warning(
+                        f"Error closing PostgresSaver connection: {close_error}"
+                    )
+
+        except Exception as e:
+            logger.error(f"Failed to setup LangGraph checkpoint tables: {e}")
+            logger.error(f"Exception type: {type(e).__name__}")
+            logger.exception("Full PostgresSaver setup error traceback:")
+            # Don't fail the migration job - this is not critical for basic functionality
+            logger.warning("Continuing without LangGraph checkpoint setup...")
 
         # Restore original working directory
         os.chdir(original_cwd)

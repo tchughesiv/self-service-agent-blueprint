@@ -20,7 +20,7 @@ spec:
       restartPolicy: OnFailure
       containers:
       - name: db-migration
-        image: "{{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        image: "{{ .Values.image.registry }}/{{ .Values.image.agentService }}:{{ .Values.image.tag }}"
         imagePullPolicy: {{ .Values.image.pullPolicy }}
         command: ["python", "shared-models/scripts/migrate.py"]
         env:

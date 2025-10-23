@@ -6,7 +6,7 @@ authors = [
     {name = "Self-Service Agent Team", email = "team@example.com"},
 ]
 dependencies = [
-    "fastapi>=0.104.0",
+    "fastapi>=0.104.0,<0.117.0",
     "uvicorn[standard]>=0.24.0",
     "pydantic>=2.5.0",
     "structlog>=23.2.0",
