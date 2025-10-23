@@ -57,6 +57,7 @@ dependencies = [
     "wcwidth==0.2.13",
     "flask>=3.1.0",
     "gunicorn>=23.0.0",
+    "uvicorn[standard]>=0.24.0",
     "slack_sdk>=3.36.0",
     "slack-bolt>=1.18.0",
     "opentelemetry-exporter-otlp-proto-http==1.37.0",
