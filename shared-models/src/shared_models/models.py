@@ -5,9 +5,20 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import JSON, Boolean, Column
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Column,
+)
 from sqlalchemy import Enum as SQLEnum
-from sqlalchemy import ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlalchemy.orm import relationship
 
@@ -70,7 +81,7 @@ class DeliveryStatus(str, Enum):
 
 
 # Request Manager Models
-class RequestSession(Base, TimestampMixin):
+class RequestSession(Base, TimestampMixin):  # type: ignore[misc]
     """User conversation sessions."""
 
     __tablename__ = "request_sessions"
@@ -113,7 +124,7 @@ class RequestSession(Base, TimestampMixin):
     )
 
 
-class RequestLog(Base, TimestampMixin):
+class RequestLog(Base, TimestampMixin):  # type: ignore[misc]
     """Log of all requests processed."""
 
     __tablename__ = "request_logs"
@@ -152,7 +163,7 @@ class RequestLog(Base, TimestampMixin):
 
 
 # Integration Dispatcher Models
-class UserIntegrationConfig(Base, TimestampMixin):
+class UserIntegrationConfig(Base, TimestampMixin):  # type: ignore[misc]
     """Per-user integration configuration."""
 
     __tablename__ = "user_integration_configs"
@@ -186,7 +197,7 @@ class UserIntegrationConfig(Base, TimestampMixin):
     )
 
 
-class IntegrationDefaultConfig(Base, TimestampMixin):
+class IntegrationDefaultConfig(Base, TimestampMixin):  # type: ignore[misc]
     """Default integration configurations for new users."""
 
     __tablename__ = "integration_default_configs"
@@ -209,7 +220,7 @@ class IntegrationDefaultConfig(Base, TimestampMixin):
     created_by = Column(String(255), default="system")  # System-generated defaults
 
 
-class DeliveryLog(Base, TimestampMixin):
+class DeliveryLog(Base, TimestampMixin):  # type: ignore[misc]
     """Log of integration message deliveries."""
 
     __tablename__ = "delivery_logs"
@@ -261,7 +272,7 @@ class DeliveryLog(Base, TimestampMixin):
     )
 
 
-class ProcessedEvent(Base, TimestampMixin):
+class ProcessedEvent(Base, TimestampMixin):  # type: ignore[misc]
     """Track processed CloudEvents to prevent duplicate processing."""
 
     __tablename__ = "processed_events"
@@ -284,7 +295,7 @@ class ProcessedEvent(Base, TimestampMixin):
     )
 
 
-class IntegrationCredential(Base, TimestampMixin):
+class IntegrationCredential(Base, TimestampMixin):  # type: ignore[misc]
     """Secure storage for integration credentials."""
 
     __tablename__ = "integration_credentials"
@@ -312,7 +323,7 @@ class IntegrationCredential(Base, TimestampMixin):
     )
 
 
-class UserIntegrationMapping(Base, TimestampMixin):
+class UserIntegrationMapping(Base, TimestampMixin):  # type: ignore[misc]
     """Mapping between user emails and integration-specific user IDs."""
 
     __tablename__ = "user_integration_mappings"

@@ -1809,6 +1809,7 @@ requires-dist = [
     { name = "self-service-agent-shared-models", directory = "../shared-models" },
     { name = "structlog", specifier = ">=23.2.0" },
     { name = "tracing-config", directory = "../tracing-config" },
+    { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.24.0" },
 ]
 provides-extras = ["dev"]

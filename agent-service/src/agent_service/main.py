@@ -25,10 +25,16 @@ from shared_models import (
     parse_cloudevent_from_request,
     simple_health_check,
 )
-from shared_models.models import AgentResponse, NormalizedRequest, SessionStatus
+from shared_models.models import (
+    AgentResponse,
+    NormalizedRequest,
+    SessionStatus,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 from tracing_config.auto_tracing import run as auto_tracing_run
-from tracing_config.auto_tracing import tracingIsActive
+from tracing_config.auto_tracing import (
+    tracingIsActive,
+)
 
 from . import __version__
 from .schemas import SessionCreate, SessionResponse, SessionUpdate

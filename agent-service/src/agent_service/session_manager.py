@@ -16,8 +16,14 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
-from shared_models import configure_logging, get_enum_value
-from shared_models.models import RequestSession, SessionStatus
+from shared_models import (
+    configure_logging,
+    get_enum_value,
+)
+from shared_models.models import (
+    RequestSession,
+    SessionStatus,
+)
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 

@@ -63,6 +63,9 @@ warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
 
+# Configure mypy to use source directories for local packages
+mypy_path = "../shared-models/src:../shared-clients/src:../tracing-config/src:../agent-service/src"
+
 [tool.uv.sources]
 self-service-agent-shared-models = { path = "../shared-models" }
 self-service-agent-shared-clients = { path = "../shared-clients" }

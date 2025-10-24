@@ -9,7 +9,7 @@ import logging
 from pathlib import Path
 from typing import Annotated, Any, Dict, List, Optional, TypedDict
 
-import yaml
+import yaml  # type: ignore[import-untyped]
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
@@ -243,7 +243,7 @@ class StateMachine:
 
                 return text
 
-            result = replace_placeholders(text, format_data)
+            result = replace_placeholders(text, format_data)  # type: ignore[no-untyped-call]
             return str(result) if result is not None else text
 
         except Exception as e:
@@ -1039,7 +1039,7 @@ class ConversationSession:
 
             # Create node function with closure to capture state_name
             def make_node_func(name, stype):  # type: ignore[no-untyped-def]
-                def node_func(state: dict[str, Any]) -> Command | dict[str, Any]:
+                def node_func(state: dict[str, Any]) -> Command[Any] | dict[str, Any]:
                     """Node function that returns Command for routing (or state for terminal nodes)."""
                     logger.info(
                         f"Thread {self.thread_id} processing node: {name}, type: {stype}"
@@ -1105,10 +1105,10 @@ class ConversationSession:
 
                 return node_func
 
-            workflow.add_node(state_name, make_node_func(state_name, state_type))
+            workflow.add_node(state_name, make_node_func(state_name, state_type))  # type: ignore[no-untyped-call]
 
         # Add a resume dispatcher node that routes to the correct starting point
-        def resume_dispatcher(state: dict[str, Any]) -> Command:
+        def resume_dispatcher(state: dict[str, Any]) -> Command[Any]:
             """Dispatcher that resumes from last waiting node or starts from initial state"""
             last_waiting_node = state.get("_last_waiting_node")
 
@@ -1137,7 +1137,7 @@ class ConversationSession:
         # Compile with checkpointer only
         return workflow.compile(checkpointer=self.checkpointer, debug=False)
 
-    def get_initial_response(self) -> str | list[str | dict]:
+    def get_initial_response(self) -> str | list[str | dict[str, Any]]:
         """Get the initial response from the agent by checking conversation history."""
         try:
             # Check if there's existing conversation state

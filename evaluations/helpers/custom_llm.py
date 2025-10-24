@@ -5,7 +5,7 @@ import os
 from typing import Any, Dict, Optional, Tuple
 
 import openai
-from deepeval.models import DeepEvalBaseLLM  # type: ignore
+from deepeval.models import DeepEvalBaseLLM
 
 from .token_counter import count_tokens_from_response
 
@@ -33,7 +33,7 @@ class CustomLLM(DeepEvalBaseLLM):
         self.api_key = api_key
         self.base_url = base_url
         # Use LLM_ID environment variable if model_name not provided
-        self.model_name = model_name or os.getenv("LLM_ID", "")
+        self.model_name = model_name or os.getenv("LLM_ID") or ""
         self.client = openai.OpenAI(api_key=api_key, base_url=base_url)
 
     def load_model(self) -> Any:

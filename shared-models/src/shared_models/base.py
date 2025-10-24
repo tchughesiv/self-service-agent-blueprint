@@ -1,6 +1,7 @@
 """Base database models and utilities."""
 
 from datetime import datetime, timezone
+from typing import Any, Type
 
 from sqlalchemy import Column, MetaData
 from sqlalchemy.dialects.postgresql import TIMESTAMP
@@ -18,7 +19,10 @@ naming_convention = {
 metadata = MetaData(naming_convention=naming_convention)
 
 # Base class for all models
-Base = declarative_base(metadata=metadata)
+_Base = declarative_base(metadata=metadata)
+
+# Type alias for mypy
+Base: Type[Any] = _Base
 
 
 class TimestampMixin:
