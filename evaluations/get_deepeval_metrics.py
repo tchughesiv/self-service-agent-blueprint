@@ -7,7 +7,7 @@ conversations related to laptop refresh requests. It provides a comprehensive
 suite of conversational metrics for assessing agent performance.
 """
 
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from deepeval.metrics import (
     ConversationalGEval,
@@ -22,7 +22,7 @@ from helpers.load_conversation_context import load_default_context
 
 def get_metrics(
     custom_model: Optional[DeepEvalBaseLLM] = None,
-) -> List[ConversationalGEval]:
+) -> List[Any]:
     """
     Create comprehensive evaluation metrics for laptop refresh conversation assessment.
 
@@ -50,23 +50,17 @@ def get_metrics(
             - Error Validation: Checks for system response problems
             - Location-based Options: Validates correct laptop options per location
     """
-    # Prepare model configuration for all metrics
-    model_kwargs = {"model": custom_model}
-
     default_context = load_default_context()
 
     metrics = [
         TurnRelevancyMetric(
             threshold=0.8,
-            **model_kwargs,
         ),
         RoleAdherenceMetric(
             threshold=0.5,
-            **model_kwargs,
         ),
         ConversationCompletenessMetric(
             threshold=0.8,
-            **model_kwargs,
         ),
         ConversationalGEval(
             name="Information Gathering",
@@ -76,7 +70,6 @@ def get_metrics(
                 "Evaluate if the assistant gathers necessary information about the user's current laptop.",
                 "Check if the assistant follows a logical flow for information collection.",
             ],
-            **model_kwargs,
         ),
         ConversationalGEval(
             name="Policy Compliance",
@@ -93,7 +86,6 @@ def get_metrics(
                 "Verify the assistant provides clear policy explanations when discussing eligibility.",
                 f"\n\nadditional-context-start\n{default_context}\nadditional-context-end",
             ],
-            **model_kwargs,
         ),
         ConversationalGEval(
             name="Option Presentation",
@@ -104,7 +96,6 @@ def get_metrics(
                 "Evaluate if laptop specifications are clearly and completely presented.",
                 "Check if the assistant guides the user through selection process effectively.",
             ],
-            **model_kwargs,
         ),
         ConversationalGEval(
             name="Process Completion",
@@ -115,7 +106,6 @@ def get_metrics(
                 "Check if the assistant acknowledges or references the user's laptop selection in any form (e.g., 'You've selected...', proceeding with that model, or creating a ticket for that laptop). Implicit confirmation through context (like creating a ticket after selection) counts as confirmation.",
                 "Verify that the conversation includes a completion action such as creating a ServiceNow ticket, providing a ticket number, or confirming the request has been submitted. Creating a ticket IS a completion action and no additional next steps are required.",
             ],
-            **model_kwargs,
         ),
         ConversationalGEval(
             name="User Experience",
@@ -126,7 +116,6 @@ def get_metrics(
                 "Evaluate if responses are clear and easy to understand.",
                 "Check if the assistant addresses user needs effectively.",
             ],
-            **model_kwargs,
         ),
         ConversationalGEval(
             name="Flow termination",
@@ -135,7 +124,6 @@ def get_metrics(
             evaluation_steps=[
                 "Check if the conversation ends with DONEDONEDONE or the agent returning a service now ticket number to the user. If the ends in any other way the conversation failed"
             ],
-            **model_kwargs,
         ),
         ConversationalGEval(
             name="Ticket number validation",
@@ -144,7 +132,6 @@ def get_metrics(
             evaluation_steps=[
                 "Check that the first three characters of the ticket number for the laptop request are REQ"
             ],
-            **model_kwargs,
         ),
         ConversationalGEval(
             name="Correct eligibility validation",
@@ -161,7 +148,6 @@ def get_metrics(
                 "The user's eligibility status (eligible or not eligible) is irrelevant - only the accuracy of the stated or implied timeframe matters.",
                 f"\n\nadditional-context-start\n{default_context}\nadditional-context-end",
             ],
-            **model_kwargs,
         ),
         ConversationalGEval(
             name="No errors reported by agent",
@@ -170,7 +156,6 @@ def get_metrics(
             evaluation_steps=[
                 "Validate that there are no problems with system responses",
             ],
-            **model_kwargs,
         ),
         ConversationalGEval(
             name="Correct laptop options for user location",
@@ -185,7 +170,6 @@ def get_metrics(
                 "Additionally, verify that each laptop model presented matches one of the models in the additional context for that location. If the agent shows a laptop that does not exist in the context for that location (like a 'Commodore 64' or any other incorrect model), this evaluation step FAILS.",
                 f"\n\nadditional-context-start\n{default_context}\nadditional-context-end",
             ],
-            **model_kwargs,
         ),
         ConversationalGEval(
             name="Confirmation Before Ticket Creation",
@@ -201,7 +185,6 @@ def get_metrics(
                 "If the ticket is created immediately after laptop selection without the agent first asking for confirmation and waiting for user response, this evaluation FAILS.",
                 "Note: The confirmation question must come from the agent BEFORE the ticket is created. If the agent creates the ticket and then asks 'Is there anything else I can help you with?', this does NOT count as confirmation - the ticket was already created.",
             ],
-            **model_kwargs,
         ),
     ]
 

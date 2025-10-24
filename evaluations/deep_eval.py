@@ -216,7 +216,7 @@ Note: Providing clear, factual information about potential rejection or addition
 
             test_case = ConversationalTestCase(
                 turns=turns,
-                context=test_case_context,
+                context="\n".join(test_case_context),
                 chatbot_role=chatbot_role,
             )
 
@@ -227,7 +227,7 @@ Note: Providing clear, factual information about potential rejection or addition
             )
 
             # Store results with basic tracking for summary
-            conversation_result = {
+            conversation_result: dict[str, Any] = {
                 "filename": filename,
                 "conversation_turns": len(turns),
                 "evaluation_results": results,
