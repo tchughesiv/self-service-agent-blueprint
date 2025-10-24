@@ -9,7 +9,7 @@ import logging
 from pathlib import Path
 from typing import Annotated, Any, Dict, List, Optional, TypedDict
 
-import yaml  # type: ignore[import-untyped]
+import yaml
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages

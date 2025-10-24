@@ -175,7 +175,7 @@ help:
 	@echo "Utility Commands:"
 	@echo "  format                              - Run isort import sorting and Black formatting on entire codebase"
 	@echo "  lint                                - Run optimized linting (global isort/flake8 + per-directory mypy)"
-	@echo "  lint-global-tools                   - Run isort and flake8 globally on standard projects"
+	@echo "  lint-global-tools                   - Run isort and flake8 globally on all projects"
 	@echo "  lint-mypy-per-directory             - Run mypy on all projects with project-specific configs"
 	@echo "  lint-<directory>                    - Run mypy on specific directory (e.g., lint-agent-service)"
 	@echo "  version                             - Print the current VERSION"
@@ -373,7 +373,7 @@ lint: format lint-global-tools lint-mypy-per-directory
 .PHONY: lint-global-tools
 lint-global-tools:
 	@echo "Running global linting tools (flake8 and isort)..."
-	@echo "1. Running flake8 globally on standard projects..."
+	@echo "1. Running flake8 globally on all projects..."
 	@uv run flake8 .
 	@echo "2. Running isort globally on all projects..."
 	@uv run isort --check-only --diff .

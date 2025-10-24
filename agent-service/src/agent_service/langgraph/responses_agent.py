@@ -2,7 +2,7 @@ import logging
 import os
 from typing import Any, Dict, Optional
 
-import yaml  # type: ignore[import-untyped]
+import yaml
 from llama_stack_client import LlamaStackClient
 
 from .util import load_config_from_path, resolve_agent_service_path
