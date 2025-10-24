@@ -442,7 +442,7 @@ format:
 
 # Install dependencies
 .PHONY: install-all
-install-all: install-shared-models install-shared-clients install-tracing-config install install-request-manager install-agent-service install-integration-dispatcher install-mcp-snow install-mock-eventing
+install-all: install-shared-models install-shared-clients install-tracing-config install install-request-manager install-agent-service install-integration-dispatcher install-mcp-snow install-mock-eventing install-evaluations
 	@echo "All dependencies installed successfully!"
 
 .PHONY: install-shared-models
@@ -547,6 +547,12 @@ install-tracing-config:
 	@echo "Installing tracing-config dependencies..."
 	cd tracing-config && uv sync
 	@echo "Tracing-config dependencies installed successfully!"
+
+.PHONY: install-evaluations
+install-evaluations:
+	@echo "Installing evaluations dependencies..."
+	cd evaluations && uv sync
+	@echo "Evaluations dependencies installed successfully!"
 
 # Test code
 .PHONY: test-all
