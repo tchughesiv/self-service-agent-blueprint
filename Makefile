@@ -174,7 +174,10 @@ help:
 	@echo ""
 	@echo "Utility Commands:"
 	@echo "  format                              - Run isort import sorting and Black formatting on entire codebase"
-	@echo "  lint                                - Run flake8 linting on entire codebase"
+	@echo "  lint                                - Run optimized linting (global isort/flake8 + per-directory mypy)"
+	@echo "  lint-global-tools                   - Run isort and flake8 globally on standard projects"
+	@echo "  lint-mypy-per-directory             - Run mypy on all projects with project-specific configs"
+	@echo "  lint-<directory>                    - Run mypy on specific directory (e.g., lint-agent-service)"
 	@echo "  version                             - Print the current VERSION"
 	@echo ""
 	@echo "Configuration options (set via environment variables or make arguments):"
@@ -363,15 +366,71 @@ push-mock-eventing-image:
 
 # Code quality
 .PHONY: lint
-lint: format
-	@echo "Running comprehensive linting on entire codebase..."
-	@echo "1. Running flake8 for code style and basic issues..."
-	uv run flake8 .
-	@echo "2. Running mypy for type checking..."
-	uv run mypy .
-	@echo "3. Running isort to check import organization..."
-	uv run isort --check-only --diff .
-	@echo "Linting completed successfully!"
+lint: format lint-global-tools lint-mypy-per-directory
+	@echo "All directory linting completed successfully!"
+
+# Global linting tools (isort and flake8) for projects with standard configurations
+.PHONY: lint-global-tools
+lint-global-tools:
+	@echo "Running global linting tools (flake8 and isort)..."
+	@echo "1. Running flake8 globally on standard projects..."
+	@uv run flake8 .
+	@echo "2. Running isort globally on all projects..."
+	@uv run isort --check-only --diff .
+	@echo "✅ Global linting tools completed"
+
+# Per-directory mypy linting (project-specific configurations)
+.PHONY: lint-mypy-per-directory
+lint-mypy-per-directory: lint-shared-models lint-shared-clients lint-agent-service lint-request-manager lint-integration-dispatcher lint-mcp-snow lint-mock-eventing lint-tracing-config lint-evaluations
+	@echo "✅ All mypy linting completed"
+
+# Common function for mypy linting
+define lint_mypy
+	@echo "Running mypy on $(1)..."
+	@if [ -d "$(1)" ]; then \
+		cd $(1) && uv run --with mypy mypy --strict . && echo "✅ $(1) mypy completed"; \
+	else \
+		echo "⚠️  $(1) directory not found, skipping..."; \
+	fi
+endef
+
+# Individual directory linting targets (mypy with project-specific configurations)
+.PHONY: lint-shared-models
+lint-shared-models:
+	$(call lint_mypy,shared-models)
+
+.PHONY: lint-shared-clients
+lint-shared-clients:
+	$(call lint_mypy,shared-clients)
+
+.PHONY: lint-agent-service
+lint-agent-service:
+	$(call lint_mypy,agent-service)
+
+.PHONY: lint-request-manager
+lint-request-manager:
+	$(call lint_mypy,request-manager)
+
+.PHONY: lint-integration-dispatcher
+lint-integration-dispatcher:
+	$(call lint_mypy,integration-dispatcher)
+
+.PHONY: lint-mcp-snow
+lint-mcp-snow:
+	$(call lint_mypy,mcp-servers/snow)
+
+.PHONY: lint-mock-eventing
+lint-mock-eventing:
+	$(call lint_mypy,mock-eventing-service)
+
+.PHONY: lint-tracing-config
+lint-tracing-config:
+	$(call lint_mypy,tracing-config)
+
+.PHONY: lint-evaluations
+lint-evaluations:
+	$(call lint_mypy,evaluations)
+
 
 .PHONY: format
 format:
