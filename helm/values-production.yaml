@@ -92,7 +92,7 @@ requestManagement:
 
   # Database Performance Configuration for Production
   database:
-    # Connection pool settings optimized for production workloads
+    # Async connection pool (for SQLAlchemy) - optimized for production workloads
     poolSize: 20              # Larger pool for production concurrency
     maxOverflow: 30           # More overflow connections for peak loads
     poolTimeout: 30           # Standard timeout
@@ -101,3 +101,7 @@ requestManagement:
     statementTimeout: 60000
     # Idle transaction timeout (10 minutes for production)
     idleTransactionTimeout: 600000
+    # Sync connection pool (for PostgresSaver/LangGraph) - optimized for production
+    syncPoolMinSize: 5        # Higher minimum for production stability
+    syncPoolMaxSize: 15       # Larger pool for production concurrency
+    syncPoolTimeout: 60       # Longer timeout for production workloads

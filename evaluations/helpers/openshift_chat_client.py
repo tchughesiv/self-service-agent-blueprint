@@ -17,7 +17,7 @@ class OpenShiftChatClient:
     def __init__(
         self,
         authoritative_user_id: str,
-        deployment_name: str = "deploy/self-service-agent",
+        deployment_name: str = "deploy/self-service-agent-request-manager",
         test_script: str = "chat-responses-request-mgr.py",
         reset_conversation: bool = False,
     ):
@@ -66,13 +66,13 @@ class OpenShiftChatClient:
 
             # Set PYTHONPATH if TEST_MODE is enabled
             if os.environ.get("TEST_MODE"):
-                env_vars += " PYTHONPATH=/opt/app-root/asset-manager/src:/opt/app-root/slack-service/src:/opt/app-root/session-manager/src:"
+                env_vars += " PYTHONPATH=/opt/app-root/agent-service/src:/opt/app-root/slack-service/src:/opt/app-root/session-manager/src:"
 
             cmd = [
                 "oc",
                 "exec",
                 "-it",
-                "deploy/self-service-agent",
+                "deploy/self-service-agent-request-manager",
                 "--",
                 "bash",
                 "-c",

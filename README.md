@@ -129,10 +129,9 @@ Agentic systems involve complex interactions between multiple components—routi
 The repository is organized into the following key directories:
 
 **Core Services:**
-- **`agent-service/`** - AI agent processing service that handles LlamaStack interactions
+- **`agent-service/`** - AI agent processing service with knowledge base management and LangGraph state machine
 - **`request-manager/`** - Request routing, session management, and unified communication processing
 - **`integration-dispatcher/`** - Multi-channel delivery (Slack, Email, Webhooks)
-- **`asset-manager/`** - Agent, knowledge base, and toolgroup registration and management
 - **`mock-eventing-service/`** - Lightweight mock service for testing without Knative infrastructure
 
 **MCP Servers:**
@@ -148,7 +147,7 @@ The repository is organized into the following key directories:
 
 **Infrastructure & Configuration:**
 - **`helm/`** - Kubernetes Helm charts for OpenShift deployment
-- **`asset-manager/config/`** - Agent configurations, knowledge bases, and tool groups
+- **`agent-service/config/`** - Agent configurations, knowledge bases, and LangGraph prompts
 - **`tracing-config/`** - OpenTelemetry configuration for observability
 - **`scripts/`** - CI/CD and container build scripts
 
@@ -377,8 +376,8 @@ The blueprint consists of reusable **core platform components** and **use-case-s
 
 **Key Capabilities:**
 - **Agent Orchestration:** Routes requests to appropriate agents (routing agent → specialist agents), managing handoffs and conversation context
-- **Configuration-Driven:** Uses agents configured by Asset Manager
-- **Generic Design:** All domain logic comes from agent configurations registered via Asset Manager—no hardcoded use-case behavior
+- **Configuration-Driven:** Uses agents configured via YAML files in agent-service
+- **Generic Design:** All domain logic comes from agent configurations—no hardcoded use-case behavior
 
 ---
 
@@ -393,12 +392,12 @@ The blueprint consists of reusable **core platform components** and **use-case-s
 
 ---
 
-#### 4.1.4 Asset Manager
+#### 4.1.4 Agent Service
 
-**Purpose:** Configuration-as-code system that automates registration of agents, knowledge bases, and tool groups with LlamaStack.
+**Purpose:** AI agent processing service that handles agent registration, knowledge base management, and LangGraph state machine execution.
 
 **Key Capabilities:**
-- **Agent Registration:** Reads YAML files from `asset-manager/config/agents/`, registers agents with their instructions, tools, and knowledge bases
+- **Agent Registration:** Reads YAML files from `agent-service/config/agents/`, registers agents with their instructions, tools, and knowledge bases
 - **Knowledge Base Creation:** Processes text documents, creates embeddings, builds vector databases, registers for RAG queries
 
 ---
@@ -522,13 +521,13 @@ MCP servers allow agents to interact with external systems through standardized 
 
 **Conversational Policy Explanation:** User asks "Why am I not eligible?" → Agent retrieves and explains specific unmet criteria
 
-**Pattern:** Create directory under `asset-manager/config/knowledge_bases/`, add .txt files, Asset Manager handles chunking, embeddings, vector database creation, and LlamaStack registration.
+**Pattern:** Create directory under `agent-service/config/knowledge_bases/`, add .txt files, Agent Service handles chunking, embeddings, vector database creation, and LlamaStack registration.
 
 ---
 
 #### 4.2.3 Agents
 
-**Purpose:** YAML configurations defining agent behavior, system instructions, accessible tools, and knowledge bases—registered with LlamaStack by Asset Manager.
+**Purpose:** YAML configurations defining agent behavior, system instructions, accessible tools, and knowledge bases—registered with LlamaStack by Agent Service.
 
 **Laptop Refresh Agent Architecture (Routing Pattern):**
 
@@ -651,7 +650,7 @@ oc get routes -n $NAMESPACE
 **Expected outcome:**
 - All pods in Running state
 - Routes accessible
-- Asset manager completed successfully
+- Agent service initialization completed successfully
 
 #### Step 6: Test the Deployment
 
@@ -1033,13 +1032,11 @@ Now that you have the system running, dive deeper into each component.
 
 ### 6.2 Agent Configuration
 
-**Asset Manager**
-- Full documentation: [`asset-manager/README.md`](asset-manager/README.md)
-- Topics: Agent registration, knowledge base creation, tool groups
+**Agent Service**
+- Topics: Agent registration, knowledge base creation, LangGraph state machine
 
 **Agent Configurations**
-- Full documentation: `asset-manager/config/agents/README.md` (TBD)
-- Directory: `asset-manager/config/agents/`
+- Directory: `agent-service/config/agents/`
 - Examples: `routing-agent.yaml`, `laptop-refresh.yaml`
 
 **Prompt Configuration**
@@ -1047,8 +1044,7 @@ Now that you have the system running, dive deeper into each component.
 - Topics: System prompts, few-shot examples, prompt engineering
 
 **Knowledge Bases**
-- Full documentation: `asset-manager/config/knowledge_bases/README.md` (TBD)
-- Directory: `asset-manager/config/knowledge_bases/`
+- Directory: `agent-service/config/knowledge_bases/`
 - Structure: One directory per knowledge base
 - Format: `.txt` files automatically indexed
 

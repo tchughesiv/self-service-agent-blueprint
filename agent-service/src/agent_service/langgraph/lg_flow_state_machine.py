@@ -10,21 +10,14 @@ from pathlib import Path
 from typing import Annotated, Any, Dict, List, Optional, TypedDict
 
 import yaml
-from asset_manager.util import resolve_asset_manager_path
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.types import Command
 
-# Import SqliteSaver - will be replace by more persistent state storage
-try:
-    from langgraph_checkpoint_sqlite import SqliteSaver  # type: ignore
-except ImportError:
-    try:
-        from langgraph.checkpoint.sqlite import SqliteSaver
-    except ImportError:
-        # Minimal fallback for development environments
-        SqliteSaver = None
+# Import PostgreSQL checkpoint utilities
+from .postgres_checkpoint import get_postgres_checkpointer
+from .util import resolve_agent_service_path
 
 logger = logging.getLogger(__name__)
 
@@ -975,14 +968,13 @@ class StateMachine:
 class ConversationSession:
     """
     Encapsulates the state machine, graph, and persistent conversation state for a single conversation session.
-    Uses LangGraph checkpoints and threads for persistence across process restarts.
+    Uses PostgreSQL-based LangGraph checkpoints for persistence across process restarts.
     """
 
     def __init__(  # type: ignore[no-untyped-def]
         self,
         agent,
         thread_id: str | None = None,
-        checkpoint_db_path: str | None = None,
         authoritative_user_id: str | None = None,
     ):
         """
@@ -991,7 +983,6 @@ class ConversationSession:
         Args:
             agent: Agent instance to use for this session (config includes state machine path)
             thread_id: Thread identifier for conversation persistence (defaults to generated ID)
-            checkpoint_db_path: Path to SQLite checkpoint database (defaults to memory)
             authoritative_user_id: Optional authoritative user ID for the user
         """
         import uuid
@@ -1008,16 +999,15 @@ class ConversationSession:
         # Convert to absolute path using centralized path resolution
         if not Path(lg_config_path).is_absolute():
             try:
-                self.config_path = resolve_asset_manager_path(lg_config_path)
+                self.config_path = resolve_agent_service_path(lg_config_path)
             except FileNotFoundError as e:
                 logger.error(f"ConversationSession config not found: {e}")
                 raise
         else:
             self.config_path = Path(lg_config_path)
 
-        # Initialize checkpoint storage with SqliteSaver
-        self.checkpointer_cm = SqliteSaver.from_conn_string(str(checkpoint_db_path))
-        self.checkpointer = self.checkpointer_cm.__enter__()
+        # Initialize checkpoint storage with PostgresSaver
+        self.checkpointer = get_postgres_checkpointer()
 
         # Initialize state machine
         self.state_machine = StateMachine(str(self.config_path))
@@ -1192,7 +1182,7 @@ class ConversationSession:
             try:
                 # Try to import token stats, but handle gracefully if not available
                 try:
-                    from asset_manager.token_counter import get_token_stats
+                    from .token_counter import get_token_stats
 
                     stats = get_token_stats()
                     return f"CURRENT_TOKEN_SUMMARY:INPUT:{stats.total_input_tokens}:OUTPUT:{stats.total_output_tokens}:TOTAL:{stats.total_tokens}:CALLS:{stats.call_count}:MAX_SINGLE_INPUT:{stats.max_input_tokens}:MAX_SINGLE_OUTPUT:{stats.max_output_tokens}:MAX_SINGLE_TOTAL:{stats.max_total_tokens}"
@@ -1239,17 +1229,24 @@ class ConversationSession:
                 result: Any = self.app.invoke(initial_state, config=self.thread_config)
             else:
                 # Existing conversation - add user message and continue
-                # Add the user message and reset the consumed flag for this new invoke
-                user_input = {
-                    "messages": [HumanMessage(content=message)],
-                    "_consumed_this_invoke": False,  # Reset flag so first waiting node can consume
-                }
+                # Get the current state and add the new message
+                # Note: Copy the state to avoid modifying the original checkpoint state
+                # This is critical for PostgreSQL saver to work correctly
+                current_values = current_state.values.copy()
+
+                # Add the new user message to the existing messages
+                current_values["messages"].append(HumanMessage(content=message))
+                current_values["_consumed_this_invoke"] = (
+                    False  # Reset flag so first waiting node can consume
+                )
 
                 # Store token_context for access during processing
                 if token_context:
                     self.current_token_context = token_context
 
-                result2: Any = self.app.invoke(user_input, config=self.thread_config)
+                result2: Any = self.app.invoke(
+                    current_values, config=self.thread_config
+                )
 
             # Extract agent response
             agent_response = ""
@@ -1312,12 +1309,13 @@ class ConversationSession:
             return f"Error processing message: {e}"
 
     def close(self) -> None:
-        """Clean up resources, especially the SQLite context manager."""
-        if hasattr(self, "checkpointer_cm") and self.checkpointer_cm is not None:
-            try:
-                self.checkpointer_cm.__exit__(None, None, None)
-            except Exception as e:
-                logger.warning(f"Error closing checkpointer context manager: {e}")
+        """Clean up resources.
+
+        Note: PostgresSaver uses connection pooling and doesn't require explicit cleanup.
+        The global checkpoint manager handles connection pool lifecycle.
+        """
+        # No cleanup needed for PostgreSQL-based checkpoints
+        pass
 
     def __del__(self):  # type: ignore[no-untyped-def]
         """Destructor to ensure cleanup."""

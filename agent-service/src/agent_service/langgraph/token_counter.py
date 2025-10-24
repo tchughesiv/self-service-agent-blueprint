@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Token Counter Utility for Test Scripts
+Token Counter Utility for Agent Service
 
-Provides thread-safe token counting for LLM calls in test scripts.
+Provides thread-safe token counting for LLM calls in agent service.
 """
 
 import threading

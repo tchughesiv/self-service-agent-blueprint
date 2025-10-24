@@ -76,7 +76,9 @@ def run_migrations_online() -> None:
     # Use sync engine for migrations to avoid async issues
     db_config = get_db_config()
 
-    logger.debug(f"Database config: {db_config.sync_connection_string}")
+    # Only log connection string in debug mode
+    if db_config.echo_sql:
+        logger.debug(f"Database config: {db_config.sync_connection_string}")
 
     # Create sync engine directly
     from sqlalchemy import create_engine

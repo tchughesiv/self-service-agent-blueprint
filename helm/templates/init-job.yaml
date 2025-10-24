@@ -27,7 +27,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: init-and-complete
-          image: "{{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          image: "{{ .Values.image.registry }}/{{ .Values.image.agentService }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           env:
             - name: LLAMA_STACK_URL
@@ -50,12 +50,12 @@ spec:
 
               echo "Registering knowledge bases..."
 
-              # Change to the asset manager directory and run the registration script
-              cd /app/asset-manager
+              # Change to the agent service directory and run the registration script
+              cd /app/agent-service
 
               # Activate virtual environment and run the asset registration script
               echo "Running asset registration script..."
-              /app/.venv/bin/python -m asset_manager.script.register_assets
+              /app/.venv/bin/python -m agent_service.scripts.register_assets
 
               echo "Knowledge bases registered successfully"
               

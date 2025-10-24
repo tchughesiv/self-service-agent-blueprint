@@ -85,7 +85,6 @@ Ensure you have the required tools installed:
    Or install specific components:
    ```bash
    make install                    # Self-service agent dependencies
-   make install-asset-manager      # Asset manager dependencies
    make install-request-manager    # Request manager dependencies
    make install-agent-service      # Agent service dependencies
    make install-integration-dispatcher  # Integration dispatcher dependencies
@@ -167,7 +166,6 @@ make test-all                   # Run tests for all projects
 **Run component-specific tests:**
 ```bash
 make test                       # Run tests for self-service agent
-make test-asset-manager         # Run tests for asset manager
 make test-request-manager       # Run tests for request manager
 make test-agent-service         # Run tests for agent service
 make test-integration-dispatcher # Run tests for integration dispatcher
@@ -192,7 +190,6 @@ make build-all-images           # Build all container images
 **Build individual images:**
 ```bash
 make build-agent-image          # Build self-service agent image
-make build-asset-mgr-image      # Build asset manager image
 make build-request-mgr-image    # Build request manager image
 make build-agent-service-image  # Build agent service image
 make build-integration-dispatcher-image  # Build integration dispatcher image
@@ -226,7 +223,6 @@ make push-all-images            # Push all images to registry
 **Push individual images:**
 ```bash
 make push-agent-image           # Push self-service agent image
-make push-asset-mgr-image       # Push asset manager image
 make push-request-mgr-image     # Push request manager image
 make push-agent-service-image   # Push agent service image
 make push-integration-dispatcher-image  # Push integration dispatcher image
@@ -363,8 +359,8 @@ make helm-status                # Check deployment status
 
 ### Configuration Files
 
-- **Agent configs**: Use YAML format in `asset-manager/config/agents/`
-- **Knowledge bases**: Place text files in `asset-manager/config/knowledge_bases/`
+- **Agent configs**: Use YAML format in `agent-service/config/agents/`
+- **Knowledge bases**: Place text files in `agent-service/config/knowledge_bases/`
 - **Helm values**: Follow existing structure in `helm/values.yaml`
 
 ### Documentation

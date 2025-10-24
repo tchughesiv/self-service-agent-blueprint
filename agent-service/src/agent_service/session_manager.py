@@ -28,7 +28,6 @@ logger = configure_logging("agent-service")
 # Configure logging to suppress verbose output
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("langgraph").setLevel(logging.WARNING)
-logging.getLogger("asset_manager").setLevel(logging.WARNING)
 
 
 def get_session_token_context(session_id: str | None) -> str:
@@ -485,12 +484,9 @@ class ResponsesSessionManager(BaseSessionManager):
         else:
             session_thread_id = str(uuid.uuid4())
 
-        checkpoint_db_path = f"/tmp/conversation_checkpoints_{self.user_id}.db"
-
         return ConversationSession(
             agent,
             session_thread_id,
-            checkpoint_db_path,
             authoritative_user_id=authoritative_user_id,
         )
 
@@ -892,6 +888,7 @@ class ResponsesSessionManager(BaseSessionManager):
                     user_id=self.user_id,
                     thread_id=self.conversation_session.thread_id,
                 )
+                # Close session (PostgresSaver doesn't need explicit cleanup, but good practice)
                 self.conversation_session.close()
 
             # Reset state
@@ -952,6 +949,7 @@ class ResponsesSessionManager(BaseSessionManager):
     async def close(self) -> None:
         """Close the session manager and clean up resources."""
         if self.conversation_session:
+            # Close session (PostgresSaver doesn't need explicit cleanup, but good practice)
             self.conversation_session.close()
         self.current_session = None
         self.current_agent_name = None

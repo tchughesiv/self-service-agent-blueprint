@@ -3,8 +3,9 @@ import os
 from typing import Any, Dict, Optional
 
 import yaml
-from asset_manager.util import load_config_from_path, resolve_asset_manager_path
 from llama_stack_client import LlamaStackClient
+
+from .util import load_config_from_path, resolve_agent_service_path
 
 logger = logging.getLogger(__name__)
 
@@ -454,7 +455,7 @@ class Agent:
 
             # Import token counting if available
             try:
-                from asset_manager.token_counter import count_tokens_from_response
+                from .token_counter import count_tokens_from_response
 
                 # Use provided token context or fallback to default
                 context = token_context or "chat_agent"
@@ -555,7 +556,7 @@ class ResponsesAgentManager:
 
         # Load the configuration using centralized path resolution
         try:
-            config_path = resolve_asset_manager_path("config")
+            config_path = resolve_agent_service_path("config")
             logger.info(f"ResponsesAgentManager found config at: {config_path}")
         except FileNotFoundError as e:
             logger.error(f"ResponsesAgentManager config not found: {e}")

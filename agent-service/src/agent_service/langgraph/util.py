@@ -12,15 +12,15 @@ def load_yaml(file_path: str) -> dict[str, Any]:
         return {}
 
 
-def resolve_asset_manager_path(relative_path: str) -> Path:
+def resolve_agent_service_path(relative_path: str) -> Path:
     """
-    Resolve a path relative to the asset-manager root, trying multiple possible locations.
+    Resolve a path relative to the agent-service root, trying multiple possible locations.
 
     This function handles the path resolution issues that occur when running in containers
-    where the asset-manager directory structure may be different from development.
+    where the agent-service directory structure may be different from development.
 
     Args:
-        relative_path: Path relative to asset-manager root (e.g., "config", "config/lg-prompts/routing.yaml")
+        relative_path: Path relative to agent-service root (e.g., "config", "config/lg-prompts/routing.yaml")
 
     Returns:
         Path: Resolved absolute path to the requested file/directory
@@ -28,10 +28,10 @@ def resolve_asset_manager_path(relative_path: str) -> Path:
     Raises:
         FileNotFoundError: If the path cannot be found in any of the possible locations
     """
-    # Try multiple possible asset-manager root locations
+    # Try multiple possible agent-service root locations
     possible_roots = [
-        Path(__file__).parent.parent.parent,  # Original path: asset-manager/
-        Path("/app/asset-manager"),  # Container path
+        Path(__file__).parent.parent.parent,  # Original path: agent-service/
+        Path("/app/agent-service"),  # Container path
         Path("."),  # Current directory (fallback)
     ]
 

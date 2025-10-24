@@ -122,9 +122,9 @@ class AgentService:
             )
 
     async def _handle_tokens_command(self, request: NormalizedRequest) -> AgentResponse:
-        """Handle tokens command by fetching token statistics from asset_manager."""
+        """Handle tokens command by fetching token statistics from langgraph."""
         try:
-            from asset_manager.token_counter import get_token_stats
+            from .langgraph.token_counter import get_token_stats
 
             # Use session-specific token stats, with fallback to global stats
             # The get_stats method now falls back to global stats when context doesn't exist

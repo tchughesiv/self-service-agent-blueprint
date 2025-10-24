@@ -7,7 +7,7 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
-    "fastapi>=0.104.0",
+    "fastapi>=0.104.0,<0.117.0",
     "uvicorn[standard]>=0.24.0",
     "pydantic>=2.5.0",
     "cloudevents>=1.10.0",
@@ -24,13 +24,11 @@ dependencies = [
     "opentelemetry-instrumentation-httpx==0.58b0",
     "opentelemetry-instrumentation-fastapi>=0.58b0",
     "tracing-config",
-    # Asset manager for LangGraph components
-    "asset-manager",
     # LangGraph dependencies
     "langchain-core>=0.3.0",
     "langgraph>=0.6.7",
-    "langgraph-checkpoint-sqlite>=2.0.0",
-    "aiosqlite>=0.19.0",
+    "langgraph-checkpoint-postgres>=2.0.0",
+    "psycopg[binary]>=3.1.0",
     "openai>=1.0.0",
     "pyyaml>=6.0.0",
     "self-service-agent-shared-clients",
@@ -71,7 +69,6 @@ disallow_untyped_defs = true
 [tool.uv.sources]
 self-service-agent-shared-models = { path = "../shared-models" }
 self-service-agent-shared-clients = { path = "../shared-clients" }
-asset-manager = { path = "../asset-manager" }
 tracing-config = { path = "../tracing-config" }
 
 [dependency-groups]
