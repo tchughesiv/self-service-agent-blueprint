@@ -36,9 +36,9 @@ import random
 from pathlib import Path
 from typing import Any, List, Optional
 
-from deepeval.dataset import ConversationalGolden  # type: ignore
-from deepeval.simulator import ConversationSimulator  # type: ignore
-from deepeval.test_case import ConversationalTestCase, Turn  # type: ignore
+from deepeval.dataset import ConversationalGolden
+from deepeval.simulator import ConversationSimulator
+from deepeval.test_case import ConversationalTestCase, Turn
 from helpers.custom_llm import CustomLLM, get_api_configuration
 from helpers.openshift_chat_client import OpenShiftChatClient
 
@@ -127,10 +127,8 @@ async def _model_callback(input: str, turns: List[Turn], thread_id: str) -> Turn
         if client is None:
             logger.error("OpenShift client not initialized")
             return Turn(
-                id="error",
-                input=input,
-                output="I apologize, but the system is not properly initialized.",
-                thread_id=thread_id,
+                role="assistant",
+                content="I apologize, but the system is not properly initialized.",
             )
 
         response = client.send_message(input)
@@ -245,7 +243,7 @@ if __name__ == "__main__":
         # Use custom LLM for user simulation, OpenShift client for agent responses
         logger.info("Creating ConversationSimulator...")
         simulator = ConversationSimulator(
-            model_callback=_model_callback,  # Uses OpenShift client to test actual agent
+            model_callback=_model_callback,  # type: ignore[arg-type]  # Uses OpenShift client to test actual agent
             simulator_model=custom_llm,  # Uses custom LLM to simulate user behavior
         )
 

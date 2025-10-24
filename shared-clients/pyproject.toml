@@ -20,16 +20,18 @@ packages = ["src/shared_clients"]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=7.0.0",
-    "pytest-asyncio>=0.21.0",
-    "black>=23.0.0",
-    "isort>=5.12.0",
-    "flake8>=6.0.0",
+    "pytest>=8.4.1",
+    "pytest-asyncio>=1.2.0",
+    "pytest-cov>=6.2.1",
+    "black>=25.1.0",
+    "flake8>=7.3.0",
+    "isort>=5.13.0",
+    "mypy>=1.17.1"
 ]
 
 [tool.black]
 line-length = 88
-target-version = ['py311']
+target-version = ['py312']
 
 [tool.isort]
 profile = "black"
@@ -39,6 +41,12 @@ line_length = 88
 asyncio_mode = "auto"
 testpaths = ["tests"]
 
+[tool.mypy]
+python_version = "3.12"
+
+# Configure mypy to use source directories for local packages
+mypy_path = "../shared-models/src"
+
 [tool.uv.sources]
 self-service-agent-shared-models = { path = "../shared-models" }
 
@@ -46,8 +54,8 @@ self-service-agent-shared-models = { path = "../shared-models" }
 dev = [
     "black>=25.1.0",
     "flake8>=7.3.0",
-    "isort>=6.0.1",
-    "mypy>=1.18.2",
+    "isort>=5.13.0",
+    "mypy>=1.17.1",
     "pytest>=8.4.2",
     "pytest-asyncio>=1.2.0",
 ]

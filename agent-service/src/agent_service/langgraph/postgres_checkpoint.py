@@ -23,18 +23,25 @@ def get_postgres_checkpointer() -> PostgresSaver:
 
     Uses a singleton pattern to reuse the same checkpointer instance across the application,
     which improves performance by reusing the underlying database connection pool.
+
+    If the connection is closed, recreates the checkpointer to allow the session to retry.
     """
     global _checkpointer
 
     if _checkpointer is None:
-        # LangGraph tables should already be set up by the database migration job
-        # Get a connection from the pool for the checkpointer
-        db_manager = get_database_manager()
-        conn = db_manager.get_sync_connection()
-        _checkpointer = PostgresSaver(conn)
-        logger.debug(
-            "Created PostgresSaver with shared configuration and connection pooling"
-        )
+        try:
+            # LangGraph tables should already be set up by the database migration job
+            # Get a connection from the pool for the checkpointer
+            db_manager = get_database_manager()
+            conn = db_manager.get_sync_connection()
+            _checkpointer = PostgresSaver(conn)
+            logger.debug(
+                "Created PostgresSaver with shared configuration and connection pooling"
+            )
+        except Exception as e:
+            logger.error(f"Failed to create PostgresSaver: {e}")
+            _checkpointer = None
+            raise
     else:
         logger.debug("Reusing existing PostgresSaver instance")
 
@@ -55,3 +62,17 @@ def close_postgres_checkpointer() -> None:
             logger.warning(f"Error closing PostgresSaver: {e}")
     else:
         logger.debug("No PostgresSaver instance to close")
+
+
+def reset_postgres_checkpointer() -> None:
+    """Reset the PostgresSaver instance to force recreation on next access.
+
+    Use this when the connection is lost to allow a new connection to be created.
+    """
+    global _checkpointer
+
+    if _checkpointer is not None:
+        logger.warning("Resetting PostgresSaver instance due to connection issue")
+        _checkpointer = None
+    else:
+        logger.debug("No PostgresSaver instance to reset")

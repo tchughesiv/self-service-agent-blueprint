@@ -7,12 +7,12 @@ import os
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Union
 
-import jwt  # type: ignore
+import jwt
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jwt.exceptions import InvalidTokenError  # type: ignore
+from jwt.exceptions import InvalidTokenError
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from shared_models import (
     CloudEventHandler,
@@ -30,7 +30,9 @@ from shared_models.models import ErrorResponse, ProcessedEvent
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from tracing_config.auto_tracing import run as auto_tracing_run
-from tracing_config.auto_tracing import tracingIsActive
+from tracing_config.auto_tracing import (
+    tracingIsActive,
+)
 
 from . import __version__
 from .communication_strategy import (
