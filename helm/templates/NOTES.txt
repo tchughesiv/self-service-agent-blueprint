@@ -1,18 +1,9 @@
 {{- if .Values.requestManagement.enabled }}
 🚀 Self-Service Agent with Request Management Layer has been deployed!
 
-## Access URLs:
-{{- if .Values.requestManagement.externalAccess.enabled }}
-- **Request Manager API**: https://{{ include "self-service-agent.fullname" . }}-request-manager-{{ .Release.Namespace }}.apps.{{ .Values.clusterDomain | default "cluster.local" }}/api/v1/
-- **Request Manager Health**: https://{{ include "self-service-agent.fullname" . }}-request-manager-{{ .Release.Namespace }}.apps.{{ .Values.clusterDomain | default "cluster.local" }}/health
-- **Slack Webhook**: https://{{ include "self-service-agent.fullname" . }}-integration-dispatcher-{{ .Release.Namespace }}.apps.{{ .Values.clusterDomain | default "cluster.local" }}/slack/events
-- **Integration Dispatcher Health**: https://{{ include "self-service-agent.fullname" . }}-integration-dispatcher-{{ .Release.Namespace }}.apps.{{ .Values.clusterDomain | default "cluster.local" }}/health
-{{- else }}
-- **Request Manager**: http://{{ include "self-service-agent.fullname" . }}-request-manager.{{ .Release.Namespace }}.svc.cluster.local
-- **Request Manager Health**: http://{{ include "self-service-agent.fullname" . }}-request-manager.{{ .Release.Namespace }}.svc.cluster.local/health
-- **Integration Dispatcher**: http://{{ include "self-service-agent.fullname" . }}-integration-dispatcher.{{ .Release.Namespace }}.svc.cluster.local
-- **Integration Dispatcher Health**: http://{{ include "self-service-agent.fullname" . }}-integration-dispatcher.{{ .Release.Namespace }}.svc.cluster.local/health
-{{- end }}
+## Services:
+- **Request Manager**: {{ include "self-service-agent.fullname" . }}-request-manager.{{ .Release.Namespace }}.svc.cluster.local
+- **Integration Dispatcher**: {{ include "self-service-agent.fullname" . }}-integration-dispatcher.{{ .Release.Namespace }}.svc.cluster.local
 
 {{- end }}
 

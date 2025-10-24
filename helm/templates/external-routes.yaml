@@ -1,4 +1,4 @@
-{{- if and .Values.requestManagement.enabled .Values.requestManagement.externalAccess.enabled }}
+{{- if and .Values.requestManagement.enabled .Values.requestManagement.requestManager.externalAccess.enabled }}
 ---
 # OpenShift Route for direct external access to Request Manager
 # This provides simple external access via OpenShift Routes
@@ -26,7 +26,9 @@ spec:
   tls:
     termination: edge
     insecureEdgeTerminationPolicy: Redirect
+{{- end }}
 
+{{- if and .Values.requestManagement.enabled .Values.requestManagement.integrationDispatcher.externalAccess.enabled }}
 ---
 apiVersion: route.openshift.io/v1
 kind: Route
