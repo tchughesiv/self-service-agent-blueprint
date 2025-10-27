@@ -51,6 +51,30 @@ class IntegrationDefaultsService:
         if not mapping:
             return None
 
+        # Handle negative cache entries (user doesn't exist)
+        if mapping.integration_user_id == "__NOT_FOUND__":
+            current_time = datetime.now(timezone.utc)
+            validation_ttl = timedelta(minutes=5)  # Negative cache TTL (5 minutes)
+
+            if (
+                mapping.last_validated_at
+                and current_time - mapping.last_validated_at < validation_ttl
+            ):
+                logger.debug(
+                    f"Negative cache entry still valid for {context}",
+                    user_email=mapping.user_email,
+                    last_validated=mapping.last_validated_at,
+                )
+                return True  # Consider negative cache as "valid" (user still doesn't exist)
+            else:
+                # Negative cache expired - allow re-check
+                logger.info(
+                    f"Negative cache entry expired for {context}, will re-check",
+                    user_email=mapping.user_email,
+                    last_validated=mapping.last_validated_at,
+                )
+                return False  # Treat as stale, will re-check via API
+
         # Check if mapping is recent enough to skip validation
         current_time = datetime.now(timezone.utc)
         validation_ttl = timedelta(minutes=5)  # 5 minutes TTL
@@ -122,10 +146,20 @@ class IntegrationDefaultsService:
                 mapping = result.scalar_one_or_none()
 
                 if mapping:
+                    slack_user_id = str(mapping.integration_user_id)
+
+                    # Check for negative cache sentinel value
+                    if slack_user_id == "__NOT_FOUND__":
+                        logger.info(
+                            "Found negative cache entry for Slack user (user does not exist)",
+                            user_email=user_email,
+                        )
+                        return None  # Skip API call for users that don't exist
+
                     logger.info(
                         "Found Slack user mapping in database",
                         user_email=user_email,
-                        slack_user_id=mapping.integration_user_id,
+                        slack_user_id=slack_user_id,
                         created_at=mapping.created_at,
                         last_validated_at=mapping.last_validated_at,
                     )
@@ -137,10 +171,19 @@ class IntegrationDefaultsService:
 
                     if is_valid:
                         await db.commit()
-                        stored_user_id = str(mapping.integration_user_id)
+                        stored_user_id = slack_user_id
                     else:
-                        await db.commit()
-                        # Will fall back to Slack API
+                        # Negative cache expired or mapping invalid - delete it and re-check via API
+                        if slack_user_id == "__NOT_FOUND__":
+                            logger.info(
+                                "Deleting expired negative cache entry, will re-check via API",
+                                user_email=user_email,
+                            )
+                            await db.delete(mapping)
+                            await db.commit()
+                        else:
+                            await db.commit()
+                            # Will fall back to Slack API
 
         except Exception as e:
             logger.error(
@@ -187,12 +230,40 @@ class IntegrationDefaultsService:
                     )
                     return None
             else:
-                logger.warning(
-                    f"Slack API lookup failed for {user_email}: {response.get('error', 'Unknown error')}"
-                )
+                error = response.get("error", "Unknown error")
+                logger.warning(f"Slack API lookup failed for {user_email}: {error}")
+
+                # Store negative cache for "not found" errors to avoid repeated API calls
+                if error == "users_not_found":
+                    logger.info(
+                        "Caching negative result for users_not_found",
+                        user_email=user_email,
+                    )
+                    from ..user_mapping_utils import store_slack_user_mapping
+
+                    # Store with sentinel value to indicate "not found"
+                    await store_slack_user_mapping(
+                        user_email, "__NOT_FOUND__", "integration_defaults_service"
+                    )
+
                 return None
         except Exception as e:
-            logger.error(f"Error looking up Slack user via API for {user_email}: {e}")
+            # Check if this is a "users_not_found" error
+            error_str = str(e).lower()
+            if "users_not_found" in error_str or "error: 'users_not_found'" in str(e):
+                logger.info(
+                    f"Slack user not found for {user_email}: user does not exist in Slack workspace"
+                )
+                # Store negative cache
+                from ..user_mapping_utils import store_slack_user_mapping
+
+                await store_slack_user_mapping(
+                    user_email, "__NOT_FOUND__", "integration_defaults_service"
+                )
+            else:
+                logger.error(
+                    f"Error looking up Slack user via API for {user_email}: {e}"
+                )
             return None
 
     async def _validate_slack_user_mapping(

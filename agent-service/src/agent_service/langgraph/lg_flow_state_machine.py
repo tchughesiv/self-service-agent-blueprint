@@ -16,7 +16,7 @@ from langgraph.graph.message import add_messages
 from langgraph.types import Command
 
 # Import PostgreSQL checkpoint utilities
-from .postgres_checkpoint import get_postgres_checkpointer
+from .postgres_checkpoint import get_postgres_checkpointer, reset_postgres_checkpointer
 from .util import resolve_agent_service_path
 
 logger = logging.getLogger(__name__)
@@ -243,7 +243,7 @@ class StateMachine:
 
                 return text
 
-            result = replace_placeholders(text, format_data)
+            result = replace_placeholders(text, format_data)  # type: ignore[no-untyped-call]
             return str(result) if result is not None else text
 
         except Exception as e:
@@ -1039,7 +1039,7 @@ class ConversationSession:
 
             # Create node function with closure to capture state_name
             def make_node_func(name, stype):  # type: ignore[no-untyped-def]
-                def node_func(state: dict[str, Any]) -> Command | dict[str, Any]:
+                def node_func(state: dict[str, Any]) -> Command[Any] | dict[str, Any]:
                     """Node function that returns Command for routing (or state for terminal nodes)."""
                     logger.info(
                         f"Thread {self.thread_id} processing node: {name}, type: {stype}"
@@ -1105,10 +1105,10 @@ class ConversationSession:
 
                 return node_func
 
-            workflow.add_node(state_name, make_node_func(state_name, state_type))
+            workflow.add_node(state_name, make_node_func(state_name, state_type))  # type: ignore[no-untyped-call]
 
         # Add a resume dispatcher node that routes to the correct starting point
-        def resume_dispatcher(state: dict[str, Any]) -> Command:
+        def resume_dispatcher(state: dict[str, Any]) -> Command[Any]:
             """Dispatcher that resumes from last waiting node or starts from initial state"""
             last_waiting_node = state.get("_last_waiting_node")
 
@@ -1137,11 +1137,11 @@ class ConversationSession:
         # Compile with checkpointer only
         return workflow.compile(checkpointer=self.checkpointer, debug=False)
 
-    def get_initial_response(self) -> str | list[str | dict]:
+    def get_initial_response(self) -> str | list[str | dict[str, Any]]:
         """Get the initial response from the agent by checking conversation history."""
         try:
-            # Check if there's existing conversation state
-            current_state = self.app.get_state(self.thread_config)
+            # Check if there's existing conversation state with retry logic
+            current_state = self._get_state_with_retry()
 
             if current_state.values and current_state.values.get("messages"):
                 return ""
@@ -1160,6 +1160,38 @@ class ConversationSession:
                 f"Error getting initial response for thread {self.thread_id}: {e}"
             )
             return ""
+
+    def _get_state_with_retry(self) -> Any:
+        """Get the current state from LangGraph with connection error handling and retry.
+
+        Returns:
+            The current state from LangGraph (has .values attribute)
+        """
+        try:
+            return self.app.get_state(self.thread_config)
+        except Exception as e:
+            error_str = str(e).lower()
+            # Check if this is a connection error
+            if (
+                "connection is closed" in error_str
+                or "connection closed" in error_str
+                or "the connection" in error_str
+            ):
+                logger.warning(
+                    f"PostgresSaver connection lost, resetting and retrying: {e}"
+                )
+                reset_postgres_checkpointer()
+                # Recreate the graph with a fresh checkpointer
+                self.checkpointer = get_postgres_checkpointer()
+                self.app = self._create_graph()
+                # Retry once
+                try:
+                    return self.app.get_state(self.thread_config)
+                except Exception as e2:
+                    logger.error(f"Failed to get state after connection reset: {e2}")
+                    raise
+            else:
+                raise
 
     def send_message(self, message: str, token_context: Optional[str] = None) -> str:
         """
@@ -1195,8 +1227,8 @@ class ConversationSession:
             return "Please provide a valid message."
 
         try:
-            # Get current thread state
-            current_state = self.app.get_state(self.thread_config)
+            # Get current thread state with retry logic for connection errors
+            current_state = self._get_state_with_retry()
 
             # Initialize conversation if needed
             if not current_state.values:

@@ -7,9 +7,9 @@ import os
 import sys
 from typing import Any, Dict, List, Optional
 
-from deepeval.evaluate import DisplayConfig, evaluate  # type: ignore
-from deepeval.test_case import ConversationalTestCase, Turn  # type: ignore
-from deepeval.test_run import global_test_run_manager  # type: ignore
+from deepeval.evaluate import DisplayConfig, evaluate
+from deepeval.test_case import ConversationalTestCase, Turn
+from deepeval.test_run import global_test_run_manager
 from get_deepeval_metrics import get_metrics
 from helpers.copy_context import copy_context_files
 from helpers.custom_llm import CustomLLM, get_api_configuration
@@ -37,7 +37,7 @@ def _no_op_wrap_up_test_run(*args: Any, **kwargs: Any) -> None:
 
 
 # Override DeepEval's default behavior to prevent online connectivity
-global_test_run_manager.wrap_up_test_run = _no_op_wrap_up_test_run
+global_test_run_manager.wrap_up_test_run = _no_op_wrap_up_test_run  # type: ignore[method-assign]
 
 
 def _convert_to_turns(conversation_data: List[Dict[str, str]]) -> List[Turn]:
@@ -63,7 +63,12 @@ def _convert_to_turns(conversation_data: List[Dict[str, str]]) -> List[Turn]:
         # Skip empty content to avoid creating invalid turns
         if not content.strip():
             continue
-        turns.append(Turn(role=role, content=content))
+
+        # Ensure role is valid for Turn
+        if role not in ["user", "assistant"]:
+            role = "user"  # Default to user if role is invalid
+
+        turns.append(Turn(role=role, content=content))  # type: ignore[arg-type]
 
     return turns
 
@@ -108,7 +113,7 @@ def _evaluate_conversations(
     # At this point, api_key_found is guaranteed to be non-None
     assert api_key_found is not None
     custom_model = CustomLLM(
-        api_key=api_key_found, base_url=current_endpoint, model_name=model_name  # type: ignore[arg-type]
+        api_key=api_key_found, base_url=current_endpoint or "", model_name=model_name
     )
     if not custom_model:
         logger.error("Could not create model object. Cannot proceed with evaluation.")
@@ -209,9 +214,11 @@ Your responsibilities:
 
 Note: Providing clear, factual information about potential rejection or additional approvals is sufficient. You do not need to be overly cautionary or repeatedly emphasize warnings. Always confirm with the user before creating tickets."""
 
+            # Note: DeepEval's type hints incorrectly say context is Optional[str]
+            # but the runtime implementation in __post_init__ expects List[str]
             test_case = ConversationalTestCase(
                 turns=turns,
-                context=test_case_context,
+                context=test_case_context if test_case_context else None,  # type: ignore[arg-type]
                 chatbot_role=chatbot_role,
             )
 
@@ -222,7 +229,7 @@ Note: Providing clear, factual information about potential rejection or addition
             )
 
             # Store results with basic tracking for summary
-            conversation_result = {
+            conversation_result: dict[str, Any] = {
                 "filename": filename,
                 "conversation_turns": len(turns),
                 "evaluation_results": results,

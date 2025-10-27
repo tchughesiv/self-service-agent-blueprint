@@ -4,7 +4,10 @@ from datetime import datetime
 from typing import Any, Dict, Optional
 
 from pydantic import BaseModel, Field, field_validator
-from shared_models.models import IntegrationType, SessionStatus
+from shared_models.models import (
+    IntegrationType,
+    SessionStatus,
+)
 
 
 class SessionCreate(BaseModel):

@@ -6,9 +6,9 @@ ServiceNow laptop refresh tickets.
 
 import logging
 import os
-from typing import Any
+from typing import Any, Literal
 
-from mcp.server.fastmcp import Context, FastMCP  # type: ignore
+from mcp.server.fastmcp import Context, FastMCP
 from snow.data.data import (
     create_laptop_refresh_ticket,
     find_employee_by_authoritative_user_id,
@@ -18,7 +18,7 @@ from snow.servicenow.client import ServiceNowClient
 from snow.servicenow.models import OpenServiceNowLaptopRefreshRequestParams
 from starlette.responses import JSONResponse
 
-MCP_TRANSPORT = os.environ.get("MCP_TRANSPORT", "sse")
+MCP_TRANSPORT: Literal["stdio", "sse", "streamable-http"] = os.environ.get("MCP_TRANSPORT", "sse")  # type: ignore[assignment]
 MCP_PORT = int(
     os.environ.get("SELF_SERVICE_AGENT_SNOW_SERVER_SERVICE_PORT_HTTP", "8001")
 )
@@ -96,7 +96,7 @@ def _create_real_servicenow_ticket(
         raise  # Re-raise to allow fallback handling
 
 
-def _extract_authoritative_user_id(ctx: Context) -> str | None:
+def _extract_authoritative_user_id(ctx: Context[Any, Any]) -> str | None:
     """Extract authoritative user ID from request context headers.
 
     Args:
@@ -168,12 +168,12 @@ async def health(request: Any) -> JSONResponse:
     return JSONResponse({"status": "OK"})
 
 
-@mcp.tool()  # type: ignore
+@mcp.tool()
 def open_laptop_refresh_ticket(
     employee_name: str,
     business_justification: str,
     servicenow_laptop_code: str,
-    ctx: Context,
+    ctx: Context[Any, Any],
 ) -> str:
     """Open a ServiceNow laptop refresh ticket for an employee.
 
@@ -227,9 +227,9 @@ def open_laptop_refresh_ticket(
     )
 
 
-@mcp.tool()  # type: ignore
+@mcp.tool()
 def get_employee_laptop_info(
-    ctx: Context,
+    ctx: Context[Any, Any],
     dummy_parameter: str = "",
 ) -> str:
     """Get laptop information for an employee using their authoritative user ID from request headers.

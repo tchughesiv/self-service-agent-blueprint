@@ -60,7 +60,7 @@ jobs:
       - name: Run mypy static analysis
         run: |
           echo "🔍 Running mypy static analysis..."
-          uv run mypy . || {
+          make lint-mypy-per-directory || {
             echo "::warning::MyPy found static analysis issues"
             echo "Run 'make lint' locally to see details"
             exit 1
