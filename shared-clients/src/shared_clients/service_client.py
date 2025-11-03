@@ -169,19 +169,6 @@ class RequestManagerClient(ServiceClient):
         )
         super().__init__(url, **kwargs)
 
-    async def send_slack_request(
-        self, request_data: Dict[str, Any]
-    ) -> Optional[Dict[str, Any]]:
-        """Send a Slack request."""
-        try:
-            response = await self.post("/api/v1/requests/slack", json=request_data)
-            response.raise_for_status()
-            result = response.json()
-            return result if isinstance(result, dict) else None
-        except Exception as e:
-            logger.error("Failed to send Slack request", error=str(e))
-            return None
-
     async def send_web_request(
         self, request_data: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:

@@ -10,10 +10,9 @@ from typing import Any, Dict, Optional
 import httpx
 from cloudevents.http import CloudEvent, to_structured
 from shared_clients import AgentServiceClient
-from shared_clients.service_client import RequestManagerClient
 from shared_clients.stream_processor import LlamaStackStreamProcessor
 from shared_models import (
-    CloudEventBuilder,
+    CloudEventSender,
     EventTypes,
     configure_logging,
     verify_slack_signature,
@@ -31,14 +30,19 @@ class SlackService:
 
     def __init__(self) -> None:
         self.signing_secret = os.getenv("SLACK_SIGNING_SECRET")
-        self.request_manager_client = RequestManagerClient(
-            timeout=60.0
-        )  # Reduced from 180s
         self.agent_service_client = AgentServiceClient()
         # Simple rate limiting: track last request time per user
         self._last_request_time: Dict[str, float] = {}
-        # Eventing configuration
+        # Eventing configuration (required - validated at startup)
         self.broker_url = os.getenv("BROKER_URL")
+        if not self.broker_url:
+            raise ValueError(
+                "BROKER_URL is required but not configured. "
+                "Slack service cannot forward requests to Request Manager without it."
+            )
+        self.cloudevent_sender = CloudEventSender(
+            self.broker_url, "integration-dispatcher"
+        )
         # Slack client for API calls
         self.bot_token = os.getenv("SLACK_BOT_TOKEN")
         self.slack_client = (
@@ -79,22 +83,18 @@ class SlackService:
         self, event_data: Dict[str, Any], event_type: str
     ) -> bool:
         """Send a CloudEvent to the broker."""
-        if not self.broker_url:
-            logger.warning("No broker URL configured - skipping CloudEvent")
-            return False
-
-        try:
-            # Create CloudEvent using shared utilities
-            builder = CloudEventBuilder("integration-dispatcher")
-            if event_type == EventTypes.REQUEST_CREATED:
-                event = builder.create_request_event(
-                    event_data,
-                    event_data.get("request_id"),
-                    event_data.get("user_id"),
-                    event_data.get("session_id"),
-                )
-            else:
-                # For other event types, create a basic event
+        # Use CloudEventSender for REQUEST_CREATED events
+        if event_type == EventTypes.REQUEST_CREATED:
+            return await self.cloudevent_sender.send_request_event(
+                request_data=event_data,
+                request_id=event_data.get("request_id"),
+                user_id=event_data.get("user_id"),
+                session_id=event_data.get("session_id"),
+            )
+        else:
+            # For other event types, use CloudEventBuilder directly
+            # (CloudEventSender doesn't support arbitrary event types yet)
+            try:
                 event = CloudEvent(
                     {
                         "type": event_type,
@@ -105,31 +105,35 @@ class SlackService:
                     event_data,
                 )
 
-            # Send to broker
-            headers, body = to_structured(event)
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    self.broker_url,
-                    headers=headers,
-                    content=body,
-                    timeout=15.0,  # Reduced from 30s for faster failure detection
+                # Send to broker
+                # broker_url is validated in __init__, so it can't be None here
+                assert (
+                    self.broker_url is not None
+                ), "broker_url should be validated in __init__"
+                headers, body = to_structured(event)
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(
+                        self.broker_url,
+                        headers=headers,
+                        content=body,
+                        timeout=15.0,
+                    )
+                    response.raise_for_status()
+
+                logger.info(
+                    "CloudEvent sent successfully",
+                    event_type=event_type,
+                    event_id=event["id"],
                 )
-                response.raise_for_status()
+                return True
 
-            logger.info(
-                "CloudEvent sent successfully",
-                event_type=event_type,
-                event_id=event["id"],
-            )
-            return True
-
-        except Exception as e:
-            logger.error(
-                "Failed to send CloudEvent",
-                event_type=event_type,
-                error=str(e),
-            )
-            return False
+            except Exception as e:
+                logger.error(
+                    "Failed to send CloudEvent",
+                    event_type=event_type,
+                    error=str(e),
+                )
+                return False
 
     async def handle_message_event(
         self,
@@ -757,11 +761,27 @@ class SlackService:
                 slack_user_id=slack_user_id,
                 user_email=user_email,
             )
-            # Store the mapping for future use
-            from .user_mapping_utils import store_slack_user_mapping
 
-            await store_slack_user_mapping(user_email, slack_user_id, "slack_service")
-            return user_email, slack_user_id
+            # Check if email already exists in any other integration mapping
+            # This handles the case where a user already has a mapping via Email or another integration
+            from shared_models.database import get_database_manager
+            from shared_models.models import IntegrationType
+
+            from .user_mapping_utils import resolve_user_id_from_email
+
+            db_manager = get_database_manager()
+            async with db_manager.get_session() as db:
+                # Use shared helper function to resolve user_id with consistent logic
+                # Pass slack_user_id as integration_specific_id so it's stored correctly
+                resolved_user_id = await resolve_user_id_from_email(
+                    email_address=user_email,
+                    integration_type=IntegrationType.SLACK,
+                    db=db,
+                    default_user_id=user_email,
+                    integration_specific_id=slack_user_id,
+                    created_by="slack_service",
+                )
+                return resolved_user_id, slack_user_id
         else:
             logger.warning(
                 f"Could not fetch user email for {context}, using Slack user ID as fallback",
@@ -786,7 +806,7 @@ class SlackService:
         integration_type: str,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Forward request to Request Manager."""
+        """Forward request to Request Manager via CloudEvent."""
         try:
             # Extract Slack-specific fields from metadata
             if metadata is None:
@@ -808,7 +828,7 @@ class SlackService:
             )
 
             # Create payload - Request Manager will generate request_id and session_id
-            payload = {
+            event_data = {
                 "user_id": user_id,
                 "content": content,
                 "integration_type": integration_type,
@@ -821,32 +841,33 @@ class SlackService:
             }
 
             logger.debug(
-                "Sending Slack request to Request Manager",
+                "Sending Slack request via CloudEvent to Request Manager",
                 user_id=user_id,
                 channel_id=channel_id,
                 slack_user_id=slack_user_id,
                 slack_team_id=slack_team_id,
                 thread_id=thread_id,
-                payload=payload,
             )
 
-            # Always use Request Manager HTTP API - it handles session management and eventing
-            response = await self.request_manager_client.send_slack_request(payload)
-            if response:
+            # Send via CloudEvent instead of direct HTTP call
+            success = await self._send_cloudevent(
+                event_data, EventTypes.REQUEST_CREATED
+            )
+            if success:
                 logger.info(
-                    "Request forwarded to Request Manager",
+                    "Request forwarded to Request Manager via CloudEvent",
                     user_id=user_id,
                     status="success",
                 )
             else:
                 logger.error(
-                    "Failed to forward request to Request Manager",
+                    "Failed to forward request to Request Manager via CloudEvent",
                     user_id=user_id,
                 )
 
         except Exception as e:
             logger.error(
-                "Failed to forward request to Request Manager",
+                "Failed to forward request to Request Manager via CloudEvent",
                 error=str(e),
                 user_id=user_id,
             )

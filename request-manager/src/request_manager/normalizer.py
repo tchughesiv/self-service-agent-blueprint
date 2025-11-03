@@ -7,7 +7,14 @@ from typing import Any, Dict, Optional, Union
 from shared_models import get_enum_value
 from shared_models.models import NormalizedRequest
 
-from .schemas import BaseRequest, CLIRequest, SlackRequest, ToolRequest, WebRequest
+from .schemas import (
+    BaseRequest,
+    CLIRequest,
+    EmailRequest,
+    SlackRequest,
+    ToolRequest,
+    WebRequest,
+)
 
 
 class RequestNormalizer:
@@ -15,7 +22,9 @@ class RequestNormalizer:
 
     def normalize_request(
         self,
-        request: Union[BaseRequest, SlackRequest, WebRequest, CLIRequest, ToolRequest],
+        request: Union[
+            BaseRequest, SlackRequest, WebRequest, CLIRequest, EmailRequest, ToolRequest
+        ],
         session_id: str,
         current_agent_id: Optional[str] = None,
     ) -> NormalizedRequest:
@@ -45,6 +54,8 @@ class RequestNormalizer:
             return self._normalize_web_request(request, base_data)
         elif isinstance(request, CLIRequest):
             return self._normalize_cli_request(request, base_data)
+        elif isinstance(request, EmailRequest):
+            return self._normalize_email_request(request, base_data)
         elif isinstance(request, ToolRequest):
             return self._normalize_tool_request(request, base_data)
         else:
@@ -103,6 +114,28 @@ class RequestNormalizer:
         }
 
         user_context = self._extract_cli_user_context(request)
+
+        return NormalizedRequest(
+            **base_data,
+            integration_context=integration_context,
+            user_context=user_context,
+            requires_routing=True,
+        )
+
+    def _normalize_email_request(
+        self, request: EmailRequest, base_data: Dict[str, Any]
+    ) -> NormalizedRequest:
+        """Normalize email-specific request."""
+        integration_context = {
+            "email_from": request.email_from,
+            "email_subject": request.email_subject,
+            "email_message_id": request.email_message_id,
+            "email_in_reply_to": request.email_in_reply_to,
+            "email_references": request.email_references,
+            "platform": "email",
+        }
+
+        user_context = self._extract_email_user_context(request)
 
         return NormalizedRequest(
             **base_data,
@@ -202,6 +235,25 @@ class RequestNormalizer:
             "cli_session": request.cli_session_id,
             "command_context": request.command_context,
         }
+
+        if request.metadata:
+            context.update(request.metadata)
+
+        return context
+
+    def _extract_email_user_context(self, request: EmailRequest) -> Dict[str, Any]:
+        """Extract user context from email request."""
+        context = {
+            "email_from": request.email_from,
+            "email_subject": request.email_subject,
+            "is_reply": bool(request.email_in_reply_to or request.email_references),
+        }
+
+        # Add threading information if this is a reply
+        if request.email_in_reply_to:
+            context["in_reply_to"] = request.email_in_reply_to
+        if request.email_references:
+            context["references"] = request.email_references
 
         if request.metadata:
             context.update(request.metadata)

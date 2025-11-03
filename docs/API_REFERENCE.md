@@ -232,7 +232,6 @@ curl -X POST https://your-request-manager/api/v1/requests/generic \
 **All endpoints use LangGraph state machine** for advanced conversation management with persistent thread management and context.
 
 **Supported Endpoints**:
-- `/api/v1/requests/slack` - Slack integration
 - `/api/v1/requests/web` - Web interface
 - `/api/v1/requests/cli` - CLI tool
 - `/api/v1/requests/tool` - Tool integration
@@ -278,56 +277,17 @@ curl -X POST https://your-request-manager/api/v1/requests/web \
   }'
 ```
 
-### POST /api/v1/requests/slack
-
-Handle Slack integration requests with signature verification.
-
-**Authentication**: Required (Slack Signature Verification)
-
-**Request Body**:
-```json
-{
-  "user_id": "string",
-  "content": "string",
-  "channel_id": "string",
-  "thread_id": "string" (optional),
-  "slack_user_id": "string",
-  "slack_team_id": "string"
-}
-```
-
-**Response**:
-```json
-{
-  "status": "success",
-  "request_id": "string",
-  "session_id": "string",
-  "message": "string"
-}
-```
-
-**Example**:
-```bash
-curl -X POST https://your-request-manager/api/v1/requests/slack \
-  -H "x-slack-signature: <signature>" \
-  -H "x-slack-request-timestamp: <timestamp>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_id": "U123456789",
-    "content": "Hello",
-    "channel_id": "C123456789",
-    "slack_user_id": "U123456789",
-    "slack_team_id": "T123456789"
-  }'
-```
-
 ### POST /api/v1/events/cloudevents
 
-Handle incoming CloudEvents (e.g., from agent responses).
+Handle incoming CloudEvents from Integration Dispatcher and Agent Service.
 
 **Authentication**: None
 
 **Request Body**: CloudEvent format
+
+**Supported Event Types**:
+- `com.self-service-agent.request.created` - Request events from Integration Dispatcher (Slack/Email)
+- `com.self-service-agent.agent.response-ready` - Agent response events from Agent Service
 
 **Response**:
 ```json
@@ -336,6 +296,8 @@ Handle incoming CloudEvents (e.g., from agent responses).
   "message": "CloudEvent processed"
 }
 ```
+
+**Note:** This endpoint handles internal service-to-service communication via CloudEvents. External clients should use `/api/v1/requests/*` endpoints instead.
 
 ### GET /health
 

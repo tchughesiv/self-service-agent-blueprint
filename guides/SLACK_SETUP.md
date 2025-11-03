@@ -193,7 +193,7 @@ The system includes a pre-configured Slack app manifest (`slack-app-manifest.jso
 There are different ways to test Slack integration depending on what you want to verify:
 
 1. **Integration Dispatcher `/deliver`** - Tests response delivery TO Slack
-2. **Request Manager `/api/v1/requests/slack`** - Tests internal request processing (used by Integration Dispatcher)
+2. **Request Manager `/api/v1/events/cloudevents`** - Tests CloudEvent handling (used by Integration Dispatcher via eventing)
 3. **Integration Dispatcher `/slack/events`** - Tests actual Slack event handling (real Slack flow)
 
 ### Test User Configuration

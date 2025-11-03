@@ -52,6 +52,17 @@ class CLIRequest(BaseRequest):
     command_context: Dict[str, Any] = Field(default_factory=dict)
 
 
+class EmailRequest(BaseRequest):
+    """Email-specific request schema."""
+
+    integration_type: IntegrationType = IntegrationType.EMAIL
+    email_from: Optional[str] = Field(None, max_length=255)
+    email_subject: Optional[str] = Field(None, max_length=500)
+    email_message_id: Optional[str] = Field(None, max_length=500)
+    email_in_reply_to: Optional[str] = Field(None, max_length=500)
+    email_references: Optional[str] = Field(None, max_length=500)
+
+
 class ToolRequest(BaseRequest):
     """Tool-generated request schema."""
 

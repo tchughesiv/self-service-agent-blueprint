@@ -1,9 +1,11 @@
 """Email integration handler."""
 
 import os
+import socket
+import ssl
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import Any, Dict
+from typing import Any, Callable, Dict, Optional, Union
 
 import aiosmtplib
 from shared_models import configure_logging
@@ -14,11 +16,95 @@ from .base import BaseIntegrationHandler, IntegrationResult
 logger = configure_logging("integration-dispatcher")
 
 
+def _validate_starttls_response(response: str) -> bool:
+    """Validate that STARTTLS is supported in the server response."""
+    return "STARTTLS" in response
+
+
+def _test_socket_connectivity(
+    host: str,
+    port: int,
+    use_ssl: bool = False,
+    server_hostname: Optional[str] = None,
+    command: Optional[bytes] = None,
+    response_validator: Optional[Callable[[str], bool]] = None,
+    protocol_name: str = "server",
+) -> bool:
+    """Test socket connectivity with optional SSL and command validation.
+
+    Args:
+        host: Server hostname
+        port: Server port
+        use_ssl: Whether to use SSL/TLS
+        server_hostname: Hostname for SSL certificate validation
+        command: Command to send after connection (e.g., b"EHLO health-check\r\n")
+        response_validator: Function to validate response (returns True if valid)
+        protocol_name: Name of protocol for logging (e.g., "SMTP", "IMAP")
+
+    Returns:
+        True if connectivity test passed, False otherwise
+    """
+    sock = None
+    ssl_sock = None
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(10)
+
+        # Connect to server
+        sock.connect((host, port))
+        logger.debug(f"TCP connection to {protocol_name} server established")
+
+        # Wrap with SSL if needed
+        active_sock: Union[socket.socket, ssl.SSLSocket]
+        if use_ssl:
+            context = ssl.create_default_context()
+            ssl_sock = context.wrap_socket(
+                sock, server_hostname=server_hostname or host
+            )
+            active_sock = ssl_sock
+        else:
+            active_sock = sock
+
+        # Read initial greeting
+        response = active_sock.recv(1024).decode("utf-8")
+        logger.debug(
+            f"{protocol_name} server greeting received", response=response[:100]
+        )
+
+        # Send command if provided
+        if command:
+            active_sock.send(command)
+            response = active_sock.recv(1024).decode("utf-8")
+            logger.debug("Command response received", response=response[:100])
+
+            # Validate response if validator provided
+            if response_validator:
+                if not response_validator(response):
+                    logger.warning(f"{protocol_name} response validation failed")
+                    return False
+
+        logger.debug(f"{protocol_name} connectivity test passed")
+        return True
+
+    except ssl.SSLError as e:
+        logger.error(f"{protocol_name} SSL connection failed", error=str(e))
+        return False
+    except Exception as e:
+        logger.error(f"{protocol_name} connection test failed", error=str(e))
+        return False
+    finally:
+        if ssl_sock:
+            ssl_sock.close()
+        if sock:
+            sock.close()
+
+
 class EmailIntegrationHandler(BaseIntegrationHandler):
     """Handler for email delivery."""
 
     def __init__(self) -> None:
         super().__init__()
+        # SMTP configuration (sending)
         self.smtp_host = os.getenv("SMTP_HOST", "localhost")
         self.smtp_port = int(os.getenv("SMTP_PORT", "587"))
         self.smtp_username = os.getenv("SMTP_USERNAME")
@@ -26,6 +112,15 @@ class EmailIntegrationHandler(BaseIntegrationHandler):
         self.smtp_use_tls = os.getenv("SMTP_USE_TLS", "true").lower() == "true"
         self.from_email = os.getenv("FROM_EMAIL", "noreply@selfservice.local")
         self.from_name = os.getenv("FROM_NAME", "Self-Service Agent")
+
+        # IMAP configuration (receiving) - reuses SMTP credentials by default
+        self.imap_host = os.getenv("IMAP_HOST")
+        self.imap_port = int(os.getenv("IMAP_PORT", "993"))
+        self.imap_username = os.getenv("IMAP_USERNAME") or self.smtp_username
+        self.imap_password = os.getenv("IMAP_PASSWORD") or self.smtp_password
+        self.imap_use_ssl = os.getenv("IMAP_USE_SSL", "true").lower() == "true"
+        self.imap_mailbox = os.getenv("IMAP_MAILBOX", "INBOX")
+        self.imap_poll_interval = int(os.getenv("IMAP_POLL_INTERVAL", "60"))
 
     async def deliver(
         self,
@@ -143,7 +238,11 @@ class EmailIntegrationHandler(BaseIntegrationHandler):
         return True
 
     async def health_check(self) -> bool:
-        """Check SMTP connectivity without sending emails."""
+        """Check email integration health (SMTP sending by default)."""
+        return await self.health_check_sending()
+
+    async def health_check_sending(self) -> bool:
+        """Check email sending capability (SMTP)."""
         # Return False if no SMTP configuration is provided
         if not self.smtp_username or not self.smtp_password:
             logger.debug(
@@ -161,97 +260,100 @@ class EmailIntegrationHandler(BaseIntegrationHandler):
         )
 
         try:
-            # Test SMTP connectivity and authentication without sending emails
+            # Test SMTP connectivity without sending emails
             # This is much less intrusive and won't hit sending limits
 
-            # Handle different SMTP configurations
+            # Determine SSL usage based on port
+            use_ssl = self.smtp_port == 465
+
+            # For port 587 with STARTTLS, validate that STARTTLS is available
             if self.smtp_port == 587 and self.smtp_use_tls:
-                # Port 587 with STARTTLS - test connection without sending emails
-                # Use a simple socket connection test to avoid Gmail sending limits
-                import socket
-
                 logger.debug("Testing SMTP connectivity on port 587 (STARTTLS)")
-
-                # Test basic TCP connectivity first
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(10)  # 10 second timeout
-
-                try:
-                    # Connect to SMTP server
-                    sock.connect((self.smtp_host, int(self.smtp_port)))
-                    logger.debug("TCP connection to SMTP server established")
-
-                    # Read the initial SMTP greeting
-                    response = sock.recv(1024).decode("utf-8")
-                    logger.debug(
-                        "SMTP server greeting received", response=response[:100]
-                    )
-
-                    # Send EHLO command
-                    sock.send(b"EHLO health-check\r\n")
-                    response = sock.recv(1024).decode("utf-8")
-                    logger.debug("EHLO response received", response=response[:100])
-
-                    # Test STARTTLS capability
-                    if "STARTTLS" in response:
-                        logger.debug("STARTTLS capability confirmed")
-                        sock.close()
-                        logger.debug(
-                            "Email integration health check passed (connectivity verified)"
-                        )
-                        return True
-                    else:
-                        logger.warning("STARTTLS not supported by server")
-                        sock.close()
-                        return False
-
-                except Exception as e:
-                    logger.error("Socket connection test failed", error=str(e))
-                    sock.close()
-                    return False
-            else:
-                # Port 465 (SMTPS) or other configurations - test connection without authentication
-                import socket
-
-                logger.debug(
-                    "Testing SMTP connectivity on port 465 (SMTPS) or other configuration"
+                return _test_socket_connectivity(
+                    host=self.smtp_host,
+                    port=int(self.smtp_port),
+                    use_ssl=False,
+                    command=b"EHLO health-check\r\n",
+                    response_validator=_validate_starttls_response,
+                    protocol_name="SMTP",
                 )
-
-                # Test basic TCP connectivity first
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(10)  # 10 second timeout
-
-                try:
-                    # Connect to SMTP server
-                    sock.connect((self.smtp_host, int(self.smtp_port)))
-                    logger.debug("TCP connection to SMTP server established")
-
-                    # Read the initial SMTP greeting
-                    response = sock.recv(1024).decode("utf-8")
-                    logger.debug(
-                        "SMTP server greeting received", response=response[:100]
-                    )
-
-                    # Send EHLO command
-                    sock.send(b"EHLO health-check\r\n")
-                    response = sock.recv(1024).decode("utf-8")
-                    logger.debug("EHLO response received", response=response[:100])
-
-                    # Close the connection
-                    sock.close()
-                    logger.info(
-                        "Email integration health check passed (connectivity verified)"
-                    )
-                    return True
-
-                except Exception as e:
-                    logger.error("Socket connection test failed", error=str(e))
-                    sock.close()
-                    return False
+            else:
+                # Port 465 (SMTPS) or other configurations
+                logger.debug(
+                    f"Testing SMTP connectivity on port {self.smtp_port} "
+                    f"({'SMTPS' if use_ssl else 'plain'})"
+                )
+                return _test_socket_connectivity(
+                    host=self.smtp_host,
+                    port=int(self.smtp_port),
+                    use_ssl=use_ssl,
+                    server_hostname=self.smtp_host,
+                    command=b"EHLO health-check\r\n",
+                    protocol_name="SMTP",
+                )
 
         except Exception as e:
             logger.error(
                 "Email integration health check failed",
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+            return False
+
+    async def health_check_receiving(self) -> bool:
+        """Check email receiving capability (IMAP).
+
+        Similar to SMTP health check, tests IMAP connectivity without
+        actually processing emails. Uses lightweight connection test.
+        """
+        # Return False if no IMAP configuration is provided
+        if not self.imap_username or not self.imap_password:
+            logger.debug("IMAP not available - no IMAP credentials configured")
+            return False
+
+        if not self.imap_host:
+            logger.debug("IMAP not available - no IMAP host configured")
+            return False
+
+        logger.debug(
+            "IMAP health check started (connectivity only)",
+            imap_host=self.imap_host,
+            imap_port=self.imap_port,
+            imap_use_ssl=self.imap_use_ssl,
+            has_username=bool(self.imap_username),
+            has_password=bool(self.imap_password),
+        )
+
+        try:
+            # Test IMAP connectivity without processing emails
+            # Similar lightweight approach to SMTP health check
+
+            if self.imap_use_ssl:
+                # Port 993 (IMAPS) - SSL/TLS from the start
+                logger.debug("Testing IMAP connectivity on port 993 (IMAPS)")
+                return _test_socket_connectivity(
+                    host=self.imap_host,
+                    port=int(self.imap_port),
+                    use_ssl=True,
+                    server_hostname=self.imap_host,
+                    command=b"a1 CAPABILITY\r\n",
+                    protocol_name="IMAP",
+                )
+            else:
+                # Port 143 (STARTTLS) - plain connection first, then upgrade
+                logger.debug("Testing IMAP connectivity on port 143 (STARTTLS)")
+                return _test_socket_connectivity(
+                    host=self.imap_host,
+                    port=int(self.imap_port),
+                    use_ssl=False,
+                    command=b"a1 CAPABILITY\r\n",
+                    response_validator=_validate_starttls_response,
+                    protocol_name="IMAP",
+                )
+
+        except Exception as e:
+            logger.error(
+                "IMAP health check failed",
                 error=str(e),
                 error_type=type(e).__name__,
             )

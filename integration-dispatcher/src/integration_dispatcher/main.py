@@ -36,6 +36,7 @@ from tracing_config.auto_tracing import run as auto_tracing_run
 from tracing_config.auto_tracing import tracingIsActive
 
 from . import __version__
+from .email_service import EmailService
 from .integrations.base import BaseIntegrationHandler
 from .integrations.defaults import IntegrationDefaultsService
 from .integrations.email import EmailIntegrationHandler
@@ -141,6 +142,16 @@ class IntegrationDispatcher:
                     "No slack_user_id found in template variables",
                     user_id=user_id,
                     template_variables=request.template_variables,
+                )
+
+            # Look for email address in template variables (from integration context)
+            email_from = request.template_variables.get("email_from")
+            if email_from:
+                context["email_from"] = email_from
+                logger.info(
+                    "Found email address in template variables",
+                    user_id=user_id,
+                    email_from=email_from,
                 )
 
         # Get smart defaults for all enabled integrations (no database persistence)
@@ -385,6 +396,16 @@ dispatcher = IntegrationDispatcher()
 
 async def _integration_dispatcher_startup() -> None:
     """Custom startup logic for Integration Dispatcher."""
+    # Validate required configuration
+    broker_url = os.getenv("BROKER_URL")
+    if not broker_url:
+        error_msg = (
+            "BROKER_URL is required but not configured. "
+            "Integration Dispatcher cannot forward incoming requests to Request Manager without it."
+        )
+        logger.error(error_msg)
+        raise ValueError(error_msg)
+
     # Log environment variables (without sensitive data)
     logger.info(
         "Environment configuration",
@@ -394,8 +415,10 @@ async def _integration_dispatcher_startup() -> None:
         smtp_host=os.getenv("SMTP_HOST", "not_set"),
         smtp_port=os.getenv("SMTP_PORT", "not_set"),
         smtp_username=os.getenv("SMTP_USERNAME", "not_set"),
+        imap_host=os.getenv("IMAP_HOST", "not_set"),
+        imap_port=os.getenv("IMAP_PORT", "not_set"),
         slack_bot_token_configured=bool(os.getenv("SLACK_BOT_TOKEN")),
-        broker_url=os.getenv("BROKER_URL", "not_set"),
+        broker_url=broker_url,
     )
 
     # Initialize integration handlers
@@ -415,6 +438,20 @@ async def _integration_dispatcher_startup() -> None:
     except Exception as e:
         logger.error("Failed to initialize integration defaults", error=str(e))
         raise
+
+    # Start IMAP email polling if configured
+    if os.getenv("IMAP_HOST") and os.getenv("SMTP_USERNAME"):
+        logger.info("Starting IMAP email polling")
+        import asyncio
+
+        # Start polling in background task
+        asyncio.create_task(email_service.start_polling())
+    else:
+        logger.info(
+            "IMAP polling not started - missing configuration",
+            has_imap_host=bool(os.getenv("IMAP_HOST")),
+            has_smtp_username=bool(os.getenv("SMTP_USERNAME")),
+        )
 
     # Database migration is sufficient for startup validation
     logger.info("Integration Dispatcher startup validation completed")
@@ -442,6 +479,7 @@ app = FastAPI(
 
 # Initialize services
 slack_service = SlackService()
+email_service = EmailService()
 integration_defaults_service = IntegrationDefaultsService()
 
 
@@ -479,13 +517,32 @@ async def _integration_health_logic(db: AsyncSession) -> Dict[str, Any]:
         integration_handlers=integration_handlers,
     )
 
+    # Add granular email status
+    email_capabilities: Dict[str, bool] = {}
+    if IntegrationType.EMAIL in dispatcher.handlers:
+        email_handler = dispatcher.handlers[IntegrationType.EMAIL]
+        # Type check to ensure it's EmailIntegrationHandler
+        from .integrations.email import EmailIntegrationHandler
+
+        if isinstance(email_handler, EmailIntegrationHandler):
+            email_capabilities = {
+                "sending": await email_handler.health_check_sending(),
+                "receiving": await email_handler.health_check_receiving(),
+            }
+
+    services_dict: Dict[str, Any] = {
+        "database": "connected" if result.database_connected else "disconnected",
+        "integrations": f"{len(result.integrations_available)}/{len(dispatcher.handlers)} available",
+    }
+
+    # Add email capabilities if available
+    if email_capabilities:
+        services_dict["email_capabilities"] = email_capabilities
+
     return {
         "database_connected": result.database_connected,
         "integrations_available": result.integrations_available,
-        "services": {
-            "database": "connected" if result.database_connected else "disconnected",
-            "integrations": f"{len(result.integrations_available)}/{len(dispatcher.handlers)} available",
-        },
+        "services": services_dict,
     }
 
 

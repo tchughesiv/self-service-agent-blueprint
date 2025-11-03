@@ -85,7 +85,9 @@ class HealthCheck(BaseModel):
     status: str
     database_connected: bool
     integrations_available: List[str]
-    services: Dict[str, str]
+    services: Dict[
+        str, Any
+    ]  # Changed to Any to support nested objects like email_capabilities
 
 
 # ErrorResponse is now imported from shared_models.models

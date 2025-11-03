@@ -208,20 +208,28 @@ async def initialize_default_subscriptions() -> None:
 
         # Default subscriptions that should always exist
         default_subscriptions: list[dict[str, Any]] = [
+            # Integration Dispatcher → Request Manager (for Slack/Email requests)
+            {
+                "event_type": "com.self-service-agent.request.created",
+                "subscriber_url": f"http://{service_name}-request-manager.{namespace}.svc.cluster.local/api/v1/events/cloudevents",
+                "filter_attributes": {"source": "integration-dispatcher"},
+            },
+            # Request Manager → Agent Service (when using eventing mode)
             {
                 "event_type": "com.self-service-agent.request.created",
                 "subscriber_url": f"http://{service_name}-agent-service.{namespace}.svc.cluster.local/api/v1/events/cloudevents",
-                "filter_attributes": {},
+                "filter_attributes": {"source": "request-manager"},
+            },
+            # Request Manager → Agent Service (for routing requests)
+            {
+                "event_type": "com.self-service-agent.request.created",
+                "subscriber_url": f"http://{service_name}-agent-service.{namespace}.svc.cluster.local/api/v1/events/cloudevents",
+                "filter_attributes": {"requiresrouting": "true"},
             },
             {
                 "event_type": "com.self-service-agent.agent.response-ready",
                 "subscriber_url": f"http://{service_name}-integration-dispatcher.{namespace}.svc.cluster.local",
                 "filter_attributes": {"source": "request-manager"},
-            },
-            {
-                "event_type": "com.self-service-agent.request.created",
-                "subscriber_url": f"http://{service_name}-agent-service.{namespace}.svc.cluster.local/api/v1/events/cloudevents",
-                "filter_attributes": {"requiresrouting": "true"},
             },
             {
                 "event_type": "com.self-service-agent.agent.response-ready",

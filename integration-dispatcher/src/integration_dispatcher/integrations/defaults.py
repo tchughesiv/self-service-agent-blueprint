@@ -8,7 +8,8 @@ from shared_models import configure_logging
 from shared_models.models import IntegrationDefaultConfig, IntegrationType
 from slack_sdk.errors import SlackApiError
 from slack_sdk.web.async_client import AsyncWebClient
-from sqlalchemy import delete, select
+from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = configure_logging("integration-dispatcher")
@@ -125,6 +126,46 @@ class IntegrationDefaultsService:
                     attempts=mapping.validation_attempts,
                 )
                 return False
+
+    async def _check_email_exists_as_user(
+        self, email_address: str, db: AsyncSession
+    ) -> bool:
+        """Check if an email address exists as a user (has any integration mapping)."""
+        try:
+            from shared_models.models import UserIntegrationMapping
+            from sqlalchemy import select
+
+            # Check if email exists in any integration mapping
+            # Use scalars().first() instead of scalar_one_or_none() since there can be multiple mappings
+            # (e.g., both SLACK and EMAIL for the same email)
+            stmt = select(UserIntegrationMapping).where(
+                UserIntegrationMapping.user_email == email_address
+            )
+            result = await db.execute(stmt)
+            mapping = result.scalars().first()
+
+            if mapping:
+                logger.info(
+                    "Email exists as user",
+                    email_address=email_address,
+                    integration_type=mapping.integration_type.value,
+                )
+                return True
+            else:
+                logger.debug(
+                    "Email not found as user",
+                    email_address=email_address,
+                )
+                return False
+
+        except Exception as e:
+            logger.error(
+                "Error checking if email exists as user",
+                email_address=email_address,
+                error=str(e),
+            )
+            # On error, be conservative and return False
+            return False
 
     async def _get_validated_slack_user_id(self, user_email: str) -> Optional[str]:
         """Get validated Slack user ID from stored mapping."""
@@ -423,14 +464,16 @@ class IntegrationDefaultsService:
         logger.info("Integration defaults initialized in database")
 
     async def _refresh_default_configs(self, db: AsyncSession) -> None:
-        """Refresh default configs in database based on current health status."""
-        # Clear existing defaults
-        await db.execute(delete(IntegrationDefaultConfig))
+        """Refresh default configs in database based on current health status.
 
+        Uses upsert pattern (INSERT ... ON CONFLICT DO UPDATE) to make this idempotent
+        and safe for concurrent execution by multiple workers.
+        """
         # Check current health status
         health_status = await self._check_integration_health()
 
-        # Insert new defaults
+        # Prepare upsert values for all defaults
+        upsert_values = []
         for integration_type, config in self.default_integrations.items():
             # Check if enabled environment variable allows integration
             enabled_env = os.getenv(f"INTEGRATION_DEFAULTS_{integration_type}_ENABLED")
@@ -452,17 +495,34 @@ class IntegrationDefaultsService:
                 # Use health check result only
                 enabled = health_check_passed
 
-            default_config = IntegrationDefaultConfig(
-                integration_type=IntegrationType(integration_type),
-                enabled=enabled,
-                priority=config["priority"],
-                retry_count=config["retry_count"],
-                retry_delay_seconds=config["retry_delay_seconds"],
-                config=config["config"],
-                created_by="system",
+            upsert_values.append(
+                {
+                    "integration_type": IntegrationType(integration_type),
+                    "enabled": enabled,
+                    "priority": config["priority"],
+                    "retry_count": config["retry_count"],
+                    "retry_delay_seconds": config["retry_delay_seconds"],
+                    "config": config["config"],
+                    "created_by": "system",
+                }
             )
-            db.add(default_config)
 
+        # Use upsert to insert or update in one atomic operation
+        # This prevents race conditions when multiple workers start simultaneously
+        stmt = insert(IntegrationDefaultConfig).values(upsert_values)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["integration_type"],
+            set_={
+                "enabled": stmt.excluded.enabled,
+                "priority": stmt.excluded.priority,
+                "retry_count": stmt.excluded.retry_count,
+                "retry_delay_seconds": stmt.excluded.retry_delay_seconds,
+                "config": stmt.excluded.config,
+                "updated_at": datetime.now(timezone.utc),
+            },
+        )
+
+        await db.execute(stmt)
         await db.commit()
         logger.info(
             "Integration defaults refreshed in database", health_status=health_status
@@ -624,6 +684,76 @@ class IntegrationDefaultsService:
                         user_id=user_id,
                         channel_id=channel_id,
                         config=config["config"],
+                    )
+
+            # Apply context-specific configuration for EMAIL
+            if default_config.integration_type == IntegrationType.EMAIL:
+                # For EMAIL, only enable if the email address exists as a user (has a mapping)
+                email_address = None
+
+                if context:
+                    email_address = context.get("email_from")
+                    if email_address:
+                        logger.info(
+                            "Found email address in context",
+                            user_id=user_id,
+                            email_address=email_address,
+                        )
+
+                # If no context email, check if user_id itself is an email address
+                if not email_address and "@" in user_id:
+                    email_address = user_id
+                    logger.info(
+                        "Using user_id as email address",
+                        user_id=user_id,
+                        email_address=email_address,
+                    )
+
+                # Check if email exists as a user (has any integration mapping)
+                if email_address:
+                    email_exists = await self._check_email_exists_as_user(
+                        email_address, db
+                    )
+                    if email_exists:
+                        if "config" not in config:
+                            config["config"] = {}
+                        # Create a mutable copy to update (similar to Slack config update)
+                        email_config = (
+                            dict(config["config"])
+                            if isinstance(config["config"], dict)
+                            else {}
+                        )
+                        email_config["email_address"] = email_address
+                        config["config"] = email_config
+                        logger.info(
+                            "Email exists as user - enabled EMAIL integration",
+                            user_id=user_id,
+                            email_address=email_address,
+                            config=config["config"],
+                        )
+                    else:
+                        # Email not found as a user - disable EMAIL integration for this request
+                        logger.warning(
+                            "Email does not exist as user, disabling EMAIL integration",
+                            user_id=user_id,
+                            email_address=email_address,
+                        )
+                        config["enabled"] = False
+                        logger.info(
+                            "Disabled EMAIL integration - user not found",
+                            user_id=user_id,
+                            email_address=email_address,
+                        )
+                else:
+                    # No email address available - disable EMAIL integration for this request
+                    logger.warning(
+                        "No email address available, disabling EMAIL integration",
+                        user_id=user_id,
+                    )
+                    config["enabled"] = False
+                    logger.info(
+                        "Disabled EMAIL integration due to missing email address",
+                        user_id=user_id,
                     )
 
             # Only include enabled integrations
@@ -812,6 +942,76 @@ class IntegrationDefaultsService:
                         channel_id=channel_id,
                         slack_user_id=slack_user_id,
                         config=config["config"],
+                    )
+
+            # Apply context-specific configuration for EMAIL
+            if default_config.integration_type == IntegrationType.EMAIL:
+                # For EMAIL, only enable if the email address exists as a user (has a mapping)
+                email_address = None
+
+                if context:
+                    email_address = context.get("email_from")
+                    if email_address:
+                        logger.info(
+                            "Found email address in context",
+                            user_id=user_id,
+                            email_address=email_address,
+                        )
+
+                # If no context email, check if user_id itself is an email address
+                if not email_address and "@" in user_id:
+                    email_address = user_id
+                    logger.info(
+                        "Using user_id as email address",
+                        user_id=user_id,
+                        email_address=email_address,
+                    )
+
+                # Check if email exists as a user (has any integration mapping)
+                if email_address:
+                    email_exists = await self._check_email_exists_as_user(
+                        email_address, db
+                    )
+                    if email_exists:
+                        if "config" not in config:
+                            config["config"] = {}
+                        # Create a mutable copy to update (similar to Slack config update)
+                        email_config = (
+                            dict(config["config"])
+                            if isinstance(config["config"], dict)
+                            else {}
+                        )
+                        email_config["email_address"] = email_address
+                        config["config"] = email_config
+                        logger.info(
+                            "Email exists as user - enabled EMAIL integration",
+                            user_id=user_id,
+                            email_address=email_address,
+                            config=config["config"],
+                        )
+                    else:
+                        # Email not found as a user - disable EMAIL integration for this request
+                        logger.warning(
+                            "Email does not exist as user, disabling EMAIL integration",
+                            user_id=user_id,
+                            email_address=email_address,
+                        )
+                        config["enabled"] = False
+                        logger.info(
+                            "Disabled EMAIL integration - user not found",
+                            user_id=user_id,
+                            email_address=email_address,
+                        )
+                else:
+                    # No email address available - disable EMAIL integration for this request
+                    logger.warning(
+                        "No email address available, disabling EMAIL integration",
+                        user_id=user_id,
+                    )
+                    config["enabled"] = False
+                    logger.info(
+                        "Disabled EMAIL integration due to missing email address",
+                        user_id=user_id,
                     )
 
             # Only include enabled integrations
