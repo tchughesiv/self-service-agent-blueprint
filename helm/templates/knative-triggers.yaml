@@ -1,5 +1,28 @@
 {{- if and .Values.requestManagement.enabled .Values.requestManagement.knative.eventing.enabled }}
 ---
+# Trigger for Integration Dispatcher to send requests to Request Manager
+apiVersion: eventing.knative.dev/v1
+kind: Trigger
+metadata:
+  name: {{ include "self-service-agent.fullname" . }}-integration-dispatcher-to-request-manager-trigger
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "self-service-agent.labels" . | nindent 4 }}
+spec:
+  broker: {{ .Values.requestManagement.knative.broker.name }}
+  filter:
+    attributes:
+      type: com.self-service-agent.request.created
+      source: integration-dispatcher
+  subscriber:
+    uri: http://{{ include "self-service-agent.fullname" . }}-request-manager.{{ .Release.Namespace }}.svc.cluster.local/api/v1/events/cloudevents
+  delivery:
+    retry: 3
+    backoffPolicy: exponential
+    backoffDelay: PT1S
+    # Dead letter handling is done automatically by Kafka Broker
+---
+# Trigger for Request Manager to forward requests to Agent Service (when using eventing mode)
 apiVersion: eventing.knative.dev/v1
 kind: Trigger
 metadata:
@@ -12,6 +35,7 @@ spec:
   filter:
     attributes:
       type: com.self-service-agent.request.created
+      source: request-manager
   subscriber:
     uri: http://{{ include "self-service-agent.fullname" . }}-agent-service.{{ .Release.Namespace }}.svc.cluster.local/api/v1/events/cloudevents
   delivery:

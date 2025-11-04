@@ -876,7 +876,7 @@ helm-install-prod: namespace helm-depend
 		echo "Attempt $$i of 3..."; \
 		if $(MAKE) _helm-install-prod-single; then \
 			echo "Installation successful, verifying triggers..."; \
-			EXPECTED_TRIGGERS=10; \
+			EXPECTED_TRIGGERS=8; \
 			ACTUAL_TRIGGERS=$$(kubectl get triggers -n $(NAMESPACE) --no-headers 2>/dev/null | wc -l); \
 			if [ "$$ACTUAL_TRIGGERS" -eq "$$EXPECTED_TRIGGERS" ]; then \
 				echo "✅ All $$EXPECTED_TRIGGERS triggers deployed successfully"; \
@@ -918,7 +918,7 @@ print-urls:
 .PHONY: verify-triggers
 verify-triggers:
 	@echo "Verifying all triggers are deployed..."
-	@EXPECTED_TRIGGERS=10; \
+	@EXPECTED_TRIGGERS=8; \
 	ACTUAL_TRIGGERS=$$(kubectl get triggers -n $(NAMESPACE) --no-headers 2>/dev/null | wc -l); \
 	if [ "$$ACTUAL_TRIGGERS" -eq "$$EXPECTED_TRIGGERS" ]; then \
 		echo "✅ All $$EXPECTED_TRIGGERS triggers deployed successfully"; \
@@ -930,16 +930,14 @@ verify-triggers:
 		kubectl get triggers -n $(NAMESPACE) --no-headers 2>/dev/null | awk '{print "  ✅ " $$1}' || echo "  (none)"; \
 		echo ""; \
 		echo "Expected triggers:"; \
+		echo "  ✅ self-service-agent-integration-dispatcher-to-request-manager-trigger"; \
 		echo "  ✅ self-service-agent-request-created-trigger"; \
 		echo "  ✅ self-service-agent-agent-response-trigger"; \
 		echo "  ✅ self-service-agent-routing-trigger"; \
 		echo "  ✅ self-service-agent-agent-response-to-request-manager-trigger"; \
 		echo "  ✅ self-service-agent-request-notification-trigger"; \
 		echo "  ✅ self-service-agent-processing-notification-trigger"; \
-		echo "  ❌ self-service-agent-database-update-trigger"; \
-		echo "  ❌ self-service-agent-responses-request-trigger"; \
-		echo "  ❌ self-service-agent-responses-response-to-request-manager-trigger"; \
-		echo "  ❌ self-service-agent-responses-response-to-integration-dispatcher-trigger"; \
+		echo "  ✅ self-service-agent-database-update-trigger"; \
 		echo ""; \
 		echo "To fix missing triggers, run:"; \
 		echo "  make helm-install-prod"; \

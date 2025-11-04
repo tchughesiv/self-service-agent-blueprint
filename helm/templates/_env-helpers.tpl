@@ -85,12 +85,6 @@ Generate Request Manager specific environment variables
 - name: EVENT_BASE_DELAY
   value: "1.0"
 {{/* Integration API Keys */}}
-- name: SLACK_SIGNING_SECRET
-  valueFrom:
-    secretKeyRef:
-      name: slack-signing-secret
-      key: signing-secret
-      optional: true
 - name: SNOW_API_KEY
   valueFrom:
     secretKeyRef:
@@ -268,6 +262,61 @@ Generate Integration Dispatcher specific environment variables
     secretKeyRef:
       name: {{ include "self-service-agent.fullname" . }}-integration-secrets
       key: from-name
+      optional: true
+{{/* IMAP Configuration (receiving emails) - reuses SMTP credentials if not set */}}
+- name: IMAP_HOST
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "self-service-agent.fullname" . }}-integration-secrets
+      key: imap-host
+      optional: true
+- name: IMAP_PORT
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "self-service-agent.fullname" . }}-integration-secrets
+      key: imap-port
+      optional: true
+- name: IMAP_USERNAME
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "self-service-agent.fullname" . }}-integration-secrets
+      key: imap-username
+      optional: true
+- name: IMAP_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "self-service-agent.fullname" . }}-integration-secrets
+      key: imap-password
+      optional: true
+- name: IMAP_USE_SSL
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "self-service-agent.fullname" . }}-integration-secrets
+      key: imap-use-ssl
+      optional: true
+- name: IMAP_MAILBOX
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "self-service-agent.fullname" . }}-integration-secrets
+      key: imap-mailbox
+      optional: true
+- name: IMAP_POLL_INTERVAL
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "self-service-agent.fullname" . }}-integration-secrets
+      key: imap-poll-interval
+      optional: true
+- name: IMAP_LEASE_DURATION
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "self-service-agent.fullname" . }}-integration-secrets
+      key: imap-lease-duration
+      optional: true
+- name: IMAP_LEASE_RENEWAL_INTERVAL
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "self-service-agent.fullname" . }}-integration-secrets
+      key: imap-lease-renewal-interval
       optional: true
 {{/* Test Integration Configuration */}}
 - name: TEST_INTEGRATION_ENABLED

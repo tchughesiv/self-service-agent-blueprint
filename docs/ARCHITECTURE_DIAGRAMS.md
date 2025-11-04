@@ -246,7 +246,7 @@ The **Integration Dispatcher** is primarily responsible for **outgoing response 
 **4. Slack Event Processing (Incoming Only)**
 - **Event handling**: Processes Slack events, mentions, commands
 - **Signature verification**: Validates Slack request authenticity
-- **Request forwarding**: Forwards Slack requests to Request Manager
+- **Request forwarding**: Forwards Slack requests to Request Manager via CloudEvents
 - **Interactive components**: Handles Slack buttons, modals, etc.
 
 ### **Key Architecture Pattern:**

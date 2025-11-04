@@ -76,7 +76,7 @@ The system uses LangGraph-based state machine conversations for advanced convers
 
 ### Bidirectional Integrations (Request + Response Delivery)
 - **Slack**: Receives requests via Integration Dispatcher (`/slack/events`, `/slack/interactive`, `/slack/commands`), responses delivered via Slack API
-
+- **Email**: Receives requests via IMAP polling in Integration Dispatcher, responses delivered via SMTP
 ### Request-Only Integrations (Direct Response)
 - **Web**: Receives requests directly via Request Manager, responses returned directly
 - **CLI**: Receives requests directly via Request Manager, responses handled synchronously by CLI tool
@@ -84,7 +84,6 @@ The system uses LangGraph-based state machine conversations for advanced convers
 - **Generic**: Receives requests directly via Request Manager, responses returned directly (synchronous)
 
 ### Response-Only Integrations (No Incoming Requests)
-- **Email**: Only delivers responses via SMTP (no incoming email requests)
 - **SMS**: Only delivers responses via SMS (no incoming SMS requests)
 - **Webhook**: Only delivers responses via HTTP POST (no incoming webhook requests)
 - **Test**: Only delivers responses for testing (no incoming test requests)
@@ -184,21 +183,16 @@ Content-Type: application/json
 ```
 
 #### Slack Requests
-```http
-POST /api/v1/requests/slack
-x-slack-signature: <signature>
-x-slack-request-timestamp: <timestamp>
-Content-Type: application/json
 
-{
-  "user_id": "string",
-  "content": "string",
-  "channel_id": "string",
-  "thread_id": "string" (optional),
-  "slack_user_id": "string",
-  "slack_team_id": "string"
-}
-```
+Slack requests are handled via CloudEvents from Integration Dispatcher to Request Manager. Slack events are received by Integration Dispatcher at `/slack/events` and forwarded to Request Manager via CloudEvents.
+
+**Flow:**
+1. Slack → Integration Dispatcher `/slack/events` (external webhook)
+2. Integration Dispatcher → CloudEvent `REQUEST_CREATED` → Request Manager `/api/v1/events/cloudevents`
+3. Request Manager processes and routes to Agent Service
+4. Responses flow back through Integration Dispatcher to Slack
+
+**Note:** There is no direct HTTP endpoint for Slack requests in Request Manager. They are handled internally via CloudEvents.
 
 ### Integration Management Endpoints
 
@@ -500,14 +494,26 @@ curl -X POST https://your-request-manager/api/v1/requests/tool \
   -d '{"user_id": "user", "content": "Tool request", "tool_id": "snow-integration"}'
 ```
 
-### Slack Signature Verification
+### Slack Integration Flow
+
+Slack events are received by Integration Dispatcher and forwarded to Request Manager via CloudEvents:
+
+**External (Slack → Integration Dispatcher):**
 ```bash
-curl -X POST https://your-request-manager/api/v1/requests/slack \
+# Slack sends webhooks to Integration Dispatcher
+curl -X POST https://your-integration-dispatcher/slack/events \
   -H "x-slack-signature: <signature>" \
   -H "x-slack-request-timestamp: <timestamp>" \
   -H "Content-Type: application/json" \
-  -d '{"user_id": "U123456789", "content": "Hello", "channel_id": "C123456789", "slack_user_id": "U123456789", "slack_team_id": "T123456789"}'
+  -d '{"type": "event_callback", "event": {...}}'
 ```
+
+**Internal (Integration Dispatcher → Request Manager):**
+- Integration Dispatcher verifies Slack signature
+- Sends CloudEvent `REQUEST_CREATED` to broker
+- Request Manager receives via `/api/v1/events/cloudevents`
+
+**Note:** Slack requests are not directly accessible via Request Manager HTTP endpoints. They flow through Integration Dispatcher using CloudEvents.
 
 ## Examples
 

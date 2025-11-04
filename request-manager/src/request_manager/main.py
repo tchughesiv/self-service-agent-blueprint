@@ -24,7 +24,6 @@ from shared_models import (
     create_shared_lifespan,
     get_db_session_dependency,
     parse_cloudevent_from_request,
-    verify_slack_signature,
 )
 from shared_models.models import ErrorResponse, ProcessedEvent
 from sqlalchemy import select
@@ -45,6 +44,7 @@ from .response_handler import UnifiedResponseHandler
 from .schemas import (
     BaseRequest,
     CLIRequest,
+    EmailRequest,
     HealthCheck,
     SlackRequest,
     ToolRequest,
@@ -102,7 +102,6 @@ security = HTTPBearer(auto_error=False)
 unified_processor: Optional[UnifiedRequestProcessor] = None
 
 # Security configuration
-SLACK_SIGNING_SECRET = os.getenv("SLACK_SIGNING_SECRET", "")
 API_KEYS = {
     "snow-integration": os.getenv("SNOW_API_KEY", ""),
     "hr-system": os.getenv("HR_API_KEY", ""),
@@ -321,39 +320,6 @@ async def detailed_health_check(
     )
 
 
-@app.post("/api/v1/requests/slack")
-async def handle_slack_request(
-    slack_request: SlackRequest,
-    request: Request,
-    db: AsyncSession = Depends(get_db_session_dependency),
-    x_slack_signature: Optional[str] = Header(None, alias="x-slack-signature"),
-    x_slack_request_timestamp: Optional[str] = Header(
-        None, alias="x-slack-request-timestamp"
-    ),
-) -> Dict[str, Any]:
-    """Handle Slack integration requests with signature verification.
-
-    This endpoint is used internally by the Integration Dispatcher to process
-    Slack requests. It is NOT called directly by Slack - Slack sends events
-    to the Integration Dispatcher, which then forwards them here via
-    RequestManagerClient.send_slack_request().
-
-    Flow: Slack → Integration Dispatcher → Request Manager (this endpoint)
-    """
-    # Verify Slack signature if configured
-    if SLACK_SIGNING_SECRET and x_slack_signature and x_slack_request_timestamp:
-        body = await request.body()
-        if not verify_slack_signature(
-            body, x_slack_request_timestamp, x_slack_signature, SLACK_SIGNING_SECRET
-        ):
-            logger.warning("Invalid Slack signature", user_id=slack_request.user_id)
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid signature"
-            )
-
-    return await _process_request_adaptive(slack_request, db)
-
-
 @app.post("/api/v1/requests/web")
 async def handle_web_request(
     web_request: WebRequest,
@@ -487,6 +453,10 @@ async def handle_cloudevent(
                     "event_id": event_id,
                 }
 
+        # Handle request created events (from integration dispatcher)
+        if event_type == EventTypes.REQUEST_CREATED:
+            return await _handle_request_created_event_from_data(event_data, db)
+
         # Handle agent response events
         if event_type == EventTypes.AGENT_RESPONSE_READY:
             # Use the already parsed event data from shared utility
@@ -508,7 +478,9 @@ async def handle_cloudevent(
 
 
 async def _process_request_adaptive(
-    request: Union[BaseRequest, SlackRequest, WebRequest, CLIRequest, ToolRequest],
+    request: Union[
+        BaseRequest, SlackRequest, WebRequest, CLIRequest, EmailRequest, ToolRequest
+    ],
     db: AsyncSession,
     timeout: int = 120,
 ) -> Dict[str, Any]:
@@ -533,6 +505,124 @@ async def _process_request_adaptive(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to process request",
+        )
+
+
+async def _handle_request_created_event_from_data(
+    event_data: Dict[str, Any], db: AsyncSession
+) -> Dict[str, Any]:
+    """Handle request created CloudEvent from integration dispatcher."""
+    from shared_models.cloudevent_utils import CloudEventHandler
+    from shared_models.models import IntegrationType
+
+    # Extract event metadata
+    event_id = event_data.get("id")
+
+    try:
+        # Extract request data from CloudEvent
+        request_data = CloudEventHandler.extract_event_data(event_data)
+
+        # Convert to appropriate request schema based on integration_type
+        integration_type_str = request_data.get("integration_type")
+        if not integration_type_str:
+            logger.error("Missing integration_type in request event data")
+            return await create_cloudevent_response(
+                status="error",
+                message="Missing integration_type",
+                details={"event_id": event_id},
+            )
+
+        integration_type = IntegrationType(integration_type_str.upper())
+
+        # Validate required fields
+        user_id = request_data.get("user_id")
+        content = request_data.get("content")
+        if not user_id or not content:
+            logger.error(
+                "Missing required fields in request event data",
+                user_id=bool(user_id),
+                content=bool(content),
+            )
+            return await create_cloudevent_response(
+                status="error",
+                message="Missing required fields (user_id, content)",
+                details={"event_id": event_id},
+            )
+
+        # Extract common base fields
+        base_fields = {
+            "user_id": str(user_id),
+            "content": str(content),
+            "integration_type": integration_type,
+            "metadata": request_data.get("metadata", {}),
+        }
+
+        # Create request object based on integration type
+        request: Union[SlackRequest, EmailRequest]
+        if integration_type == IntegrationType.SLACK:
+            slack_user_id = request_data.get("slack_user_id") or user_id
+            slack_team_id = request_data.get("slack_team_id", "")
+            if not isinstance(slack_user_id, str) or not isinstance(slack_team_id, str):
+                logger.error("Invalid Slack fields in request event data")
+                return await create_cloudevent_response(
+                    status="error",
+                    message="Invalid Slack fields",
+                    details={"event_id": event_id},
+                )
+            request = SlackRequest(
+                **base_fields,
+                request_type=request_data.get("request_type", "slack_interaction"),
+                channel_id=request_data.get("channel_id"),
+                thread_id=request_data.get("thread_id"),
+                slack_user_id=slack_user_id,
+                slack_team_id=slack_team_id,
+            )
+        elif integration_type == IntegrationType.EMAIL:
+            request = EmailRequest(
+                **base_fields,
+                request_type=request_data.get("request_type", "email_interaction"),
+                email_from=request_data.get("email_from"),
+                email_subject=request_data.get("email_subject"),
+                email_message_id=request_data.get("email_message_id"),
+                email_in_reply_to=request_data.get("email_in_reply_to"),
+                email_references=request_data.get("email_references"),
+            )
+        else:
+            logger.warning(
+                "Unsupported integration type in request event",
+                integration_type=integration_type_str,
+                event_id=event_id,
+            )
+            return await create_cloudevent_response(
+                status="ignored",
+                message="Unsupported integration type",
+                details={
+                    "integration_type": integration_type_str,
+                    "event_id": event_id,
+                },
+            )
+
+        # Process the request using the existing adaptive processor
+        logger.info(
+            "Processing request from CloudEvent",
+            integration_type=integration_type_str,
+            user_id=request.user_id,
+            event_id=event_id,
+        )
+
+        return await _process_request_adaptive(request, db)
+
+    except Exception as e:
+        logger.error(
+            "Failed to handle request created event",
+            event_id=event_id,
+            error=str(e),
+            exc_info=True,
+        )
+        return await create_cloudevent_response(
+            status="error",
+            message="Failed to process request event",
+            details={"event_id": event_id, "error": str(e)},
         )
 
 
@@ -720,6 +810,7 @@ async def _forward_response_to_integration_dispatcher(
                     )
                     slack_user_id = integration_context.get("slack_user_id")
                     slack_channel = integration_context.get("channel_id")
+                    email_from = integration_context.get("email_from")
 
                     logger.info(
                         "Retrieved integration context from database",
@@ -727,6 +818,7 @@ async def _forward_response_to_integration_dispatcher(
                         integration_context=integration_context,
                         slack_user_id=slack_user_id,
                         slack_channel=slack_channel,
+                        email_from=email_from,
                     )
 
                     if slack_user_id:
@@ -749,6 +841,14 @@ async def _forward_response_to_integration_dispatcher(
                             "Added slack_channel to template variables",
                             request_id=request_id,
                             slack_channel=slack_channel,
+                        )
+
+                    if email_from:
+                        template_variables["email_from"] = email_from
+                        logger.info(
+                            "Added email_from to template variables",
+                            request_id=request_id,
+                            email_from=email_from,
                         )
 
         # Create delivery event data for Integration Dispatcher

@@ -27,7 +27,7 @@ testIntegrationEnabled: false
 # Database Configuration
 database:
   # Expected migration version that services should wait for
-  expectedMigrationVersion: "004"
+  expectedMigrationVersion: "005"
   
   # Database connection URL - leave empty to use default pgvector service
   # Format: postgresql://username:password@host:port/database
@@ -494,6 +494,7 @@ security:
 
   # Email configuration for Integration Dispatcher
   email:
+    # SMTP Configuration (sending emails)
     smtpHost: ""
     smtpPort: "587"
     smtpUsername: ""
@@ -501,3 +502,13 @@ security:
     smtpUseTls: "true"
     fromEmail: "noreply@selfservice.local"
     fromName: "Self-Service Agent"
+    # IMAP Configuration (receiving emails) - reuses SMTP credentials if not set
+    imapHost: ""  # e.g., "imap.gmail.com", "outlook.office365.com"
+    imapPort: "993"  # Default: 993 (SSL) or 143 (STARTTLS)
+    imapUsername: ""  # If not set, reuses smtpUsername
+    imapPassword: ""  # If not set, reuses smtpPassword
+    imapUseSsl: "true"  # Whether to use SSL/TLS (default: true)
+    imapMailbox: "INBOX"  # Mailbox to poll (default: INBOX)
+    imapPollInterval: "60"  # Polling interval in seconds (default: 60 - 1 minute)
+    imapLeaseDuration: "120"  # Leader election lease duration in seconds (default: 120 - should be 2x poll interval)
+    imapLeaseRenewalInterval: ""  # Lease renewal interval in seconds (optional, defaults to lease_duration // 2)
