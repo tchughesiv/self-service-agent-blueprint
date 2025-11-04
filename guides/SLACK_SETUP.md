@@ -60,20 +60,38 @@ After creating the app, update the placeholder URLs:
 
 ### Step 6: Deploy with Slack Configuration
 
-```bash
-# Set credentials as environment variables
-export SLACK_BOT_TOKEN="xoxb-your-actual-bot-token"
-export SLACK_SIGNING_SECRET="your-actual-signing-secret"
+**Option 1: Using Helm Values (Recommended)**
 
-# Deploy with Slack integration enabled
-make helm-install-dev NAMESPACE=your-namespace
+Update `helm/values.yaml` with your Slack configuration:
+
+```yaml
+security:
+  slack:
+    botToken: "xoxb-your-actual-bot-token"
+    signingSecret: "your-actual-signing-secret"
 ```
 
-Or let the Makefile prompt for credentials:
+Then deploy:
 
 ```bash
-ENABLE_SLACK=true make helm-install-dev NAMESPACE=your-namespace
+make helm-install-test NAMESPACE=your-namespace
 ```
+
+**Option 2: Using EXTRA_HELM_ARGS**
+
+Alternatively, you can pass configuration directly via `EXTRA_HELM_ARGS`:
+
+```bash
+make helm-install-test NAMESPACE=your-namespace \
+  EXTRA_HELM_ARGS="\
+    --set-string security.slack.botToken=xoxb-your-actual-bot-token \
+    --set-string security.slack.signingSecret=your-actual-signing-secret"
+```
+
+**Note:**
+- **Option 1 (values.yaml) is recommended** for persistent configuration and production deployments
+- **Option 2 (EXTRA_HELM_ARGS)** is useful for one-off deployments, testing, or CI/CD pipelines
+- Use `--set-string` for all values to ensure proper string handling
 
 ### Step 7: Restart Integration Dispatcher
 

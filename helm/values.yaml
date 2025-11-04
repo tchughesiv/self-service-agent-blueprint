@@ -142,22 +142,6 @@ llama-stack:
             user: ${env.POSTGRES_USER:=pgvector}
             password: ${env.POSTGRES_PASSWORD:=pgvector}
 
-# Slack integration is now handled by the integration-dispatcher
-# Configuration is in the requestManagement section below
-slack:
-  enabled: true
-  botToken: ""
-  signingSecret: ""
-  service:
-    type: ClusterIP
-    port: 8080
-  route:
-    enabled: true
-    host: ""
-    tls:
-      enabled: true
-      termination: edge
-
 mcp-servers:
   enabled: true
   mcp-servers:
@@ -406,19 +390,6 @@ requestManagement:
   
   # Integration Configuration
   integrations:
-    # Service-level configuration
-    services:
-      email:
-        enabled: false
-        smtpHost: "smtp.example.com"
-        smtpPort: "587"
-        smtpUseTls: "true"
-        fromEmail: "noreply@selfservice.local"
-        fromName: "Self-Service Agent"
-      slack:
-        enabled: false
-        # Slack credentials loaded from secrets
-    
     # User defaults (auto-enabled based on service configuration)
     userDefaults:
       SLACK:
