@@ -167,6 +167,9 @@ class RequestLog(Base, TimestampMixin):  # type: ignore[misc]
     # Timing
     completed_at = Column(TIMESTAMP(timezone=True))
 
+    # Pod tracking (for scaled deployments)
+    pod_name = Column(String(255), index=True)  # Pod that initiated the request
+
     # Relationships
     session = relationship("RequestSession", back_populates="request_logs")
 

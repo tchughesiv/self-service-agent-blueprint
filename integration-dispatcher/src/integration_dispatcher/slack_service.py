@@ -167,77 +167,39 @@ class SlackService:
             )
 
             if db_session and event.get("ts"):
-                from shared_models.models import ProcessedEvent
-                from sqlalchemy import select
+                from shared_models import DatabaseUtils
 
                 # Create a unique identifier for this Slack message
                 # Use Slack's event_id for optimal deduplication
                 slack_message_id = self._create_slack_message_id(event, event_id)
 
                 logger.info(
-                    "Checking for duplicate Slack message",
+                    "Claiming Slack message for processing",
                     slack_message_id=slack_message_id,
                     has_db_session=bool(db_session),
                     channel=event.get("channel"),
                     ts=event.get("ts"),
                 )
 
-                existing_message = await db_session.execute(
-                    select(ProcessedEvent).where(
-                        ProcessedEvent.event_id == slack_message_id
-                    )
+                # ✅ ATOMIC EVENT CLAIMING: Use check-and-set pattern to prevent duplicate processing
+                # This provides 100% guarantee - only one pod can claim and process an event
+                event_claimed = await DatabaseUtils.try_claim_event_for_processing(
+                    db_session,
+                    slack_message_id,
+                    "slack_message",
+                    "slack",
+                    "integration-dispatcher",
                 )
-                if existing_message.scalar_one_or_none():
+
+                if not event_claimed:
                     logger.info(
-                        "Slack message already processed - skipping duplicate",
+                        "Slack message already claimed by another pod - skipping duplicate",
                         slack_message_id=slack_message_id,
                         channel=event.get("channel"),
                         ts=event.get("ts"),
                         user_id=event.get("user"),
                     )
                     return
-
-                # ✅ RECORD IMMEDIATELY: Record the message as processed to prevent race conditions
-                try:
-                    from shared_models.models import ProcessedEvent
-
-                    processed_event = ProcessedEvent(
-                        event_id=slack_message_id,
-                        event_type="slack_message",
-                        event_source="slack",
-                        request_id=None,  # Will be set by request-manager
-                        session_id=None,  # Will be set by request-manager
-                        processed_by="integration-dispatcher",
-                        processing_result="processing",
-                        error_message=None,
-                    )
-
-                    db_session.add(processed_event)
-                    await db_session.commit()
-
-                    logger.info(
-                        "Recorded Slack message as processing to prevent race conditions",
-                        slack_message_id=slack_message_id,
-                        channel=event.get("channel"),
-                        ts=event.get("ts"),
-                    )
-
-                except Exception as e:
-                    # Handle unique constraint violations gracefully (message already recorded)
-                    if "duplicate key value violates unique constraint" in str(e):
-                        logger.info(
-                            "Slack message already recorded - skipping duplicate",
-                            slack_message_id=slack_message_id,
-                        )
-                        return
-                    else:
-                        logger.error(
-                            "Failed to record Slack message for deduplication",
-                            slack_message_id=slack_message_id,
-                            error=str(e),
-                        )
-                        await db_session.rollback()
-                        # Continue processing even if recording fails
             else:
                 logger.warning(
                     "Skipping Slack message deduplication - missing db_session or ts",

@@ -703,10 +703,21 @@ class EmailService:
                     message_id, from_addr, date
                 )
 
-                # Check for duplicate
-                if await self._is_duplicate(email_message_id, db):
+                # ✅ ATOMIC EVENT CLAIMING: Use check-and-set pattern to prevent duplicate processing
+                # This provides 100% guarantee - only one pod can claim and process an event
+                from shared_models import DatabaseUtils
+
+                event_claimed = await DatabaseUtils.try_claim_event_for_processing(
+                    db,
+                    email_message_id,
+                    "email_message",
+                    "imap",
+                    "integration-dispatcher",
+                )
+
+                if not event_claimed:
                     logger.debug(
-                        "Email already processed - skipping duplicate",
+                        "Email already claimed by another pod - skipping duplicate",
                         email_message_id=email_message_id,
                         from_addr=from_addr,
                     )
@@ -716,36 +727,6 @@ class EmailService:
                     except Exception:
                         pass  # Ignore errors when marking as read
                     return False
-
-                # Record as processing to prevent race conditions
-                try:
-                    processed_event = ProcessedEvent(
-                        event_id=email_message_id,
-                        event_type="email_message",
-                        event_source="imap",
-                        request_id=None,  # Will be set by request-manager
-                        session_id=None,  # Will be set by request-manager
-                        processed_by="integration-dispatcher",
-                        processing_result="processing",
-                        error_message=None,
-                    )
-                    db.add(processed_event)
-                    await db.commit()
-                except Exception as e:
-                    if "duplicate key value violates unique constraint" in str(e):
-                        logger.debug(
-                            "Email already recorded - skipping duplicate",
-                            email_message_id=email_message_id,
-                        )
-                        return False
-                    else:
-                        logger.error(
-                            "Failed to record email for deduplication",
-                            email_message_id=email_message_id,
-                            error=str(e),
-                        )
-                        await db.rollback()
-                        # Continue processing even if recording fails
 
                 # Get body content
                 body = self._extract_body(email_message)

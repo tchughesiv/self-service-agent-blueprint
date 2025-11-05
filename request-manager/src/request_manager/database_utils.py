@@ -14,10 +14,23 @@ async def create_request_log_entry_unified(
     integration_type: str,
     integration_context: dict[str, Any] | None = None,
     db: AsyncSession | None = None,
+    set_pod_name: bool = True,
 ) -> None:
-    """Create RequestLog entry for any API type."""
+    """Create RequestLog entry for any API type.
+
+    Args:
+        set_pod_name: If True, set pod_name for requests that wait for responses (request-manager endpoints).
+                     If False, don't set pod_name (e.g., CloudEvent requests from integration-dispatcher).
+    """
     try:
         from shared_models.models import RequestLog
+
+        # Get pod name for tracking which pod initiated the request (only for requests that wait for responses)
+        pod_name = None
+        if set_pod_name:
+            from .communication_strategy import get_pod_name
+
+            pod_name = get_pod_name()
 
         # Create RequestLog entry
         request_log = RequestLog(
@@ -43,6 +56,7 @@ async def create_request_log_entry_unified(
             cloudevent_id=None,  # Will be set when CloudEvent is sent
             cloudevent_type=None,  # Will be set when CloudEvent is sent
             completed_at=None,  # Will be set by Agent Service
+            pod_name=pod_name,  # Track which pod initiated this request
         )
 
         if db:
@@ -82,6 +96,29 @@ async def create_request_log_entry_unified(
         # Don't raise exception - RequestLog creation failure shouldn't stop request processing
 
 
+async def try_claim_event_for_processing(
+    db: AsyncSession,
+    event_id: str,
+    event_type: str,
+    event_source: str,
+    processed_by: str,
+) -> bool:
+    """Atomically claim an event for processing (check-and-set pattern).
+
+    This provides 100% guarantee against duplicate processing by using
+    database unique constraint as a distributed lock.
+
+    Returns:
+        True if this pod successfully claimed the event (can process it)
+        False if another pod already claimed it (must skip processing)
+    """
+    from shared_models import DatabaseUtils
+
+    return await DatabaseUtils.try_claim_event_for_processing(
+        db, event_id, event_type, event_source, processed_by
+    )
+
+
 async def record_processed_event(
     db: AsyncSession,
     event_id: str,
@@ -93,52 +130,21 @@ async def record_processed_event(
     processing_result: str,
     error_message: Optional[str] = None,
 ) -> None:
-    """Record that an event has been processed to prevent duplicate processing."""
-    from shared_models import configure_logging
-    from shared_models.models import ProcessedEvent
+    """Record that an event has been processed to prevent duplicate processing.
 
-    logger = configure_logging("request-manager")
+    Note: For atomic claiming, use try_claim_event_for_processing first.
+    This function updates the event record after processing completes.
+    """
+    from shared_models import DatabaseUtils
 
-    if not event_id:
-        logger.warning("Cannot record processed event without event_id")
-        return
-
-    try:
-        processed_event = ProcessedEvent(
-            event_id=event_id,
-            event_type=event_type,
-            event_source=event_source,
-            request_id=request_id,
-            session_id=session_id,
-            processed_by=processed_by,
-            processing_result=processing_result,
-            error_message=error_message,
-        )
-
-        db.add(processed_event)
-        await db.commit()
-
-        logger.debug(
-            "Recorded processed event",
-            event_id=event_id,
-            event_type=event_type,
-            processing_result=processing_result,
-        )
-
-    except Exception as e:
-        # Handle unique constraint violations gracefully (event already recorded)
-        if "duplicate key value violates unique constraint" in str(e):
-            logger.debug(
-                "Event already recorded in processed_events table",
-                event_id=event_id,
-                processing_result=processing_result,
-            )
-        else:
-            logger.error(
-                "Failed to record processed event",
-                event_id=event_id,
-                error=str(e),
-            )
+    await DatabaseUtils.update_processed_event(
+        db,
+        event_id,
+        request_id=request_id,
+        session_id=session_id,
+        processing_result=processing_result,
+        error_message=error_message,
+    )
 
 
 async def cleanup_old_sessions(

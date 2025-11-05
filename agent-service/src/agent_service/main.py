@@ -352,6 +352,9 @@ class AgentService:
                 (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
             )
 
+        # Use provided metadata or empty dict
+        response_metadata = dict(metadata) if metadata else {}
+
         response = AgentResponse(
             request_id=request.request_id,
             session_id=request.session_id,
@@ -359,7 +362,7 @@ class AgentService:
             agent_id=agent_id,
             content=content,
             response_type=response_type,
-            metadata=metadata or {},
+            metadata=response_metadata,
             processing_time_ms=processing_time_ms,
             requires_followup=requires_followup,
             followup_actions=followup_actions or [],
