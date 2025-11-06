@@ -60,26 +60,7 @@ After creating the app, update the placeholder URLs:
 
 ### Step 6: Deploy with Slack Configuration
 
-**Option 1: Using Helm Values (Recommended)**
-
-Update `helm/values.yaml` with your Slack configuration:
-
-```yaml
-security:
-  slack:
-    botToken: "xoxb-your-actual-bot-token"
-    signingSecret: "your-actual-signing-secret"
-```
-
-Then deploy:
-
-```bash
-make helm-install-test NAMESPACE=your-namespace
-```
-
-**Option 2: Using EXTRA_HELM_ARGS**
-
-Alternatively, you can pass configuration directly via `EXTRA_HELM_ARGS`:
+Pass configuration directly via `EXTRA_HELM_ARGS`:
 
 ```bash
 make helm-install-test NAMESPACE=your-namespace \
@@ -89,8 +70,6 @@ make helm-install-test NAMESPACE=your-namespace \
 ```
 
 **Note:**
-- **Option 1 (values.yaml) is recommended** for persistent configuration and production deployments
-- **Option 2 (EXTRA_HELM_ARGS)** is useful for one-off deployments, testing, or CI/CD pipelines
 - Use `--set-string` for all values to ensure proper string handling
 
 ### Step 7: Restart Integration Dispatcher
@@ -251,47 +230,6 @@ kubectl logs deployment/self-service-agent-integration-dispatcher -n ${NAMESPACE
 - Ensure the bot is invited to the channel or DM
 - Check that the bot has the necessary permissions
 - Verify the user's Slack configuration includes `user_email` or `slack_user_id`
-
-### Debug Commands
-
-```bash
-# Check integration health
-curl http://localhost:8080/health
-
-# Check Slack-specific health
-curl http://localhost:8080/health | jq '.integrations_available'
-
-# Check user delivery history
-curl http://localhost:8081/api/v1/users/U09E98M70JK/deliveries
-
-# Reset user to defaults
-curl -X POST http://localhost:8081/api/v1/users/U09E98M70JK/integration-defaults/reset
-
-# Check Integration Dispatcher logs for Slack events
-kubectl logs deployment/self-service-agent-integration-dispatcher -n ${NAMESPACE:-default} | grep -i slack
-```
-
-### Slack Event Debugging
-
-The Integration Dispatcher logs detailed information about Slack events:
-
-```bash
-# Watch for Slack events
-kubectl logs -f deployment/self-service-agent-integration-dispatcher -n ${NAMESPACE:-default} | grep -i "slack event"
-
-# Check for signature verification issues
-kubectl logs deployment/self-service-agent-integration-dispatcher -n ${NAMESPACE:-default} | grep -i "signature"
-```
-
-## Best Practices
-
-1. **Use Integration Defaults** - Let the system handle most users automatically
-2. **Test After Setup** - Verify the integration works end-to-end
-3. **Monitor Delivery Logs** - Check for failed deliveries
-4. **Configure Retry Settings** - Based on your Slack app reliability
-5. **Use Descriptive User IDs** - For easier management
-6. **Keep Configurations Simple** - Only override when necessary
-7. **Test Different Interaction Types** - DMs, mentions, slash commands, and interactive buttons
 
 ## Security Considerations
 

@@ -81,37 +81,7 @@ You'll need:
 
 #### Configure Email Settings
 
-**Option 1: Using Helm Values (Recommended)**
-
-Update `helm/values.yaml` with your email configuration:
-
-```yaml
-security:
-  email:
-    smtpHost: "smtp.gmail.com"
-    smtpPort: "587"
-    smtpUsername: "your-email@gmail.com"
-    smtpPassword: "your-app-password"
-    smtpUseTls: "true"
-    fromEmail: "your-email@gmail.com"
-    fromName: "Self-Service Agent"
-    imapHost: "imap.gmail.com"
-    imapPort: "993"
-    imapUseSsl: "true"
-    imapMailbox: "INBOX"
-    imapPollInterval: "60"
-    imapLeaseDuration: "120"
-```
-
-Then deploy:
-
-```bash
-make helm-install-test NAMESPACE=your-namespace
-```
-
-**Option 2: Using EXTRA_HELM_ARGS**
-
-Alternatively, you can pass configuration directly via `EXTRA_HELM_ARGS`:
+Pass configuration directly via `EXTRA_HELM_ARGS`:
 
 ```bash
 make helm-install-test NAMESPACE=your-namespace \
@@ -132,8 +102,6 @@ make helm-install-test NAMESPACE=your-namespace \
 ```
 
 **Note:** 
-- **Option 1 (values.yaml) is recommended** for persistent configuration and production deployments
-- **Option 2 (EXTRA_HELM_ARGS)** is useful for one-off deployments, testing, or CI/CD pipelines
 - Use `--set-string` for all values to ensure proper string handling
 - If `imapUsername` and `imapPassword` are not set, they will reuse `smtpUsername` and `smtpPassword` respectively
 - Minimum required configuration: `smtpHost`, `smtpUsername`, `smtpPassword`, and `imapHost` (if you want IMAP polling)
@@ -331,62 +299,6 @@ kubectl logs deployment/self-service-agent-integration-dispatcher -n ${NAMESPACE
 - Check that IMAP access is enabled on the email account
 - Verify SSL/TLS settings match the port (993 = SSL, 143 = STARTTLS)
 - Check firewall/network rules allow IMAP access
-
-### Debug Commands
-
-```bash
-# Check integration health
-kubectl exec deployment/self-service-agent-integration-dispatcher -n ${NAMESPACE:-default} -- curl -s http://localhost:8080/health
-
-# Check email-specific health
-kubectl exec deployment/self-service-agent-integration-dispatcher -n ${NAMESPACE:-default} -- curl -s http://localhost:8080/health/detailed | jq '.integrations_available'
-
-# Check user delivery history
-kubectl exec deployment/self-service-agent-integration-dispatcher -n ${NAMESPACE:-default} -- curl -s http://localhost:8080/api/v1/users/user@example.com/deliveries | jq
-
-# Reset user to defaults
-kubectl exec deployment/self-service-agent-integration-dispatcher -n ${NAMESPACE:-default} -- curl -s -X POST http://localhost:8080/api/v1/users/user@example.com/integration-defaults/reset
-
-# Check Integration Dispatcher logs for email events
-kubectl logs deployment/self-service-agent-integration-dispatcher -n ${NAMESPACE:-default} | grep -i email
-```
-
-### Email Processing Debugging
-
-The Integration Dispatcher logs detailed information about email processing:
-
-```bash
-# Watch for IMAP polling events
-kubectl logs -f deployment/self-service-agent-integration-dispatcher -n ${NAMESPACE:-default} | grep -i "imap\|polling"
-
-# Check for email processing errors
-kubectl logs deployment/self-service-agent-integration-dispatcher -n ${NAMESPACE:-default} | grep -i "email.*error\|failed.*email"
-
-# Check leader election status
-kubectl logs deployment/self-service-agent-integration-dispatcher -n ${NAMESPACE:-default} | grep -i "leader\|lease"
-```
-
-## Best Practices
-
-1. **Use App Passwords** - For Gmail and other providers, use App Passwords instead of account passwords
-2. **Configure IMAP Polling** - Set appropriate polling interval based on your needs (60s default)
-3. **Monitor Leader Election** - Ensure only one pod is polling IMAP (leader election)
-4. **Test After Setup** - Verify the integration works end-to-end (send and receive)
-5. **Configure Mailbox** - Use a dedicated mailbox/folder for testing (e.g., `SSA_TEST`)
-6. **Monitor Delivery Logs** - Check for failed deliveries
-7. **Configure Retry Settings** - Based on your email provider's reliability
-8. **Use Dedicated Email Account** - Consider using a dedicated email account for the agent
-9. **Set Appropriate FROM_EMAIL** - Use a recognizable email address for users
-10. **Test Email Threading** - Verify reply threading works correctly
-
-## Security Considerations
-
-- **App Passwords**: Use App Passwords instead of account passwords when possible
-- **Credentials Storage**: Store email credentials securely in Kubernetes secrets
-- **TLS/SSL**: Always use TLS/SSL for SMTP and IMAP connections
-- **Email Validation**: System validates email addresses before sending
-- **Rate Limiting**: Built-in rate limiting prevents abuse
-- **Deduplication**: Email messages are deduplicated to prevent duplicate processing
 
 ## Related Documentation
 

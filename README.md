@@ -31,11 +31,12 @@
 5. [Hands-On Quickstart](#5-hands-on-quickstart)
    - [Deploy to OpenShift](#51-deploy-to-openshift)
    - [Interact with the CLI](#52-interact-with-the-cli)
-   - [Use Slack Integration (Optional)](#53-use-slack-integration-optional)
-   - [Integration with Real ServiceNow (Optional)](#54-integration-with-real-servicenow-optional)
-   - [Setting up Safety Shields (Optional)](#55-setting-up-safety-shields-optional)
-   - [Run Evaluations](#56-run-evaluations)
-   - [Follow the Flow with Observability](#57-follow-the-flow-with-observability)
+  - [Integration with Slack (Optional)](#53-integration-with-slack-optional)
+  - [Integration with Real ServiceNow (Optional)](#54-integration-with-real-servicenow-optional)
+  - [Integration with Email (Optional)](#55-integration-with-email-optional)
+  - [Setting up Safety Shields (Optional)](#56-setting-up-safety-shields-optional)
+  - [Run Evaluations](#57-run-evaluations)
+  - [Follow the Flow with Observability](#58-follow-the-flow-with-observability)
 
 6. [Performance & Scaling](#6-performance--scaling)
 
@@ -783,7 +784,7 @@ oc exec -it $REQUEST_MANAGER_POD -n $NAMESPACE -- \
 
 ---
 
-### 5.3 Use Slack Integration (Optional)
+### 5.3 Integration with Slack (Optional)
 
 Slack integration enables real-world testing with actual users in your workspace.
 
@@ -810,7 +811,19 @@ export SLACK_BOT_TOKEN=your-bot-token
 make helm-upgrade NAMESPACE=$NAMESPACE
 ```
 
-#### Step 3: Test Slack Interaction
+#### Step 3: Verify Slack Integration
+
+Check the Integration Dispatcher health endpoint to confirm Slack integration is active:
+
+```bash
+# Check integration health
+kubectl exec deployment/self-service-agent-integration-dispatcher -n $NAMESPACE -- \
+  curl -s http://localhost:8080/health/detailed | jq '.integrations_available'
+
+# Look for "SLACK" in the integrations_available array
+```
+
+#### Step 4: Test Slack Interaction
 
 In your Slack workspace:
 
@@ -911,7 +924,100 @@ Log into your ServiceNow instance and verify:
 
 ---
 
-### 5.5 Setting up Safety Shields (Optional)
+### 5.5 Integration with Email (Optional)
+
+Email integration enables two-way communication with the AI agent through email, allowing users to interact with the system via their email client.
+
+#### Step 1: Set Up Email Configuration
+
+See [`EMAIL_SETUP.md`](guides/EMAIL_SETUP.md) for detailed instructions.
+
+**Summary:**
+1. Choose an email provider (Gmail, Outlook, or custom SMTP/IMAP)
+2. Get SMTP credentials for sending emails
+3. Get IMAP credentials for receiving emails (optional, for polling)
+4. Configure email account settings (enable IMAP if needed)
+
+#### Step 2: Update Deployment with Email Credentials
+
+```bash
+# Set email configuration
+export SMTP_HOST=smtp.gmail.com
+export SMTP_PORT=587
+export SMTP_USERNAME=your-email@gmail.com
+export SMTP_PASSWORD=your-app-password
+export IMAP_HOST=imap.gmail.com
+export IMAP_PORT=993
+
+# Upgrade Helm deployment with email configuration
+make helm-upgrade NAMESPACE=$NAMESPACE \
+  EXTRA_HELM_ARGS="\
+    --set-string security.email.smtpHost=$SMTP_HOST \
+    --set-string security.email.smtpPort=$SMTP_PORT \
+    --set-string security.email.smtpUsername=$SMTP_USERNAME \
+    --set-string security.email.smtpPassword=$SMTP_PASSWORD \
+    --set-string security.email.smtpUseTls=true \
+    --set-string security.email.fromEmail=$SMTP_USERNAME \
+    --set-string security.email.fromName='Self-Service Agent' \
+    --set-string security.email.imapHost=$IMAP_HOST \
+    --set-string security.email.imapPort=$IMAP_PORT \
+    --set-string security.email.imapUseSsl=true \
+    --set-string security.email.imapMailbox=INBOX \
+    --set-string security.email.imapPollInterval=60 \
+    --set-string security.email.imapLeaseDuration=120"
+```
+
+#### Step 3: Verify Email Integration
+
+Check the Integration Dispatcher health endpoint to confirm email integration is active:
+
+```bash
+# Check integration health and email capabilities
+kubectl exec deployment/self-service-agent-integration-dispatcher -n $NAMESPACE -- \
+  curl -s http://localhost:8080/health/detailed | jq '{integrations_available, email_capabilities: .services.email_capabilities}'
+
+# Look for:
+# - "EMAIL" in the integrations_available array
+# - email_capabilities showing sending: true and/or receiving: true
+```
+
+#### Step 4: Test Email Interaction
+
+Send an email to the configured email address (`FROM_EMAIL` or `SMTP_USERNAME`):
+
+1. Send email from your email client to the configured address
+2. Subject: "I need help with my laptop refresh"
+3. Body: "Hi, I'd like to start a laptop refresh request"
+
+**Expected outcome:**
+- ✓ Email received and processed by Integration Dispatcher
+- ✓ Agent responds via email with greeting and laptop information
+- ✓ Conversation maintains context across email replies
+- ✓ Agent presents laptop options for your region
+- ✓ Ticket created with confirmation sent via email
+
+#### Step 5: Test Email Threading
+
+Reply to the agent's email to test conversation threading:
+
+1. Reply to the agent's email (maintains In-Reply-To header)
+2. Continue the conversation: "I'd like to see available laptop options"
+3. Agent responds in the same email thread
+
+**Expected outcome:**
+- ✓ Email threading works correctly
+- ✓ Conversation context maintained across multiple emails
+- ✓ Agent remembers previous messages in the thread
+
+**You should now be able to:**
+- ✓ Interact with agents via email
+- ✓ Receive email notifications and responses
+- ✓ Maintain conversation context through email threads
+- ✓ Test email integration end-to-end
+
+---
+
+### 5.6 Setting up Safety Shields (Optional)
 
 Safety shields provide content moderation for AI agent interactions, validating user input and agent responses against safety policies using Llama Guard 3 or compatible models.
 
@@ -1011,7 +1117,7 @@ For comprehensive safety shields documentation, see the [Safety Shields Guide](g
 
 ---
 
-### 5.6 Run Evaluations
+### 5.7 Run Evaluations
 
 The evaluation framework validates agent behavior against business requirements and quality metrics.
 
@@ -1121,7 +1227,7 @@ python evaluate.py --num-conversations 5
 
 ---
 
-### 5.7 Follow the Flow with Observability
+### 5.8 Follow the Flow with Observability
 
 (Documentation TBD)
 
@@ -1193,8 +1299,12 @@ Now that you have the system running, dive deeper into each component.
 ### 7.3 External Integrations
 
 **Slack Setup**
-- Full documentation: [`SLACK_SETUP.md`](guides/SLACK_SETUP.md)
+- Full documentation: [`guides/SLACK_SETUP.md`](guides/SLACK_SETUP.md)
 - Topics: App creation, OAuth, event subscriptions
+
+**Email Setup**
+- Full documentation: [`guides/EMAIL_SETUP.md`](guides/EMAIL_SETUP.md)
+- Topics: SMTP configuration, IMAP polling, email threading
 
 **ServiceNow Integration**
 - (Documentation TBD)
