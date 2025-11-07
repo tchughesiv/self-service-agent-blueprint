@@ -742,18 +742,39 @@ async def _handle_agent_response_event_from_data(
             followup_actions=event_data.get("followup_actions", []),
         )
 
-        # Resolve any waiting response futures for this request
-        # Note: If no future found (wrong pod), response is still stored in database
+        # Resolve any waiting response futures for this request (fast path)
+        # Note: If pod_name is NULL, ANY pod that receives the response event can immediately
+        # process it if it has a waiting future. This provides the fastest possible response.
+        # If no future found (wrong pod or no waiting request), response is still stored in database
         # and will be picked up by database polling in wait_for_response
         try:
             from request_manager.communication_strategy import resolve_response_future
 
-            future_resolved = resolve_response_future(request_id, response_data)
-            if not future_resolved:
-                # Wrong pod received the response - but it's stored in database
-                # The correct pod's polling will find it
+            # Construct complete response_data dict with all required fields
+            complete_response_data = {
+                "request_id": request_id,
+                "session_id": session_id,
+                "agent_id": agent_id,
+                "content": content,
+                "metadata": event_data.get("metadata", {}),
+                "processing_time_ms": event_data.get("processing_time_ms"),
+                "requires_followup": event_data.get("requires_followup", False),
+                "followup_actions": event_data.get("followup_actions", []),
+            }
+
+            future_resolved = resolve_response_future(
+                request_id, complete_response_data
+            )
+            if future_resolved:
+                logger.info(
+                    "Response future resolved via event (fast path)",
+                    request_id=request_id,
+                )
+            else:
+                # No waiting future found - response is stored in database
+                # The correct pod's polling will find it (or any pod if pod_name is NULL)
                 logger.debug(
-                    "Response received by pod that didn't initiate request - stored in database, will be picked up by polling",
+                    "No waiting response future found - response stored in database, will be picked up by polling",
                     request_id=request_id,
                 )
         except Exception as e:
