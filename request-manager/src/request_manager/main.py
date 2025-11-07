@@ -25,8 +25,7 @@ from shared_models import (
     get_db_session_dependency,
     parse_cloudevent_from_request,
 )
-from shared_models.models import ErrorResponse, ProcessedEvent
-from sqlalchemy import select
+from shared_models.models import ErrorResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from tracing_config.auto_tracing import run as auto_tracing_run
 from tracing_config.auto_tracing import (
@@ -68,6 +67,23 @@ async def _request_manager_startup() -> None:
         "Initialized unified request processor",
         strategy_type=type(communication_strategy).__name__,
     )
+
+    # Start single per-pod polling task
+    from .communication_strategy import get_pod_name
+
+    pod_name = get_pod_name()
+    if pod_name:
+        from .communication_strategy import _start_pod_polling_task
+
+        await _start_pod_polling_task(pod_name)
+        logger.info(
+            "Started single per-pod polling task",
+            pod_name=pod_name,
+        )
+    else:
+        logger.warning(
+            "Pod name not found in environment (HOSTNAME or POD_NAME) - single pod polling not started"
+        )
 
 
 # Create lifespan using shared utility with custom startup
@@ -423,10 +439,22 @@ async def handle_cloudevent(
             event_source=event_source,
         )
 
+        # Validate required CloudEvent fields (type and source are required per spec)
+        if not event_type or not event_source:
+            logger.warning(
+                "CloudEvent missing required fields",
+                event_id=event_id,
+                has_type=bool(event_type),
+                has_source=bool(event_source),
+            )
+            return await create_cloudevent_response(
+                status="error",
+                message="CloudEvent missing required fields (type, source)",
+                details={"event_id": event_id},
+            )
+
         # ✅ CIRCUIT BREAKER: Prevent feedback loops by ignoring self-generated events
-        if event_source and (
-            "request-manager" in event_source or event_source == "request-manager"
-        ):
+        if "request-manager" in event_source or event_source == "request-manager":
             logger.info(
                 "Ignoring self-generated event to prevent feedback loop",
                 event_id=event_id,
@@ -435,21 +463,29 @@ async def handle_cloudevent(
             )
             return {"status": "ignored", "reason": "self-generated event"}
 
-        # ✅ EVENT ID DEDUPLICATION: Check if this exact event was already processed
+        # ✅ ATOMIC EVENT CLAIMING: Use check-and-set pattern to prevent duplicate processing
+        # This provides 100% guarantee - only one pod can claim and process an event
         if event_id:
-            existing_event = await db.execute(
-                select(ProcessedEvent).where(ProcessedEvent.event_id == event_id)
+            from .database_utils import try_claim_event_for_processing
+
+            event_claimed = await try_claim_event_for_processing(
+                db,
+                event_id,
+                event_type,
+                event_source,
+                "request-manager",
             )
-            if existing_event.scalar_one_or_none():
+
+            if not event_claimed:
                 logger.info(
-                    "Event already processed - skipping duplicate",
+                    "Event already claimed by another pod - skipping duplicate",
                     event_id=event_id,
                     event_type=event_type,
                     event_source=event_source,
                 )
                 return {
                     "status": "skipped",
-                    "reason": "duplicate event",
+                    "reason": "duplicate event (already claimed by another pod)",
                     "event_id": event_id,
                 }
 
@@ -483,12 +519,18 @@ async def _process_request_adaptive(
     ],
     db: AsyncSession,
     timeout: int = 120,
+    is_cloudevent_request: bool = False,
 ) -> Dict[str, Any]:
     """Process a request synchronously and return the actual AI response.
 
     All user-facing and system-facing endpoints (web, CLI, Slack, tool, generic)
     should return immediate responses. The internal architecture (HTTP vs eventing)
     is handled transparently by the sync processing logic.
+
+    Args:
+        is_cloudevent_request: If True, this is a CloudEvent request from integration-dispatcher
+                             (doesn't need pod_name since integration-dispatcher handles responses separately).
+                             If False, this is a regular request-manager endpoint (needs pod_name for polling).
     """
     if not unified_processor:
         raise HTTPException(
@@ -499,7 +541,9 @@ async def _process_request_adaptive(
     try:
         # Use unified processor for all requests (both agent and responses mode)
         # The internal processing handles both HTTP and eventing modes appropriately
-        return await unified_processor.process_request_sync(request, db, timeout)
+        return await unified_processor.process_request_sync(
+            request, db, timeout, set_pod_name=not is_cloudevent_request
+        )
     except Exception as e:
         logger.error("Failed to process request", error=str(e))
         raise HTTPException(
@@ -610,7 +654,29 @@ async def _handle_request_created_event_from_data(
             event_id=event_id,
         )
 
-        return await _process_request_adaptive(request, db)
+        result = await _process_request_adaptive(
+            request, db, is_cloudevent_request=True
+        )
+
+        # Record successful event processing to prevent duplicate processing
+        # This is critical for preventing race conditions when multiple pods receive the same event
+        if event_id:
+            from shared_models import EventTypes
+
+            from .database_utils import record_processed_event
+
+            await record_processed_event(
+                db,
+                event_id,
+                EventTypes.REQUEST_CREATED,
+                event_data.get("source", "integration-dispatcher"),
+                result.get("request_id") if isinstance(result, dict) else None,
+                result.get("session_id") if isinstance(result, dict) else None,
+                "request-manager",
+                "success",
+            )
+
+        return result
 
     except Exception as e:
         logger.error(
@@ -619,6 +685,25 @@ async def _handle_request_created_event_from_data(
             error=str(e),
             exc_info=True,
         )
+
+        # Record failed event processing
+        if event_id:
+            from shared_models import EventTypes
+
+            from .database_utils import record_processed_event
+
+            await record_processed_event(
+                db,
+                event_id,
+                EventTypes.REQUEST_CREATED,
+                event_data.get("source", "integration-dispatcher"),
+                None,  # request_id unknown on error
+                None,  # session_id unknown on error
+                "request-manager",
+                "error",
+                str(e),
+            )
+
         return await create_cloudevent_response(
             status="error",
             message="Failed to process request event",
@@ -657,11 +742,41 @@ async def _handle_agent_response_event_from_data(
             followup_actions=event_data.get("followup_actions", []),
         )
 
-        # Resolve any waiting response futures for this request
+        # Resolve any waiting response futures for this request (fast path)
+        # Note: If pod_name is NULL, ANY pod that receives the response event can immediately
+        # process it if it has a waiting future. This provides the fastest possible response.
+        # If no future found (wrong pod or no waiting request), response is still stored in database
+        # and will be picked up by database polling in wait_for_response
         try:
             from request_manager.communication_strategy import resolve_response_future
 
-            resolve_response_future(request_id, response_data)
+            # Construct complete response_data dict with all required fields
+            complete_response_data = {
+                "request_id": request_id,
+                "session_id": session_id,
+                "agent_id": agent_id,
+                "content": content,
+                "metadata": event_data.get("metadata", {}),
+                "processing_time_ms": event_data.get("processing_time_ms"),
+                "requires_followup": event_data.get("requires_followup", False),
+                "followup_actions": event_data.get("followup_actions", []),
+            }
+
+            future_resolved = resolve_response_future(
+                request_id, complete_response_data
+            )
+            if future_resolved:
+                logger.info(
+                    "Response future resolved via event (fast path)",
+                    request_id=request_id,
+                )
+            else:
+                # No waiting future found - response is stored in database
+                # The correct pod's polling will find it (or any pod if pod_name is NULL)
+                logger.debug(
+                    "No waiting response future found - response stored in database, will be picked up by polling",
+                    request_id=request_id,
+                )
         except Exception as e:
             logger.debug(
                 "Error resolving response future",

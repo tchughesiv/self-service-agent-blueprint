@@ -634,17 +634,6 @@ async def handle_cloudevent(
         event_type = event_data.get("type")
         event_source = event_data.get("source")
 
-        # Log warning if critical fields are missing
-        if not event_id:
-            logger.warning("CloudEvent missing event ID")
-            event_id = "unknown"
-        if not event_type:
-            logger.warning("CloudEvent missing event type")
-            event_type = "unknown"
-        if not event_source:
-            logger.warning("CloudEvent missing event source")
-            event_source = "unknown"
-
         logger.info(
             "CloudEvent received",
             event_id=event_id,
@@ -652,23 +641,53 @@ async def handle_cloudevent(
             event_source=event_source,
         )
 
-        # ✅ EVENT ID DEDUPLICATION: Check if this exact event was already processed
-        if event_id:
-            existing_event = await db.execute(
-                select(ProcessedEvent).where(ProcessedEvent.event_id == event_id)
+        # Validate required CloudEvent fields (type and source are required per spec)
+        # event_id is also required for atomic claiming
+        if not event_id:
+            logger.warning("CloudEvent missing event ID - cannot claim for processing")
+            return await create_cloudevent_response(
+                status="error",
+                message="CloudEvent missing required field (id)",
+                details={},
             )
-            if existing_event.scalar_one_or_none():
-                logger.info(
-                    "Event already processed - skipping duplicate",
-                    event_id=event_id,
-                    event_type=event_type,
-                    event_source=event_source,
-                )
-                return {
-                    "status": "skipped",
-                    "reason": "duplicate event",
-                    "event_id": event_id,
-                }
+
+        if not event_type or not event_source:
+            logger.warning(
+                "CloudEvent missing required fields",
+                event_id=event_id,
+                has_type=bool(event_type),
+                has_source=bool(event_source),
+            )
+            return await create_cloudevent_response(
+                status="error",
+                message="CloudEvent missing required fields (type, source)",
+                details={"event_id": event_id},
+            )
+
+        # ✅ ATOMIC EVENT CLAIMING: Use check-and-set pattern to prevent duplicate processing
+        # This provides 100% guarantee - only one pod can claim and process an event
+        from shared_models import DatabaseUtils
+
+        event_claimed = await DatabaseUtils.try_claim_event_for_processing(
+            db,
+            event_id,
+            event_type,
+            event_source,
+            "integration-dispatcher",
+        )
+
+        if not event_claimed:
+            logger.info(
+                "Event already claimed by another pod - skipping duplicate",
+                event_id=event_id,
+                event_type=event_type,
+                event_source=event_source,
+            )
+            return {
+                "status": "skipped",
+                "reason": "duplicate event (already claimed by another pod)",
+                "event_id": event_id,
+            }
 
         # Validate CloudEvent type
         if event_type != EventTypes.AGENT_RESPONSE_READY:
@@ -753,11 +772,21 @@ async def handle_cloudevent(
             ],
         )
 
-        # ✅ RECORD SUCCESSFUL EVENT PROCESSING
-        if delivery_request.request_id and delivery_request.session_id:
-            await _record_processed_event(
+        # ✅ UPDATE EVENT PROCESSING STATUS (event was already claimed)
+        if event_id:
+            from shared_models import DatabaseUtils
+
+            await DatabaseUtils.update_processed_event(
                 db,
                 event_id,
+                request_id=delivery_request.request_id,
+                session_id=delivery_request.session_id,
+                processing_result="success",
+            )
+        elif delivery_request.request_id and delivery_request.session_id:
+            await _record_processed_event(
+                db,
+                event_id or "unknown",
                 event_type,
                 event_source,
                 delivery_request.request_id,
@@ -790,28 +819,21 @@ async def handle_cloudevent(
             event_data_keys=list(event_data.keys()) if "event_data" in locals() else [],
         )
 
-        # ✅ RECORD FAILED EVENT PROCESSING
-        request_id = event_data.get("request_id")
-        session_id = event_data.get("session_id")
+        # ✅ UPDATE EVENT PROCESSING STATUS (event was already claimed)
+        if event_id:
+            from shared_models import DatabaseUtils
 
-        if not request_id:
-            logger.warning("CloudEvent missing request_id for error recording")
-            request_id = "unknown"
-        if not session_id:
-            logger.warning("CloudEvent missing session_id for error recording")
-            session_id = "unknown"
+            request_id = event_data.get("request_id")
+            session_id = event_data.get("session_id")
 
-        await _record_processed_event(
-            db,
-            str(event_id),
-            str(event_type),
-            str(event_source),
-            request_id,
-            session_id,
-            "integration-dispatcher",
-            "error",
-            str(e),
-        )
+            await DatabaseUtils.update_processed_event(
+                db,
+                str(event_id),
+                request_id=request_id,
+                session_id=session_id,
+                processing_result="error",
+                error_message=str(e),
+            )
 
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

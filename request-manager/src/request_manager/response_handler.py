@@ -26,7 +26,15 @@ class UnifiedResponseHandler:
         requires_followup: bool = False,
         followup_actions: Optional[list[str]] = None,
     ) -> Dict[str, Any]:
-        """Process an agent response and update the database."""
+        """Process an agent response and update the database.
+
+        This ensures 100% delivery guarantee by storing the response in the database
+        when any pod receives it, so it can be found via polling if needed.
+        """
+        from datetime import datetime, timezone
+
+        from shared_models.models import RequestLog
+        from sqlalchemy import update
 
         logger.debug(
             "Response processed - routing handled by Agent Service",
@@ -34,7 +42,35 @@ class UnifiedResponseHandler:
             agent_id=agent_id,
         )
 
-        # Send database update event to Agent Service
+        # Store response directly in database (for 100% delivery guarantee)
+        # This ensures the response is available even if received by wrong pod
+        try:
+            stmt = (
+                update(RequestLog)
+                .where(RequestLog.request_id == request_id)
+                .values(
+                    response_content=content,
+                    response_metadata=metadata or {},
+                    agent_id=agent_id,
+                    processing_time_ms=processing_time_ms,
+                    completed_at=datetime.now(timezone.utc),
+                )
+            )
+            await self.db.execute(stmt)
+            await self.db.commit()
+
+            logger.debug(
+                "Response stored in database for polling fallback",
+                request_id=request_id,
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to store response in database (will rely on agent service update)",
+                request_id=request_id,
+                error=str(e),
+            )
+
+        # Send database update event to Agent Service (for consistency)
         await self._send_database_update_event(
             request_id=request_id,
             session_id=session_id,

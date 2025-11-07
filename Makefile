@@ -113,6 +113,7 @@ helm_replica_count_args = \
 	$(if $(REPLICA_COUNT),--set mcp-servers.mcp-servers.self-service-agent-snow.replicas=$(REPLICA_COUNT),) \
 	$(if $(REPLICA_COUNT),--set requestManagement.knative.mockEventing.replicas=$(REPLICA_COUNT),) \
 	$(if $(REPLICA_COUNT),--set requestManagement.kafka.replicas=$(REPLICA_COUNT),) \
+	$(if $(REPLICA_COUNT),--set requestManagement.requestManager.replicas=$(REPLICA_COUNT),) \
 	$(if $(REPLICA_COUNT),--set requestManagement.integrationDispatcher.replicas=$(REPLICA_COUNT),) \
 	$(if $(REPLICA_COUNT),--set requestManagement.agentService.replicas=$(REPLICA_COUNT),)
 
@@ -210,7 +211,7 @@ help:
 	@echo "                                        If set, overrides defaults from helm/values.yaml"
 	@echo "                                        If not set, uses defaults from helm/values.yaml"
 	@echo "                                        Applies to: llama-stack, snow MCP, mock-eventing, kafka,"
-	@echo "                                        integration-dispatcher, and agent-service"
+	@echo "                                        request-manager, integration-dispatcher, and agent-service"
 	@echo ""
 	@echo "  Image Configuration:"
 	@echo "    AGENT_SERVICE_IMG                 - Full agent service image name (default: \$${REGISTRY}/self-service-agent-service:\$${VERSION})"

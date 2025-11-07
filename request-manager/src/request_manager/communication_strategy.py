@@ -19,11 +19,28 @@ logger = configure_logging("request-manager")
 # Global registry for response futures (event-driven approach)
 _response_futures_registry: dict[str, Any] = {}
 
+# Global polling task (single per pod)
+_pod_polling_task: Optional[asyncio.Task[None]] = None
+_pod_name: Optional[str] = None
 
-def resolve_response_future(request_id: str, response_data: Dict[str, Any]) -> None:
-    """Resolve a waiting response future when event is received."""
-    logger.info(
-        "Attempting to resolve response future",
+
+def get_pod_name() -> Optional[str]:
+    """Get pod name from environment variable."""
+    return os.getenv("HOSTNAME") or os.getenv("POD_NAME")
+
+
+def resolve_response_future(request_id: str, response_data: Dict[str, Any]) -> bool:
+    """Resolve a waiting response future when event is received.
+
+    Note: This is now optional - the primary delivery mechanism is database polling.
+    If a future exists and response arrives via event, resolve it immediately for speed.
+    If not, the database polling will find it.
+
+    Returns:
+        True if future was found and resolved, False if not found (database polling will handle it)
+    """
+    logger.debug(
+        "Attempting to resolve response future (optional - database polling is primary)",
         request_id=request_id,
         registry_keys=list(_response_futures_registry.keys()),
     )
@@ -31,22 +48,27 @@ def resolve_response_future(request_id: str, response_data: Dict[str, Any]) -> N
     if request_id in _response_futures_registry:
         future = _response_futures_registry[request_id]
         if not future.done():
+            # Mark as from event for logging
+            response_data["_from_event"] = True
             future.set_result(response_data)
             logger.info(
-                "Response future resolved",
+                "Response future resolved via event (fast path)",
                 request_id=request_id,
             )
+            return True
         else:
             logger.debug(
                 "Response future already resolved",
                 request_id=request_id,
             )
+            return True
     else:
-        logger.warning(
-            "No waiting response future found",
+        # No future found - database polling will handle it
+        logger.debug(
+            "No waiting response future found - database polling will handle delivery",
             request_id=request_id,
-            available_futures=list(_response_futures_registry.keys()),
         )
+        return False
 
 
 async def create_or_get_session_shared(
@@ -171,7 +193,9 @@ class CommunicationStrategy(ABC):
         pass
 
     @abstractmethod
-    async def wait_for_response(self, request_id: str, timeout: int) -> Dict[str, Any]:
+    async def wait_for_response(
+        self, request_id: str, timeout: int, db: Optional[AsyncSession] = None
+    ) -> Dict[str, Any]:
         """Wait for response from the agent service."""
         pass
 
@@ -192,6 +216,7 @@ class EventingStrategy(CommunicationStrategy):
     async def send_request(self, normalized_request: NormalizedRequest) -> bool:
         """Send request via CloudEvent."""
         request_event_data = normalized_request.model_dump(mode="json")
+
         success = await self.event_sender.send_request_event(
             request_event_data,
             normalized_request.request_id,
@@ -210,33 +235,44 @@ class EventingStrategy(CommunicationStrategy):
         )
         return True
 
-    async def wait_for_response(self, request_id: str, timeout: int) -> Dict[str, Any]:
-        """Wait for response event using event-driven approach."""
+    async def wait_for_response(
+        self, request_id: str, timeout: int, db: Optional[AsyncSession] = None
+    ) -> Dict[str, Any]:
+        """Wait for response using single per-pod polling mechanism.
+
+        Primary mechanism: Single background polling task per pod checks database.
+        Any pod that receives the response event stores it in the database.
+
+        Optional fast path: If response arrives via event at this pod, resolve immediately.
+        """
         logger.info(
-            "Waiting for response event",
+            "Waiting for response (single pod polling mechanism)",
             request_id=request_id,
             timeout=timeout,
         )
 
-        # Create a future that will be resolved when the response event is received
+        # Create a future that can be resolved by either event or polling
         response_future: asyncio.Future[Any] = asyncio.Future()
 
-        # Store the future in the global registry so the event handler can resolve it
+        # Store the future in the global registry (for fast path via event and polling)
         _response_futures_registry[request_id] = response_future
-        logger.info(
+        logger.debug(
             "Response future registered",
             request_id=request_id,
-            registry_keys=list(_response_futures_registry.keys()),
         )
 
         try:
-            # Wait for the response event with timeout
+            # Wait for the response (either from event fast path or single pod polling)
             response_data = await asyncio.wait_for(response_future, timeout=timeout)
 
             logger.info(
-                "Response event received",
+                "Response received",
                 request_id=request_id,
+                source="event" if response_data.get("_from_event") else "database",
             )
+
+            # Remove internal flag
+            response_data.pop("_from_event", None)
 
             return {
                 "request_id": request_id,
@@ -254,39 +290,125 @@ class EventingStrategy(CommunicationStrategy):
 
         except asyncio.TimeoutError:
             logger.error(
-                "Timeout waiting for response event",
+                "Timeout waiting for response",
                 request_id=request_id,
                 timeout=timeout,
             )
-            # Clean up the future on timeout
-            registry_size = len(_response_futures_registry)
-            active_requests = list(_response_futures_registry.keys())
-            logger.error(
-                "Timeout details",
-                request_id=request_id,
-                registry_size=registry_size,
-                active_requests=active_requests,
-            )
-            if request_id in _response_futures_registry:
-                del _response_futures_registry[request_id]
             raise Exception(f"Timeout waiting for response after {timeout} seconds")
         finally:
-            # Clean up the future only if it wasn't resolved
+            # Clean up the future
             if request_id in _response_futures_registry:
-                future = _response_futures_registry[request_id]
-                if not future.done():
-                    logger.debug(
-                        "Cleaning up unresolved future",
-                        request_id=request_id,
-                    )
-                    del _response_futures_registry[request_id]
-                else:
-                    logger.debug(
-                        "Future was resolved, cleaning up from registry",
-                        request_id=request_id,
-                    )
-                    # Clean up resolved futures too to prevent memory leak
-                    del _response_futures_registry[request_id]
+                del _response_futures_registry[request_id]
+
+
+async def _start_pod_polling_task(pod_name: str) -> None:
+    """Start the single per-pod polling task that checks for responses.
+
+    This task polls the database for responses where pod_name matches this pod
+    and request_id is in the _response_futures_registry.
+    """
+    global _pod_polling_task, _pod_name
+
+    if _pod_polling_task and not _pod_polling_task.done():
+        logger.warning("Pod polling task already running")
+        return
+
+    _pod_name = pod_name
+    _pod_polling_task = asyncio.create_task(_pod_response_poller(pod_name))
+    logger.info(
+        "Started single per-pod polling task",
+        pod_name=pod_name,
+    )
+
+
+async def _pod_response_poller(pod_name: str) -> None:
+    """Single background polling task per pod that checks for responses.
+
+    This polls the database for all waiting request_ids where:
+    - pod_name matches this pod
+    - response_content is not null
+    - request_id is in _response_futures_registry
+
+    When a response is found, it resolves the corresponding future.
+    """
+    poll_interval = float(os.getenv("DB_POLL_INTERVAL", "0.5"))  # Poll every 500ms
+
+    logger.info(
+        "Pod response poller started",
+        pod_name=pod_name,
+        poll_interval=poll_interval,
+    )
+
+    while True:
+        try:
+            # Get all waiting request_ids from registry
+            waiting_request_ids = list(_response_futures_registry.keys())
+
+            if not waiting_request_ids:
+                # No requests waiting, sleep and continue
+                await asyncio.sleep(poll_interval)
+                continue
+
+            # Query database for responses where pod_name matches (or is NULL) and response_content is not null
+            # Note: We check for NULL pod_name to handle cases where it wasn't set (e.g., older requests or CloudEvents)
+            # Since we filter by request_id.in_(waiting_request_ids), we only check requests this pod is waiting for
+            from shared_models import get_database_manager
+            from shared_models.models import RequestLog
+            from sqlalchemy import or_, select
+
+            db_manager = get_database_manager()
+            async with db_manager.get_session() as db:
+                stmt = select(RequestLog).where(
+                    RequestLog.request_id.in_(waiting_request_ids),
+                    or_(
+                        RequestLog.pod_name == pod_name,
+                        RequestLog.pod_name.is_(
+                            None
+                        ),  # Handle requests without pod_name (e.g., CloudEvents)
+                    ),
+                    RequestLog.response_content.isnot(None),
+                )
+                result = await db.execute(stmt)
+                request_logs = result.scalars().all()
+
+                # Resolve futures for any found responses
+                for request_log in request_logs:
+                    request_id: str = str(request_log.request_id)
+                    if request_id in _response_futures_registry:
+                        future = _response_futures_registry[request_id]
+                        if not future.done():
+                            response_data: Dict[str, Any] = {
+                                "request_id": request_id,
+                                "session_id": request_log.session_id,
+                                "agent_id": request_log.agent_id,
+                                "content": request_log.response_content,
+                                "metadata": request_log.response_metadata or {},
+                                "processing_time_ms": request_log.processing_time_ms,
+                                "requires_followup": False,
+                                "followup_actions": [],
+                                "_from_event": False,  # Flag to indicate source
+                            }
+                            future.set_result(response_data)
+                            logger.info(
+                                "Response found in database via single pod polling",
+                                request_id=request_id,
+                                pod_name=pod_name,
+                            )
+
+        except asyncio.CancelledError:
+            logger.info("Pod polling task cancelled", pod_name=pod_name)
+            break
+        except Exception as e:
+            logger.error(
+                "Error in pod polling task",
+                pod_name=pod_name,
+                error=str(e),
+            )
+            # Continue polling even on error
+            await asyncio.sleep(poll_interval)
+        else:
+            # Wait before next poll
+            await asyncio.sleep(poll_interval)
 
 
 def get_communication_strategy() -> CommunicationStrategy:
@@ -325,12 +447,21 @@ class UnifiedRequestProcessor:
         return session.session_id, session.current_agent_id
 
     async def process_request_sync(
-        self, request: Any, db: AsyncSession, timeout: int = 120
+        self,
+        request: Any,
+        db: AsyncSession,
+        timeout: int = 120,
+        set_pod_name: bool = True,
     ) -> Dict[str, Any]:
-        """Process a request synchronously and wait for response via eventing."""
+        """Process a request synchronously and wait for response via eventing.
+
+        Args:
+            set_pod_name: If True, set pod_name for requests that wait for responses.
+                         If False, don't set pod_name (e.g., CloudEvent requests).
+        """
         # Common request preparation
         normalized_request, session_id, current_agent_id = await self._prepare_request(
-            request, db
+            request, db, set_pod_name=set_pod_name
         )
 
         # Send request via eventing and wait for response event
@@ -344,9 +475,9 @@ class UnifiedRequestProcessor:
         if not success:
             raise Exception("Failed to send request")
 
-        # Wait for response event
+        # Wait for response event (with database polling fallback for 100% delivery)
         response = await self.strategy.wait_for_response(
-            normalized_request.request_id, timeout
+            normalized_request.request_id, timeout, db
         )
 
         logger.info(
@@ -359,9 +490,13 @@ class UnifiedRequestProcessor:
         return response
 
     async def _prepare_request(
-        self, request: Any, db: AsyncSession
+        self, request: Any, db: AsyncSession, set_pod_name: bool = True
     ) -> tuple[NormalizedRequest, str, str]:
         """Common request preparation logic: session management, normalization, and RequestLog creation.
+
+        Args:
+            set_pod_name: If True, set pod_name for requests that wait for responses.
+                         If False, don't set pod_name (e.g., CloudEvent requests).
 
         Returns:
             tuple: (normalized_request, session_id, current_agent_id)
@@ -393,14 +528,24 @@ class UnifiedRequestProcessor:
         )
 
         # Create initial RequestLog entry for tracking
-        await self._create_request_log_entry(normalized_request, db)
+        await self._create_request_log_entry(
+            normalized_request, db, set_pod_name=set_pod_name
+        )
 
         return normalized_request, session_id, current_agent_id
 
     async def _create_request_log_entry(
-        self, normalized_request: NormalizedRequest, db: AsyncSession
+        self,
+        normalized_request: NormalizedRequest,
+        db: AsyncSession,
+        set_pod_name: bool = True,
     ) -> None:
-        """Create initial RequestLog entry for tracking."""
+        """Create initial RequestLog entry for tracking.
+
+        Args:
+            set_pod_name: If True, set pod_name for requests that wait for responses.
+                         If False, don't set pod_name (e.g., CloudEvent requests).
+        """
         from .database_utils import create_request_log_entry_unified
 
         await create_request_log_entry_unified(
@@ -412,4 +557,5 @@ class UnifiedRequestProcessor:
             integration_type=normalized_request.integration_type,
             integration_context=normalized_request.integration_context,
             db=db,
+            set_pod_name=set_pod_name,
         )
