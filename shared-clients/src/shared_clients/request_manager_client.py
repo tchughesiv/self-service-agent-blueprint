@@ -12,9 +12,12 @@ import uuid
 from typing import Any, Dict, Optional, Union
 
 import httpx
+from shared_models import configure_logging
 
 # Remove logging we otherwise get by default
 logging.getLogger("httpx").setLevel(logging.WARNING)
+
+logger = configure_logging("request-manager-client")
 
 AGENT_MESSAGE_TERMINATOR = os.environ.get("AGENT_MESSAGE_TERMINATOR", "")
 
@@ -175,7 +178,6 @@ class CLIChatClient(RequestManagerClient):
         self,
         message: str,
         command_context: Optional[Dict[str, Any]] = None,
-        debug: bool = False,
         request_manager_session_id: Optional[str] = None,
         user_email: Optional[str] = None,
         session_name: Optional[str] = None,
@@ -186,7 +188,6 @@ class CLIChatClient(RequestManagerClient):
         Args:
             message: The message to send
             command_context: CLI command context (default: {"command": "chat", "args": []})
-            debug: Whether to print debug information
             request_manager_session_id: Session ID (auto-generated if not provided)
             user_email: User email
             session_name: Session name
@@ -210,11 +211,11 @@ class CLIChatClient(RequestManagerClient):
             "session_name": session_name or "",
         }
 
-        if debug:
-            print(
-                f"DEBUG: Sending request to {self.request_manager_url}/api/v1/requests/generic"
-            )
-            print(f"DEBUG: Payload: {message}")
+        logger.debug(
+            "Sending request to Request Manager",
+            url=f"{self.request_manager_url}/api/v1/requests/generic",
+            payload=message,
+        )
 
         try:
             result = await self.send_request(
@@ -225,9 +226,11 @@ class CLIChatClient(RequestManagerClient):
                 endpoint="generic",
             )
 
-            if debug:
-                print(f"DEBUG: Result type: {type(result)}")
-                print(f"DEBUG: Result: {result}")
+            logger.debug(
+                "Received result from Request Manager",
+                result_type=type(result).__name__,
+                result=result,
+            )
 
             return self._format_response(result)
 
@@ -243,9 +246,7 @@ class CLIChatClient(RequestManagerClient):
         # For now, just generate a new user_id to effectively reset the session
         self.user_id = str(uuid.uuid4())
 
-    async def _process_message(
-        self, message: str, debug: bool, test_mode: bool
-    ) -> bool:
+    async def _process_message(self, message: str, test_mode: bool) -> bool:
         """
         Process a single message and return True if the chat loop should continue.
 
@@ -257,7 +258,7 @@ class CLIChatClient(RequestManagerClient):
         ):
             return False
         elif message.lower() == "**tokens**":
-            agent_response = await self.send_message(message, debug=debug)
+            agent_response = await self.send_message(message)
             # Extract string content from response
             if isinstance(agent_response, dict):
                 response_content = agent_response.get("content", str(agent_response))
@@ -266,7 +267,7 @@ class CLIChatClient(RequestManagerClient):
             self._handle_tokens_command(response_content)
             return False
         elif message.strip():
-            agent_response = await self.send_message(message, debug=debug)
+            agent_response = await self.send_message(message)
             print(f"agent: {agent_response}")
             if test_mode:
                 print(AGENT_MESSAGE_TERMINATOR)
@@ -343,7 +344,6 @@ class CLIChatClient(RequestManagerClient):
     async def chat_loop(
         self,
         initial_message: str | None = None,
-        debug: bool = False,
         test_mode: bool = False,
     ) -> None:
         """
@@ -351,24 +351,23 @@ class CLIChatClient(RequestManagerClient):
 
         Args:
             initial_message: Optional initial message to send
-            debug: Whether to print debug information
             test_mode: If True, reads from stdin for automated testing
         """
         if test_mode:
-            if debug:
-                print("DEBUG: Test mode chat loop started")
-                print(f"DEBUG: Using Request Manager at: {self.request_manager_url}")
-                print(f"DEBUG: User ID: {self.user_id}")
+            logger.debug(
+                "Test mode chat loop started",
+                request_manager_url=self.request_manager_url,
+                user_id=self.user_id,
+            )
         else:
             print("CLI Chat - Type 'quit' to exit, 'reset' to clear session")
             print(f"Using Request Manager at: {self.request_manager_url}")
 
         # Send initial greeting if provided
         if initial_message:
-            if debug and test_mode:
-                print(f"DEBUG: Sending initial message: {initial_message}")
+            logger.debug("Sending initial message", message=initial_message)
             try:
-                agent_response = await self.send_message(initial_message, debug=debug)
+                agent_response = await self.send_message(initial_message)
                 print(f"agent: {agent_response}")
                 if test_mode:
                     print(AGENT_MESSAGE_TERMINATOR)
@@ -391,7 +390,7 @@ class CLIChatClient(RequestManagerClient):
                         continue
 
                     should_continue = await self._process_message(
-                        message, debug, test_mode=True
+                        message, test_mode=True
                     )
                     if not should_continue:
                         break
@@ -408,7 +407,7 @@ class CLIChatClient(RequestManagerClient):
                 try:
                     message = input("> ")
                     should_continue = await self._process_message(
-                        message, debug, test_mode=False
+                        message, test_mode=False
                     )
                     if not should_continue:
                         break
@@ -421,7 +420,6 @@ class CLIChatClient(RequestManagerClient):
     async def chat_loop_test_mode(
         self,
         initial_message: str | None = None,
-        debug: bool = False,
     ) -> None:
         """
         Run a test-mode chat loop that reads from stdin for automated testing.
@@ -429,8 +427,5 @@ class CLIChatClient(RequestManagerClient):
 
         Args:
             initial_message: Optional initial message to send
-            debug: Whether to print debug information
         """
-        await self.chat_loop(
-            initial_message=initial_message, debug=debug, test_mode=True
-        )
+        await self.chat_loop(initial_message=initial_message, test_mode=True)

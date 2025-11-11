@@ -4,11 +4,11 @@ A FastMCP server that provides tools for creating
 ServiceNow laptop refresh tickets.
 """
 
-import logging
 import os
 from typing import Any, Literal
 
 from mcp.server.fastmcp import Context, FastMCP
+from shared_models import configure_logging
 from snow.data.data import (
     create_laptop_refresh_ticket,
     find_employee_by_authoritative_user_id,
@@ -21,7 +21,7 @@ from starlette.responses import JSONResponse
 from tracing_config.auto_tracing import run as auto_tracing_run
 
 SERVICE_NAME = "snow-mcp-server"
-logger = logging.getLogger(SERVICE_NAME)
+logger = configure_logging(SERVICE_NAME)
 auto_tracing_run(SERVICE_NAME, logger)
 
 MCP_TRANSPORT: Literal["stdio", "sse", "streamable-http"] = os.environ.get("MCP_TRANSPORT", "sse")  # type: ignore[assignment]
@@ -60,7 +60,7 @@ def _create_real_servicenow_ticket(
 
         # Look up user sys_id by email as currently only email is supported
         # authoritative user id
-        logging.info(f"Looking up sys_id for email: {authoritative_user_id}")
+        logger.info(f"Looking up sys_id for email: {authoritative_user_id}")
         user_result = client.get_user_by_email(authoritative_user_id)
         if user_result.get("success") and user_result.get("user"):
             user_sys_id = user_result["user"].get("sys_id")
@@ -68,7 +68,7 @@ def _create_real_servicenow_ticket(
                 raise ValueError(
                     f"User found but sys_id is missing for email: {authoritative_user_id}"
                 )
-            logging.info(f"Found sys_id: {user_sys_id}")
+            logger.info(f"Found sys_id: {user_sys_id}")
         else:
             error_msg = user_result.get("message", "Unknown error")
             raise ValueError(
@@ -84,7 +84,7 @@ def _create_real_servicenow_ticket(
 
         # Extract the required fields from the result
         if result.get("success") and result.get("data", {}).get("result"):
-            logging.info(
+            logger.info(
                 f"ServiceNow API request completed - authoritative_user_id: {authoritative_user_id}, "
                 f"laptop: {preferred_model}, success: {result.get('success', False)}"
             )
@@ -101,7 +101,7 @@ def _create_real_servicenow_ticket(
 
     except Exception as e:
         error_msg = f"Error opening ServiceNow laptop refresh request: {str(e)}"
-        logging.error(error_msg)
+        logger.error(error_msg)
         raise  # Re-raise to allow fallback handling
 
 
@@ -125,7 +125,7 @@ def _extract_authoritative_user_id(ctx: Context[Any, Any]) -> str | None:
                 )
                 return str(user_id) if user_id is not None else None
     except Exception as e:
-        logging.debug(f"Error extracting headers from request context: {e}")
+        logger.debug(f"Error extracting headers from request context: {e}")
 
     return None
 
@@ -152,7 +152,9 @@ def _extract_servicenow_token(ctx: Context[Any, Any]) -> str | None:
                 token = headers.get("SERVICE_NOW_TOKEN")
                 return str(token) if token is not None else None
     except Exception as e:
-        logging.debug(f"Error extracting ServiceNow token from request context: {e}")
+        logger.debug(
+            "Error extracting ServiceNow token from request context", error=str(e)
+        )
 
     return None
 
@@ -181,7 +183,7 @@ def _get_real_servicenow_laptop_info(
             return f"Error: Failed to retrieve laptop info for {authoritative_user_id} from ServiceNow"
     except Exception as e:
         error_msg = f"Error getting laptop info from ServiceNow: {str(e)}"
-        logging.error(error_msg)
+        logger.error(error_msg)
         raise  # Re-raise to allow fallback handling
 
 
@@ -252,7 +254,7 @@ def open_laptop_refresh_ticket(
             raise ValueError(
                 "ServiceNow API token is required for real ServiceNow integration. "
             )
-        logging.info(
+        logger.info(
             f"Using real ServiceNow API - authoritative_user_id: {authoritative_user_id}, laptop_code: {servicenow_laptop_code}"
         )
         return _create_real_servicenow_ticket(
@@ -260,7 +262,7 @@ def open_laptop_refresh_ticket(
         )
 
     # Use mock implementation
-    logging.info(
+    logger.info(
         f"Using mock ServiceNow implementation - authoritative_user_id: {authoritative_user_id}, laptop_code: {servicenow_laptop_code}"
     )
     return create_laptop_refresh_ticket(
@@ -320,19 +322,19 @@ def get_employee_laptop_info(
             raise ValueError(
                 "ServiceNow API token is required for real ServiceNow integration. "
             )
-        logging.info(
+        logger.info(
             f"Using real ServiceNow API for laptop info - authoritative_user_id: {authoritative_user_id}"
         )
         return _get_real_servicenow_laptop_info(authoritative_user_id, api_token)
 
     # Use mock implementation
-    logging.info(
+    logger.info(
         f"Using mock laptop info implementation - authoritative_user_id: {authoritative_user_id}"
     )
 
     result = _get_mock_laptop_info(authoritative_user_id)
 
-    logging.info(
+    logger.info(
         f"returning laptop info for employee - authoritative_user_id: {authoritative_user_id}"
     )
 
