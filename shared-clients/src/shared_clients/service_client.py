@@ -119,12 +119,43 @@ class AgentServiceClient(ServiceClient):
     async def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
         """Get session details via REST API."""
         try:
-            response = await self.get(f"/api/v1/sessions/{session_id}")
+            url = f"/api/v1/sessions/{session_id}"
+            logger.error(
+                "DEBUG: AgentServiceClient.get_session called",
+                session_id=session_id,
+                url=url,
+                base_url=self.base_url,
+            )
+            response = await self.get(url)
+            logger.error(
+                "DEBUG: AgentServiceClient.get_session response",
+                session_id=session_id,
+                status_code=response.status_code,
+                has_content=bool(response.content),
+            )
             response.raise_for_status()
             result = response.json()
+            logger.error(
+                "DEBUG: AgentServiceClient.get_session parsed JSON",
+                session_id=session_id,
+                has_result=bool(result),
+                result_type=type(result).__name__,
+            )
             return result if isinstance(result, dict) else None
         except Exception as e:
-            logger.error("Failed to get session", session_id=session_id, error=str(e))
+            logger.error(
+                "Failed to get session",
+                session_id=session_id,
+                error=str(e),
+                error_type=type(e).__name__,
+                exc_info=True,
+            )
+            logger.error(
+                "DEBUG: AgentServiceClient.get_session exception",
+                session_id=session_id,
+                error=str(e),
+                error_type=type(e).__name__,
+            )
             return None
 
     async def create_session(

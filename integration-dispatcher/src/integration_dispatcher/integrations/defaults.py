@@ -668,18 +668,61 @@ class IntegrationDefaultsService:
 
                 if not channel_id:
                     # For direct messages, we need to get the DM channel for the user
-                    # Use stored mapping with validation if no context provided
-                    final_slack_user_id = await self._get_validated_slack_user_id(
-                        user_id
+                    # First, try to get Slack user_id from existing mapping by canonical user_id
+                    slack_user_id = None
+                    from shared_models.models import UserIntegrationMapping
+
+                    stmt = select(UserIntegrationMapping).where(
+                        UserIntegrationMapping.user_id == user_id,
+                        UserIntegrationMapping.integration_type
+                        == IntegrationType.SLACK,
                     )
-                    if final_slack_user_id:
-                        self._update_slack_config(
-                            config, slack_user_id=final_slack_user_id
+                    result = await db.execute(stmt)
+                    slack_mapping = result.scalar_one_or_none()
+
+                    if slack_mapping:
+                        slack_user_id = slack_mapping.integration_user_id
+                        logger.info(
+                            "Found Slack user_id from mapping",
+                            user_id=user_id,
+                            slack_user_id=slack_user_id,
                         )
+
+                    # If no mapping found, try to look up by email from context or User table
+                    if not slack_user_id:
+                        user_email = None
+                        if context:
+                            user_email = context.get("email_from")
+
+                        # If no email in context, look it up from User table
+                        if not user_email:
+                            from shared_models.models import User
+
+                            stmt = select(User).where(User.user_id == user_id)
+                            result = await db.execute(stmt)
+                            user = result.scalar_one_or_none()
+                            if user and user.primary_email:
+                                user_email = user.primary_email
+                                logger.info(
+                                    "Found email from User table",
+                                    user_id=user_id,
+                                    email=user_email,
+                                )
+
+                        # If we have an email, try to look up Slack user_id via API
+                        if user_email:
+                            final_slack_user_id = (
+                                await self._get_validated_slack_user_id(user_email)
+                            )
+                            if final_slack_user_id:
+                                slack_user_id = final_slack_user_id
+
+                    if slack_user_id:
+                        self._update_slack_config(config, slack_user_id=slack_user_id)
                         logger.info(
                             "Applied Slack user ID for DM lookup (no channel in context)",
                             user_id=user_id,
-                            slack_user_id=final_slack_user_id,
+                            slack_user_id=slack_user_id,
                             config=config["config"],
                         )
                     else:
@@ -716,7 +759,7 @@ class IntegrationDefaultsService:
                             email_address=email_address,
                         )
 
-                # If no context email, check if user_id itself is an email address
+                # If no context email, check if user_id itself is an email address (legacy support)
                 if not email_address and "@" in user_id:
                     email_address = user_id
                     logger.info(
@@ -724,6 +767,38 @@ class IntegrationDefaultsService:
                         user_id=user_id,
                         email_address=email_address,
                     )
+
+                # If still no email, look it up from User table or UserIntegrationMapping
+                if not email_address:
+                    from shared_models.models import User, UserIntegrationMapping
+
+                    # First, try to get email from User table
+                    stmt = select(User).where(User.user_id == user_id)
+                    result = await db.execute(stmt)
+                    user = result.scalar_one_or_none()
+                    if user and user.primary_email:
+                        email_address = user.primary_email
+                        logger.info(
+                            "Found email from User table",
+                            user_id=user_id,
+                            email_address=email_address,
+                        )
+                    else:
+                        # Fallback: try to get email from EMAIL type mapping
+                        stmt = select(UserIntegrationMapping).where(
+                            UserIntegrationMapping.user_id == user_id,
+                            UserIntegrationMapping.integration_type
+                            == IntegrationType.EMAIL,
+                        )
+                        result = await db.execute(stmt)
+                        email_mapping = result.scalar_one_or_none()
+                        if email_mapping and email_mapping.user_email:
+                            email_address = email_mapping.user_email
+                            logger.info(
+                                "Found email from EMAIL mapping",
+                                user_id=user_id,
+                                email_address=email_address,
+                            )
 
                 # Check if email exists as a user (has any integration mapping)
                 if email_address:
@@ -974,7 +1049,7 @@ class IntegrationDefaultsService:
                             email_address=email_address,
                         )
 
-                # If no context email, check if user_id itself is an email address
+                # If no context email, check if user_id itself is an email address (legacy support)
                 if not email_address and "@" in user_id:
                     email_address = user_id
                     logger.info(
@@ -982,6 +1057,38 @@ class IntegrationDefaultsService:
                         user_id=user_id,
                         email_address=email_address,
                     )
+
+                # If still no email, look it up from User table or UserIntegrationMapping
+                if not email_address:
+                    from shared_models.models import User, UserIntegrationMapping
+
+                    # First, try to get email from User table
+                    stmt = select(User).where(User.user_id == user_id)
+                    result = await db.execute(stmt)
+                    user = result.scalar_one_or_none()
+                    if user and user.primary_email:
+                        email_address = user.primary_email
+                        logger.info(
+                            "Found email from User table",
+                            user_id=user_id,
+                            email_address=email_address,
+                        )
+                    else:
+                        # Fallback: try to get email from EMAIL type mapping
+                        stmt = select(UserIntegrationMapping).where(
+                            UserIntegrationMapping.user_id == user_id,
+                            UserIntegrationMapping.integration_type
+                            == IntegrationType.EMAIL,
+                        )
+                        result = await db.execute(stmt)
+                        email_mapping = result.scalar_one_or_none()
+                        if email_mapping and email_mapping.user_email:
+                            email_address = email_mapping.user_email
+                            logger.info(
+                                "Found email from EMAIL mapping",
+                                user_id=user_id,
+                                email_address=email_address,
+                            )
 
                 # Check if email exists as a user (has any integration mapping)
                 if email_address:

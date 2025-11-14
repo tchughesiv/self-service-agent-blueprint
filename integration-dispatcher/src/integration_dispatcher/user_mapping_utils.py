@@ -21,7 +21,7 @@ Usage:
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from shared_models import configure_logging
+from shared_models import configure_logging, get_or_create_canonical_user
 from shared_models.database import get_database_manager
 from shared_models.models import IntegrationType, UserIntegrationMapping
 from sqlalchemy.dialects.postgresql import insert
@@ -34,21 +34,31 @@ async def store_user_mapping(
     integration_user_id: str,
     integration_type: IntegrationType,
     created_by: str = "system",
-) -> None:
+    canonical_user_id: Optional[str] = None,
+) -> str:
     """
-    Store the email -> integration user ID mapping for future use.
+    Store the integration user ID mapping, creating/getting canonical user if needed.
 
     Args:
         user_email: The user's email address
         integration_user_id: The integration-specific user ID (e.g., Slack user ID, Teams user ID)
         integration_type: The type of integration (SLACK, TEAMS, etc.)
         created_by: Identifier for who created this mapping
+        canonical_user_id: Optional canonical user_id. If None, will be resolved from email.
+
+    Returns:
+        str: The canonical user_id
     """
     try:
         db_manager = get_database_manager()
         async with db_manager.get_session() as db:
+            # Get or create canonical user
+            if canonical_user_id is None:
+                canonical_user_id = await get_or_create_canonical_user(user_email, db)
+
             # Use upsert pattern - update if exists, insert if not
             stmt = insert(UserIntegrationMapping).values(
+                user_id=canonical_user_id,
                 user_email=user_email,
                 integration_type=integration_type,
                 integration_user_id=integration_user_id,
@@ -60,9 +70,10 @@ async def store_user_mapping(
 
             # On conflict, update the integration user ID and validation timestamp
             stmt = stmt.on_conflict_do_update(
-                index_elements=["user_email", "integration_type"],
+                index_elements=["user_id", "integration_type"],
                 set_={
                     "integration_user_id": stmt.excluded.integration_user_id,
+                    "user_email": stmt.excluded.user_email,  # Update email if changed
                     "last_validated_at": stmt.excluded.last_validated_at,
                     "validation_attempts": 0,  # Reset attempts
                     "last_validation_error": None,  # Clear errors
@@ -75,11 +86,14 @@ async def store_user_mapping(
 
             logger.info(
                 "Stored user mapping",
+                canonical_user_id=canonical_user_id,
                 user_email=user_email,
                 integration_user_id=integration_user_id,
                 integration_type=integration_type.value,
                 created_by=created_by,
             )
+
+            return canonical_user_id
 
     except Exception as e:
         logger.error(
@@ -90,14 +104,19 @@ async def store_user_mapping(
             created_by=created_by,
             error=str(e),
         )
+        raise
 
 
 # Convenience functions for specific integration types
 async def store_slack_user_mapping(
     user_email: str, slack_user_id: str, created_by: str = "system"
-) -> None:
-    """Store a Slack user mapping (convenience function)."""
-    await store_user_mapping(
+) -> str:
+    """Store a Slack user mapping (convenience function).
+
+    Returns:
+        str: The canonical user_id
+    """
+    return await store_user_mapping(
         user_email=user_email,
         integration_user_id=slack_user_id,
         integration_type=IntegrationType.SLACK,
@@ -107,17 +126,67 @@ async def store_slack_user_mapping(
 
 async def store_email_user_mapping(
     user_email: str, created_by: str = "email_service"
-) -> None:
+) -> str:
     """Store an email user mapping (convenience function).
 
     For email, the integration_user_id is the email_address itself.
+
+    Returns:
+        str: The canonical user_id
     """
-    await store_user_mapping(
+    return await store_user_mapping(
         user_email=user_email,
         integration_user_id=user_email,
         integration_type=IntegrationType.EMAIL,
         created_by=created_by,
     )
+
+
+async def resolve_user_id_from_integration_id(
+    integration_user_id: str,
+    integration_type: IntegrationType,
+    db: Any,
+    created_by: str = "system",
+) -> Optional[str]:
+    """Resolve canonical user_id from integration-specific user ID (e.g., Slack user ID).
+
+    This is used when email is not available (e.g., Slack API fails to return email).
+
+    Args:
+        integration_user_id: The integration-specific user ID (e.g., Slack user ID)
+        integration_type: The integration type (e.g., SLACK)
+        db: Database session
+        created_by: Identifier for who is creating this lookup
+
+    Returns:
+        Optional[str]: The canonical user_id (UUID as string) if found, None otherwise
+    """
+    from sqlalchemy import select
+
+    # Check if there's an existing mapping for this integration_user_id
+    stmt = select(UserIntegrationMapping).where(
+        UserIntegrationMapping.integration_user_id == integration_user_id,
+        UserIntegrationMapping.integration_type == integration_type,
+    )
+    result = await db.execute(stmt)
+    existing_mapping = result.scalar_one_or_none()
+
+    if existing_mapping:
+        logger.debug(
+            "Found existing mapping for integration user ID",
+            integration_user_id=integration_user_id,
+            integration_type=integration_type.value,
+            canonical_user_id=existing_mapping.user_id,
+        )
+        return str(existing_mapping.user_id)
+
+    # No mapping found - cannot create canonical user without email
+    logger.warning(
+        "No mapping found for integration user ID and email not available",
+        integration_user_id=integration_user_id,
+        integration_type=integration_type.value,
+    )
+    return None
 
 
 async def resolve_user_id_from_email(
@@ -128,25 +197,25 @@ async def resolve_user_id_from_email(
     integration_specific_id: Optional[str] = None,
     created_by: str = "system",
 ) -> str:
-    """Resolve user_id from email address, checking for existing mappings and maintaining user identity.
+    """Resolve canonical user_id from email address, checking for existing mappings and maintaining user identity.
 
     This function:
     1. Checks for integration-specific mapping first
     2. If not found, checks if email exists in any other integration mapping
-    3. If found, reuses existing user_id and creates mapping with integration_specific_id (or existing user_id)
-    4. If not found, creates new mapping with default_user_id and integration_specific_id
+    3. If found, reuses existing canonical user_id and creates mapping with integration_specific_id
+    4. If not found, creates new canonical user and mapping with integration_specific_id
 
     Args:
         email_address: The user's email address
         integration_type: The integration type to create mapping for (e.g., EMAIL, SLACK)
         db: Database session to use for queries
-        default_user_id: The user_id to use if no existing mapping is found
+        default_user_id: DEPRECATED - no longer used, kept for backward compatibility
         integration_specific_id: The integration-specific ID to store in integration_user_id
-            (e.g., Slack user ID). If None, uses the resolved user_id.
+            (e.g., Slack user ID). If None, uses email_address.
         created_by: Identifier for who is creating this mapping
 
     Returns:
-        str: The resolved user_id (either existing or default)
+        str: The canonical user_id (UUID as string)
     """
     from sqlalchemy import select
 
@@ -163,19 +232,14 @@ async def resolve_user_id_from_email(
             "Found existing mapping for integration",
             email_address=email_address,
             integration_type=integration_type.value,
+            canonical_user_id=integration_mapping.user_id,
             integration_user_id=integration_mapping.integration_user_id,
         )
-        # For system user_id, we need to use the email_address (user_email field)
-        # The integration_user_id is integration-specific (e.g., Slack user ID) and used for lookups
-        # But the system user_id should be consistent - for both Slack and Email, we use the email
-        # However, for backwards compatibility, some integrations might use integration_user_id as user_id
-        # So we return the email_address which is the consistent system user_id
-        return email_address
+        # Return the canonical user_id (UUID)
+        return str(integration_mapping.user_id)
 
     # Check if email exists in any other integration mapping
     # This handles the case where a user already has a mapping via another integration
-    # Use scalars().first() instead of scalar_one_or_none() since there can be multiple mappings
-    # (e.g., both SLACK and EMAIL for the same email)
     stmt = select(UserIntegrationMapping).where(
         UserIntegrationMapping.user_email == email_address
     )
@@ -183,53 +247,48 @@ async def resolve_user_id_from_email(
     existing_mapping = result.scalars().first()
 
     if existing_mapping:
-        # User already exists via another integration - use email_address as the consistent user_id
-        # The system expects email_address as the user_id for both Slack and Email
-        # Use integration_specific_id if provided, otherwise use email_address
-        # For Slack: integration_specific_id should be slack_user_id
-        # For Email: integration_specific_id should be email_address
+        # User already exists via another integration - reuse canonical user_id
+        canonical_user_id = str(existing_mapping.user_id)
         integration_id = (
             integration_specific_id
             if integration_specific_id is not None
             else email_address
         )
         logger.info(
-            "Found existing mapping for email from another integration, creating mapping with same user_id",
+            "Found existing mapping for email from another integration, creating mapping with same canonical user_id",
             email_address=email_address,
             integration_type=integration_type.value,
             existing_integration_type=existing_mapping.integration_type.value,
-            existing_integration_user_id=existing_mapping.integration_user_id,
+            canonical_user_id=canonical_user_id,
             integration_specific_id=integration_id,
         )
-        # Create mapping using integration_specific_id for integration_user_id
-        # but the system will use email_address as the user_id for requests (consistent across integrations)
+        # Create mapping using existing canonical user_id
         await store_user_mapping(
             user_email=email_address,
             integration_user_id=integration_id,
             integration_type=integration_type,
             created_by=created_by,
+            canonical_user_id=canonical_user_id,
         )
-        # Always return email_address as the system user_id for consistency
-        return email_address
+        return canonical_user_id
 
-    # No mapping found - create one for new user
-    # Use integration_specific_id if provided, otherwise use default_user_id
+    # No mapping found - create new canonical user and mapping
     integration_id = (
         integration_specific_id
         if integration_specific_id is not None
-        else default_user_id
+        else email_address
     )
     logger.info(
-        "No mapping found for email, creating mapping for new user",
+        "No mapping found for email, creating new canonical user and mapping",
         email_address=email_address,
         integration_type=integration_type.value,
-        default_user_id=default_user_id,
         integration_specific_id=integration_id,
     )
-    await store_user_mapping(
+    # store_user_mapping will create the canonical user if needed
+    canonical_user_id = await store_user_mapping(
         user_email=email_address,
         integration_user_id=integration_id,
         integration_type=integration_type,
         created_by=created_by,
     )
-    return default_user_id
+    return canonical_user_id

@@ -483,6 +483,44 @@ email_service = EmailService()
 integration_defaults_service = IntegrationDefaultsService()
 
 
+# Middleware to always log Slack interactive requests
+@app.middleware("http")
+async def log_slack_interactive_requests(request: Request, call_next: Any) -> Any:
+    # Log ALL POST requests to help debug routing issues
+    if request.method == "POST":
+        logger.error(
+            "=== MIDDLEWARE: POST request received ===",
+            path=request.url.path,
+            client_host=request.client.host if request.client else None,
+            is_slack_interactive=(request.url.path == "/slack/interactive"),
+        )
+    if request.method == "POST" and request.url.path == "/slack/interactive":
+        logger.error("=== MIDDLEWARE: POST /slack/interactive request received ===")
+        logger.info(
+            "Slack interactive request in middleware",
+            method=request.method,
+            path=request.url.path,
+            client_host=request.client.host if request.client else None,
+        )
+    try:
+        response = await call_next(request)
+        if request.method == "POST" and request.url.path == "/slack/interactive":
+            logger.error(
+                "=== MIDDLEWARE: POST /slack/interactive response status ===",
+                status_code=response.status_code,
+            )
+        return response
+    except Exception as e:
+        logger.error(
+            "=== MIDDLEWARE: Exception in request handling ===",
+            path=request.url.path,
+            error=str(e),
+            error_type=type(e).__name__,
+            exc_info=True,
+        )
+        raise
+
+
 # Debug middleware to log all requests (only when DEBUG logging is enabled)
 if os.getenv("LOG_LEVEL", "INFO").upper() == "DEBUG":
 
@@ -727,6 +765,39 @@ async def handle_cloudevent(
         request_id = response_data.get("request_id")
         session_id = response_data.get("session_id")
 
+        # Validate required fields - session_id is required for all agent responses
+        if not request_id:
+            logger.error("Missing request_id in CloudEvent response data")
+            return await create_cloudevent_response(
+                status="error",
+                message="Missing required field: request_id",
+                details={"event_id": event_id},
+            )
+
+        if not session_id:
+            logger.error(
+                "Missing session_id in CloudEvent response data",
+                request_id=request_id,
+                response_data_keys=list(response_data.keys()),
+            )
+            return await create_cloudevent_response(
+                status="error",
+                message="Missing required field: session_id (all agent responses must be tied to a session)",
+                details={"event_id": event_id, "request_id": request_id},
+            )
+
+        if not response_data.get("content"):
+            logger.error(
+                "Missing content in CloudEvent response data",
+                request_id=request_id,
+                session_id=session_id,
+            )
+            return await create_cloudevent_response(
+                status="error",
+                message="Missing required field: content",
+                details={"event_id": event_id, "request_id": request_id},
+            )
+
         logger.info(
             "Parsing CloudEvent data",
             request_id=request_id,
@@ -735,11 +806,21 @@ async def handle_cloudevent(
             agent_id=response_data.get("agent_id"),
         )
 
-        # Create delivery request
+        # Resolve user_id to canonical user_id if it's an email address
+        original_user_id = response_data.get("user_id")
+        from shared_models import resolve_canonical_user_id
+
+        canonical_user_id = await resolve_canonical_user_id(
+            original_user_id,
+            integration_type=None,
+            db=db,
+        )
+
+        # Create delivery request - session_id is guaranteed to be present after validation above
         delivery_request = DeliveryRequest(
-            request_id=response_data.get("request_id"),
-            session_id=response_data.get("session_id"),
-            user_id=response_data.get("user_id"),
+            request_id=request_id,
+            session_id=session_id,
+            user_id=canonical_user_id,
             subject=response_data.get("subject"),
             content=response_data.get("content"),
             template_variables=response_data.get("template_variables", {}),
@@ -751,6 +832,7 @@ async def handle_cloudevent(
             request_id=delivery_request.request_id,
             session_id=delivery_request.session_id,
             user_id=delivery_request.user_id,
+            original_user_id=original_user_id,
             agent_id=delivery_request.agent_id,
             content_length=(
                 len(delivery_request.content) if delivery_request.content else 0
@@ -853,20 +935,64 @@ async def handle_direct_delivery(
         delivery_data = json.loads(body)
         logger.debug("Delivery data received", delivery_data=delivery_data)
 
+        request_id = delivery_data.get("request_id")
+        session_id = delivery_data.get("session_id")
+
         logger.info(
             "Direct delivery request received",
-            request_id=delivery_data.get("request_id"),
-            session_id=delivery_data.get("session_id"),
+            request_id=request_id,
+            session_id=session_id,
             user_id=delivery_data.get("user_id"),
         )
 
+        # Validate required fields - session_id is required for all deliveries
+        if not request_id:
+            logger.error("Missing request_id in direct delivery request")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Missing required field: request_id",
+            )
+
+        if not session_id:
+            logger.error(
+                "Missing session_id in direct delivery request",
+                request_id=request_id,
+                delivery_data_keys=list(delivery_data.keys()),
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Missing required field: session_id (all deliveries must be tied to a session)",
+            )
+
+        if not delivery_data.get("content"):
+            logger.error(
+                "Missing content in direct delivery request",
+                request_id=request_id,
+                session_id=session_id,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Missing required field: content",
+            )
+
+        # Resolve user_id to canonical user_id if it's an email address
+        original_user_id = delivery_data.get("user_id")
+        from shared_models import resolve_canonical_user_id
+
+        canonical_user_id = await resolve_canonical_user_id(
+            original_user_id,
+            integration_type=None,
+            db=db,
+        )
+
         # Create delivery request from the payload using shared model
+        # session_id is guaranteed to be present after validation above
         from shared_models.models import DeliveryRequest
 
         delivery_request = DeliveryRequest(
-            request_id=delivery_data.get("request_id"),
-            session_id=delivery_data.get("session_id"),
-            user_id=delivery_data.get("user_id"),
+            request_id=request_id,
+            session_id=session_id,
+            user_id=canonical_user_id,
             agent_id=delivery_data.get("agent_id"),
             subject=delivery_data.get("subject"),
             content=delivery_data.get("content"),
@@ -878,6 +1004,7 @@ async def handle_direct_delivery(
             "About to dispatch delivery request",
             request_id=delivery_request.request_id,
             user_id=delivery_request.user_id,
+            original_user_id=original_user_id,
             agent_id=delivery_request.agent_id,
         )
 
@@ -1260,6 +1387,9 @@ async def handle_slack_events(
 async def handle_slack_interactive(request: Request) -> Dict[str, Any]:
     """Handle Slack interactive components (buttons, etc.)."""
     try:
+        # Log immediately to verify requests are reaching this endpoint
+        logger.error("=== SLACK INTERACTIVE ENDPOINT CALLED ===")
+        logger.info("Slack interactive endpoint called")
         body = await request.body()
         headers = request.headers
 
@@ -1267,9 +1397,18 @@ async def handle_slack_interactive(request: Request) -> Dict[str, Any]:
         timestamp = headers.get("x-slack-request-timestamp", "")
         signature = headers.get("x-slack-signature", "")
 
+        logger.info(
+            "Verifying Slack signature for interactive request",
+            has_timestamp=bool(timestamp),
+            has_signature=bool(signature),
+            body_length=len(body),
+        )
+
         if not slack_service.verify_slack_signature(body, timestamp, signature):
             logger.warning("Invalid Slack signature")
             raise HTTPException(status_code=403, detail="Invalid signature")
+
+        logger.info("Slack signature verified successfully")
 
         # Parse form data
         form_data = body.decode("utf-8")
@@ -1282,11 +1421,42 @@ async def handle_slack_interactive(request: Request) -> Dict[str, Any]:
             payload_json = form_data
 
         data = json.loads(payload_json)
-        payload = SlackInteractionPayload(**data)
+
+        # Log the raw data to help debug parsing issues
+        logger.info(
+            "Raw Slack interaction data",
+            data_keys=list(data.keys()) if isinstance(data, dict) else "not_dict",
+            has_user=bool(data.get("user") if isinstance(data, dict) else False),
+            has_actions=bool(data.get("actions") if isinstance(data, dict) else False),
+        )
+
+        try:
+            payload = SlackInteractionPayload(**data)
+        except Exception as parse_error:
+            logger.error(
+                "Failed to parse Slack interaction payload",
+                error=str(parse_error),
+                error_type=type(parse_error).__name__,
+                data_keys=list(data.keys()) if isinstance(data, dict) else "not_dict",
+                data_preview=(
+                    str(data)[:500] if isinstance(data, dict) else str(data)[:500]
+                ),
+            )
+            raise
+
+        logger.info(
+            "Parsed Slack interaction payload",
+            interaction_type=payload.type,
+            user_id=payload.user.id if payload.user else None,
+            has_actions=bool(payload.actions),
+            action_count=len(payload.actions) if payload.actions else 0,
+        )
 
         # Handle interaction
         if payload.type == "block_actions":
+            logger.info("Handling block_actions interaction")
             response = await slack_service.handle_button_interaction(payload)
+            logger.info("Button interaction handled successfully")
             return response
         elif payload.type == "view_submission":
             response = await slack_service.handle_modal_submission(payload)
@@ -1296,10 +1466,32 @@ async def handle_slack_interactive(request: Request) -> Dict[str, Any]:
         return {"text": "Unknown interaction"}
 
     except json.JSONDecodeError as e:
-        logger.error("Invalid JSON in Slack interaction", error=str(e))
+        logger.error(
+            "Invalid JSON in Slack interaction",
+            error=str(e),
+            error_type=type(e).__name__,
+            exc_info=True,
+        )
+        logger.error(
+            "DEBUG: JSON decode error in handle_slack_interactive",
+            error=str(e),
+        )
         raise HTTPException(status_code=400, detail="Invalid JSON")
+    except HTTPException:
+        # Re-raise HTTP exceptions (like 403 from signature verification)
+        raise
     except Exception as e:
-        logger.error("Error handling Slack interaction", error=str(e))
+        logger.error(
+            "Error handling Slack interaction",
+            error=str(e),
+            error_type=type(e).__name__,
+            exc_info=True,
+        )
+        logger.error(
+            "DEBUG: Exception in handle_slack_interactive",
+            error=str(e),
+            error_type=type(e).__name__,
+        )
         raise HTTPException(status_code=500, detail="Internal server error")
 
 

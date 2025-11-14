@@ -807,13 +807,13 @@ class EmailService:
             return False
 
     async def _resolve_user_id(self, email_address: str, db: Any) -> str:
-        """Resolve email address to user_id and create mapping if needed."""
+        """Resolve email address to canonical user_id and create mapping if needed."""
         try:
             from shared_models.models import IntegrationType
 
             from .user_mapping_utils import resolve_user_id_from_email
 
-            # Use shared helper function to resolve user_id with consistent logic
+            # Use shared helper function to resolve canonical user_id with consistent logic
             return await resolve_user_id_from_email(
                 email_address=email_address,
                 integration_type=IntegrationType.EMAIL,
@@ -824,12 +824,14 @@ class EmailService:
 
         except Exception as e:
             logger.error(
-                "Error resolving user_id from email",
+                "Error resolving canonical user_id from email",
                 email_address=email_address,
                 error=str(e),
             )
-            # Fall back to email address
-            return email_address
+            # Re-raise the exception rather than falling back to email address
+            # The email address is not a valid UUID and will cause database errors
+            # If resolution fails, we should fail the request rather than proceed with invalid data
+            raise
 
     def _extract_body(self, email_message: Any) -> str:
         """Extract text body from email message."""
