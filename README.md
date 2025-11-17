@@ -264,7 +264,7 @@ Now that you understand the architecture and capabilities of the self-service ag
 * **Testing Mode**: OpenShift/Kubernetes cluster (no special operators)
 * **Production Mode**: OpenShift cluster + [Serverless Operator](https://docs.openshift.com/serverless/latest/install/install-serverless-operator.html) + [Streams for Apache Kafka Operator](https://docs.redhat.com/en/documentation/red_hat_streams_for_apache_kafka/2.7/html/deploying_and_managing_streams_for_apache_kafka_on_openshift/operator-hub-str) + [Knative Eventing](https://docs.redhat.com/en/documentation/red_hat_openshift_serverless/1.35/html/installing_openshift_serverless/installing-knative-eventing) + [Knative Kafka w/ broker functionality enabled](https://docs.redhat.com/en/documentation/red_hat_openshift_serverless/1.35/html/installing_openshift_serverless/installing-knative-eventing#serverless-install-kafka-odc_installing-knative-eventing)
 
-Here's an example of a minimally required `KnativeKafka` CR -
+Here's an example of a minimally required `KnativeKafka` CR that you can paste in for the CR when following the instructions for installing Knative Kafka w/broker functionality enabled -
 ```yaml
 kind: KnativeKafka
 apiVersion: operator.serverless.openshift.io/v1alpha1
