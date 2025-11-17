@@ -381,7 +381,7 @@ Use the CLI chat script to start an interactive conversation with the agent:
 
 ```bash
 # Get the request manager pod
-export REQUEST_MANAGER_POD=$(oc get pod -n $NAMESPACE -l app=request-manager -o jsonpath='{.items[0].metadata.name}')
+export REQUEST_MANAGER_POD=$(oc get pod -n $NAMESPACE -l app=self-service-agent-request-manager -o jsonpath='{.items[0].metadata.name}')
 
 # Start interactive chat session
 oc exec -it $REQUEST_MANAGER_POD -n $NAMESPACE -- \
@@ -530,9 +530,8 @@ By default, the system uses mock ServiceNow data. To integrate with your actual 
 ```bash
 # Set ServiceNow configuration
 export SERVICENOW_INSTANCE_URL=https://your-instance.service-now.com
-export SERVICENOW_USERNAME=your-servicenow-username
-export SERVICENOW_PASSWORD=your-servicenow-password
-export USE_REAL_SERVICENOW=true
+export SERVICENOW_API_KEY=your-servicenow-api-key
+export SERVICENOW_LAPTOP_REFRESH_ID=your-servicenow-laptop-refresh-id
 
 # Upgrade Helm deployment
 make helm-upgrade NAMESPACE=$NAMESPACE
