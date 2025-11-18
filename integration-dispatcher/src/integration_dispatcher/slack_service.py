@@ -236,19 +236,8 @@ class SlackService:
                 return
 
             # Resolve user ID (email or fallback to Slack user ID)
-            logger.error(
-                "DEBUG: About to resolve Slack user_id",
-                slack_user_id=slack_user_id,
-                context="message",
-            )
             user_id, original_slack_user_id = await self._resolve_user_id(
                 slack_user_id, "message"
-            )
-            logger.error(
-                "DEBUG: Resolved Slack user_id for incoming message",
-                slack_user_id=slack_user_id,
-                resolved_user_id=user_id,
-                original_slack_user_id=original_slack_user_id,
             )
 
             # Skip messages that look like session information or system messages (to prevent loops)
@@ -296,13 +285,6 @@ class SlackService:
                 channel=channel,
                 text=text[:100],  # Log first 100 chars
             )
-            logger.error(
-                "DEBUG: Processing incoming Slack message",
-                resolved_user_id=user_id,
-                slack_user_id=slack_user_id,
-                channel=channel,
-                text_preview=text[:100],
-            )
 
             # Forward to Request Manager
             # Provide default team_id if not available
@@ -326,22 +308,11 @@ class SlackService:
                 metadata=metadata,
             )
 
-            logger.error(
-                "DEBUG: Forwarding Slack message to Request Manager",
-                resolved_user_id=user_id,
-                slack_user_id=slack_user_id,
-                content_preview=text[:100],
-            )
             await self._forward_to_request_manager(
                 user_id=user_id,
                 content=text,
                 integration_type="SLACK",
                 metadata=metadata,
-            )
-            logger.error(
-                "DEBUG: Forwarded Slack message to Request Manager",
-                resolved_user_id=user_id,
-                slack_user_id=slack_user_id,
             )
 
             # ✅ MESSAGE ALREADY RECORDED: The deduplication record was created earlier to prevent race conditions
@@ -441,336 +412,25 @@ class SlackService:
 
                 # Resolve Slack user to canonical user_id for session access verification
                 slack_user_id = payload.user.id
-                logger.error(
-                    "DEBUG: Button click - starting view_session",
-                    slack_user_id=slack_user_id,
-                    session_id=session_id,
-                    action_value=action_value,
-                )
-                logger.info(
-                    "Resolving Slack user for session access",
-                    slack_user_id=slack_user_id,
-                    session_id=session_id,
-                )
-
-                # First, try to get the session to find its user_id
-                # This helps us resolve the Slack user even if they don't have a mapping yet
-                session_user_id = None
-                try:
-                    session_data = await self.agent_service_client.get_session(
-                        session_id
-                    )
-                    if session_data:
-                        session_user_id = str(session_data.get("user_id", "")).strip()
-                        logger.error(
-                            "DEBUG: Retrieved session user_id",
-                            session_id=session_id,
-                            session_user_id=session_user_id,
-                            session_data_keys=(
-                                list(session_data.keys())
-                                if isinstance(session_data, dict)
-                                else []
-                            ),
-                        )
-                        logger.info(
-                            "Retrieved session user_id",
-                            session_id=session_id,
-                            session_user_id=session_user_id,
-                        )
-                    else:
-                        logger.error(
-                            "DEBUG: Session data is None",
-                            session_id=session_id,
-                        )
-                except Exception as session_error:
-                    logger.error(
-                        "DEBUG: Exception retrieving session",
-                        session_id=session_id,
-                        error=str(session_error),
-                        error_type=type(session_error).__name__,
-                    )
-                    logger.warning(
-                        "Could not retrieve session before resolving user",
-                        session_id=session_id,
-                        error=str(session_error),
-                    )
-
-                # Try to resolve Slack user
-                resolved_user_id = None
                 try:
                     resolved_user_id, _ = await self._resolve_user_id(
                         slack_user_id, "view_session_button"
                     )
-                    # Normalize to string for comparison
-                    if resolved_user_id:
-                        resolved_user_id = str(resolved_user_id).strip()
-                    logger.error(
-                        "DEBUG: Resolved Slack user successfully",
-                        slack_user_id=slack_user_id,
-                        resolved_user_id=resolved_user_id,
-                        session_user_id=session_user_id,
-                        resolved_type=(
-                            type(resolved_user_id).__name__
-                            if resolved_user_id
-                            else None
-                        ),
-                        session_type=(
-                            type(session_user_id).__name__ if session_user_id else None
-                        ),
-                        match=(
-                            (resolved_user_id == session_user_id)
-                            if (resolved_user_id and session_user_id)
-                            else False
-                        ),
+                    user_id = (
+                        str(resolved_user_id).strip() if resolved_user_id else None
                     )
-                    logger.info(
-                        "Resolved Slack user to canonical user_id",
-                        slack_user_id=slack_user_id,
-                        resolved_user_id=resolved_user_id,
-                        session_user_id=session_user_id,
-                    )
-                except ValueError as resolve_error:
-                    # If resolution failed and we have a session_user_id, try to use it
-                    # This handles the case where Slack user doesn't have a mapping yet
-                    if session_user_id:
-                        logger.info(
-                            "Slack user resolution failed, but found session user_id - creating mapping",
-                            slack_user_id=slack_user_id,
-                            session_user_id=session_user_id,
-                            session_id=session_id,
-                        )
-                        # Try to create a SLACK mapping for this canonical user_id
-                        # First, get the email from the User table
-                        from shared_models.database import get_database_manager
-                        from shared_models.models import IntegrationType, User
-
-                        from .user_mapping_utils import store_user_mapping
-
-                        db_manager = get_database_manager()
-                        async with db_manager.get_session() as db:
-                            # Get email from User table
-                            from sqlalchemy import select
-
-                            stmt = select(User).where(User.user_id == session_user_id)
-                            result = await db.execute(stmt)
-                            user = result.scalar_one_or_none()
-
-                            if user and user.primary_email:
-                                # Create SLACK mapping using the session's canonical user_id
-                                email_address = str(user.primary_email)
-                                await store_user_mapping(
-                                    user_email=email_address,
-                                    integration_user_id=slack_user_id,
-                                    integration_type=IntegrationType.SLACK,
-                                    created_by="slack_service_button",
-                                    canonical_user_id=session_user_id,
-                                )
-                                logger.error(
-                                    "DEBUG: Created SLACK mapping from session user_id",
-                                    slack_user_id=slack_user_id,
-                                    canonical_user_id=session_user_id,
-                                    email=email_address,
-                                )
-                                logger.info(
-                                    "Created SLACK mapping from session user_id",
-                                    slack_user_id=slack_user_id,
-                                    canonical_user_id=session_user_id,
-                                    email=email_address,
-                                )
-                                resolved_user_id = str(session_user_id).strip()
-                                logger.error(
-                                    "DEBUG: Set resolved_user_id after creating mapping",
-                                    resolved_user_id=resolved_user_id,
-                                    session_user_id=session_user_id,
-                                )
-                            else:
-                                # No email found - can't create mapping
-                                logger.error(
-                                    "Cannot create SLACK mapping: no email found for session user",
-                                    session_user_id=session_user_id,
-                                    slack_user_id=slack_user_id,
-                                )
-                                return {
-                                    "text": "❌ Error: Could not identify user. Please try again."
-                                }
-                    else:
-                        logger.error(
-                            "Failed to resolve Slack user to canonical user_id",
-                            slack_user_id=slack_user_id,
-                            session_id=session_id,
-                            error=str(resolve_error),
-                            error_type=type(resolve_error).__name__,
-                            exc_info=True,
-                        )
-                        return {
-                            "text": "❌ Error: Could not identify user. Please try again."
-                        }
-                except Exception as resolve_error:
+                except Exception as e:
                     logger.error(
                         "Failed to resolve Slack user to canonical user_id",
                         slack_user_id=slack_user_id,
                         session_id=session_id,
-                        error=str(resolve_error),
-                        error_type=type(resolve_error).__name__,
-                        exc_info=True,
+                        error=str(e),
                     )
                     return {
                         "text": "❌ Error: Could not identify user. Please try again."
                     }
 
-                # If resolution failed but we have session_user_id, create mapping
-                # (This handles cases where resolution failed but exception handler didn't set resolved_user_id)
-                if not resolved_user_id and session_user_id:
-                    logger.error(
-                        "DEBUG: Resolution failed, creating mapping from session user_id",
-                        slack_user_id=slack_user_id,
-                        session_user_id=session_user_id,
-                    )
-                    logger.info(
-                        "Resolution failed but have session user_id - creating mapping",
-                        slack_user_id=slack_user_id,
-                        session_user_id=session_user_id,
-                        session_id=session_id,
-                    )
-                    # Create SLACK mapping using the session's canonical user_id
-                    from shared_models.database import get_database_manager
-                    from shared_models.models import IntegrationType, User
-
-                    from .user_mapping_utils import store_user_mapping
-
-                    db_manager = get_database_manager()
-                    async with db_manager.get_session() as db:
-                        # Get email from User table
-                        from sqlalchemy import select
-
-                        stmt = select(User).where(User.user_id == session_user_id)
-                        result = await db.execute(stmt)
-                        user = result.scalar_one_or_none()
-
-                        if user and user.primary_email:
-                            email_address = str(user.primary_email)
-                            await store_user_mapping(
-                                user_email=email_address,
-                                integration_user_id=slack_user_id,
-                                integration_type=IntegrationType.SLACK,
-                                created_by="slack_service_button",
-                                canonical_user_id=session_user_id,
-                            )
-                            logger.error(
-                                "DEBUG: Created SLACK mapping from session user_id (resolution failed)",
-                                slack_user_id=slack_user_id,
-                                canonical_user_id=session_user_id,
-                                email=email_address,
-                            )
-                            logger.info(
-                                "Created SLACK mapping from session user_id (resolution failed)",
-                                slack_user_id=slack_user_id,
-                                canonical_user_id=session_user_id,
-                                email=email_address,
-                            )
-                            resolved_user_id = str(session_user_id).strip()
-                            logger.error(
-                                "DEBUG: Set resolved_user_id after creating mapping (resolution failed)",
-                                resolved_user_id=resolved_user_id,
-                                session_user_id=session_user_id,
-                            )
-                        else:
-                            logger.error(
-                                "Cannot create SLACK mapping: no email found for session user",
-                                session_user_id=session_user_id,
-                                slack_user_id=slack_user_id,
-                            )
-                            return {
-                                "text": "❌ Error: Could not identify user. Please try again."
-                            }
-
-                # If we have both resolved_user_id and session_user_id, check if they match
-                # If they don't match and we have session_user_id, create/update the mapping
-                elif resolved_user_id and session_user_id:
-                    # Normalize both to strings for comparison
-                    resolved_user_id = str(resolved_user_id).strip()
-                    session_user_id = str(session_user_id).strip()
-                    logger.error(
-                        "DEBUG: Comparing user_ids",
-                        resolved_user_id=resolved_user_id,
-                        session_user_id=session_user_id,
-                        match=(resolved_user_id == session_user_id),
-                    )
-                    if resolved_user_id != session_user_id:
-                        logger.warning(
-                            "Resolved user_id doesn't match session user_id - creating/updating mapping",
-                            resolved_user_id=resolved_user_id,
-                            session_user_id=session_user_id,
-                            slack_user_id=slack_user_id,
-                            session_id=session_id,
-                        )
-                        # Use session_user_id since that's the one that owns the session
-                        # Create/update SLACK mapping to link Slack user to session's canonical user_id
-                        from shared_models.database import get_database_manager
-                        from shared_models.models import IntegrationType, User
-
-                        from .user_mapping_utils import store_user_mapping
-
-                        db_manager = get_database_manager()
-                        async with db_manager.get_session() as db:
-                            # Get email from User table using session_user_id
-                            from sqlalchemy import select
-
-                            stmt = select(User).where(User.user_id == session_user_id)
-                            result = await db.execute(stmt)
-                            user = result.scalar_one_or_none()
-
-                            if user and user.primary_email:
-                                email_address = str(user.primary_email)
-                                await store_user_mapping(
-                                    user_email=email_address,
-                                    integration_user_id=slack_user_id,
-                                    integration_type=IntegrationType.SLACK,
-                                    created_by="slack_service_button",
-                                    canonical_user_id=session_user_id,
-                                )
-                                logger.error(
-                                    "DEBUG: Updated SLACK mapping to match session user_id",
-                                    slack_user_id=slack_user_id,
-                                    canonical_user_id=session_user_id,
-                                    email=email_address,
-                                )
-                                logger.info(
-                                    "Updated SLACK mapping to match session user_id",
-                                    slack_user_id=slack_user_id,
-                                    canonical_user_id=session_user_id,
-                                    email=email_address,
-                                )
-                                resolved_user_id = str(session_user_id).strip()
-                                logger.error(
-                                    "DEBUG: Set resolved_user_id after updating mapping",
-                                    resolved_user_id=resolved_user_id,
-                                    session_user_id=session_user_id,
-                                )
-                            else:
-                                logger.error(
-                                    "Cannot update SLACK mapping: no email found for session user",
-                                    session_user_id=session_user_id,
-                                    slack_user_id=slack_user_id,
-                                )
-                                return {
-                                    "text": "❌ Error: Could not identify user. Please try again."
-                                }
-                    else:
-                        logger.info(
-                            "Resolved user_id matches session user_id",
-                            user_id=resolved_user_id,
-                            session_id=session_id,
-                        )
-
-                # Use resolved_user_id (which should now match session_user_id if we fixed it)
-                if not resolved_user_id:
-                    logger.error(
-                        "DEBUG: No user_id resolved for Slack user",
-                        slack_user_id=slack_user_id,
-                        session_id=session_id,
-                        session_user_id=session_user_id,
-                    )
+                if not user_id:
                     logger.error(
                         "No user_id resolved for Slack user",
                         slack_user_id=slack_user_id,
@@ -780,52 +440,9 @@ class SlackService:
                         "text": "❌ Error: Could not identify user. Please try again."
                     }
 
-                user_id = str(resolved_user_id).strip()
-                logger.error(
-                    "DEBUG: Final user_id before calling _get_session_details",
-                    user_id=user_id,
-                    resolved_user_id=resolved_user_id,
-                    session_user_id=session_user_id,
-                    session_id=session_id,
-                    match=(
-                        (user_id == str(session_user_id).strip())
-                        if session_user_id
-                        else False
-                    ),
-                )
-                logger.info(
-                    "Resolved canonical user_id for Slack user",
-                    slack_user_id=slack_user_id,
-                    canonical_user_id=user_id,
-                    session_id=session_id,
-                )
-                logger.error(
-                    "DEBUG: Button click - resolved user_id",
-                    slack_user_id=slack_user_id,
-                    resolved_canonical_user_id=user_id,
-                    session_id=session_id,
-                )
-
                 # Fetch session details from Request Manager, verifying user has access
-                # First, let's check what user_id the session has before verifying
-                logger.error(
-                    "DEBUG: About to call _get_session_details",
-                    slack_user_id=slack_user_id,
-                    resolved_canonical_user_id=user_id,
-                    session_id=session_id,
-                )
                 session_details = await self._get_session_details(
                     session_id, user_id=user_id
-                )
-
-                logger.error(
-                    "DEBUG: Button click - session_details result",
-                    slack_user_id=slack_user_id,
-                    resolved_canonical_user_id=user_id,
-                    session_id=session_id,
-                    session_details_preview=(
-                        session_details[:100] if session_details else "None"
-                    ),
                 )
 
                 # Use response_url to post the session information
@@ -990,11 +607,6 @@ class SlackService:
                 error=str(e),
                 error_type=type(e).__name__,
                 exc_info=True,
-            )
-            logger.error(
-                "DEBUG: Exception in handle_button_interaction",
-                error=str(e),
-                error_type=type(e).__name__,
             )
             return {"text": "❌ Error processing interaction"}
 
@@ -1189,12 +801,6 @@ class SlackService:
                 slack_user_id=slack_user_id,
                 user_email=existing_email,
             )
-            logger.error(
-                "DEBUG: Resolving from cached email",
-                context=context,
-                slack_user_id=slack_user_id,
-                cached_email=existing_email,
-            )
             # Resolve to canonical user_id
             from shared_models.database import get_database_manager
             from shared_models.models import IntegrationType
@@ -1207,16 +813,8 @@ class SlackService:
                     email_address=existing_email,
                     integration_type=IntegrationType.SLACK,
                     db=db,
-                    default_user_id=existing_email,
                     integration_specific_id=slack_user_id,
                     created_by="slack_service",
-                )
-                logger.error(
-                    "DEBUG: Resolved from cached email",
-                    context=context,
-                    slack_user_id=slack_user_id,
-                    cached_email=existing_email,
-                    resolved_canonical_user_id=resolved_user_id,
                 )
                 # Verify the resolved user_id matches any existing EMAIL mapping
                 from shared_models.models import UserIntegrationMapping
@@ -1233,8 +831,8 @@ class SlackService:
                 if email_mapping:
                     email_canonical_user_id = str(email_mapping.user_id)
                     if resolved_user_id != email_canonical_user_id:
-                        logger.error(
-                            "DEBUG: Resolved user_id doesn't match EMAIL mapping!",
+                        logger.warning(
+                            "Resolved user_id doesn't match EMAIL mapping, fixing",
                             context=context,
                             slack_user_id=slack_user_id,
                             cached_email=existing_email,
@@ -1251,13 +849,6 @@ class SlackService:
                             created_by="slack_service_fix",
                             canonical_user_id=email_canonical_user_id,
                         )
-                        logger.error(
-                            "DEBUG: Fixed SLACK mapping to use EMAIL canonical user_id",
-                            context=context,
-                            slack_user_id=slack_user_id,
-                            email=existing_email,
-                            canonical_user_id=email_canonical_user_id,
-                        )
                 return resolved_user_id, slack_user_id
 
         # If no cached mapping, fetch fresh from Slack API
@@ -1269,13 +860,6 @@ class SlackService:
                 slack_user_id=slack_user_id,
                 user_email=user_email,
             )
-            logger.error(
-                "DEBUG: Resolving from Slack API email",
-                context=context,
-                slack_user_id=slack_user_id,
-                slack_api_email=user_email,
-            )
-
             # Check if email already exists in any other integration mapping
             # This handles the case where a user already has a mapping via Email or another integration
             from shared_models.database import get_database_manager
@@ -1291,16 +875,8 @@ class SlackService:
                     email_address=user_email,
                     integration_type=IntegrationType.SLACK,
                     db=db,
-                    default_user_id=user_email,
                     integration_specific_id=slack_user_id,
                     created_by="slack_service",
-                )
-                logger.error(
-                    "DEBUG: Resolved from Slack API email",
-                    context=context,
-                    slack_user_id=slack_user_id,
-                    slack_api_email=user_email,
-                    resolved_canonical_user_id=resolved_user_id,
                 )
                 # Verify the resolved user_id matches any existing EMAIL mapping
                 from shared_models.models import UserIntegrationMapping
@@ -1317,8 +893,8 @@ class SlackService:
                 if email_mapping:
                     email_canonical_user_id = str(email_mapping.user_id)
                     if resolved_user_id != email_canonical_user_id:
-                        logger.error(
-                            "DEBUG: Resolved user_id doesn't match EMAIL mapping!",
+                        logger.warning(
+                            "Resolved user_id doesn't match EMAIL mapping, fixing",
                             context=context,
                             slack_user_id=slack_user_id,
                             slack_api_email=user_email,
@@ -1333,13 +909,6 @@ class SlackService:
                             integration_user_id=slack_user_id,
                             integration_type=IntegrationType.SLACK,
                             created_by="slack_service_fix",
-                            canonical_user_id=email_canonical_user_id,
-                        )
-                        logger.error(
-                            "DEBUG: Fixed SLACK mapping to use EMAIL canonical user_id",
-                            context=context,
-                            slack_user_id=slack_user_id,
-                            email=user_email,
                             canonical_user_id=email_canonical_user_id,
                         )
                 return resolved_user_id, slack_user_id
@@ -1541,23 +1110,8 @@ class SlackService:
                 session_id=session_id,
                 user_id=user_id,
             )
-            logger.error(
-                "DEBUG: About to call Agent Service get_session",
-                session_id=session_id,
-                user_id=user_id,
-                agent_service_url=getattr(
-                    self.agent_service_client, "base_url", "unknown"
-                ),
-            )
             try:
                 session_data = await self.agent_service_client.get_session(session_id)
-                logger.error(
-                    "DEBUG: Agent Service get_session returned",
-                    session_id=session_id,
-                    user_id=user_id,
-                    has_session_data=bool(session_data),
-                    session_data_type=type(session_data).__name__,
-                )
             except Exception as e:
                 logger.error(
                     "Exception calling Agent Service get_session",
@@ -1567,23 +1121,11 @@ class SlackService:
                     error_type=type(e).__name__,
                     exc_info=True,
                 )
-                logger.error(
-                    "DEBUG: Exception in get_session call",
-                    session_id=session_id,
-                    user_id=user_id,
-                    error=str(e),
-                    error_type=type(e).__name__,
-                )
                 return "Session not found"
 
             if not session_data:
                 logger.warning(
                     "Session not found in Agent Service (returned None)",
-                    session_id=session_id,
-                    user_id=user_id,
-                )
-                logger.error(
-                    "DEBUG: Session not found in database",
                     session_id=session_id,
                     user_id=user_id,
                 )
@@ -1616,24 +1158,10 @@ class SlackService:
                     session_user_id=normalized_session_user_id,
                     match=(normalized_session_user_id == normalized_requested_user_id),
                 )
-                logger.error(
-                    "DEBUG: User ID comparison",
-                    requested_user_id=normalized_requested_user_id,
-                    session_user_id=normalized_session_user_id,
-                    requested_type=type(user_id).__name__,
-                    session_type=type(session_user_id).__name__,
-                    match=(normalized_session_user_id == normalized_requested_user_id),
-                )
 
                 if normalized_session_user_id != normalized_requested_user_id:
                     logger.warning(
                         "User attempted to access session they don't own",
-                        requested_user_id=normalized_requested_user_id,
-                        session_user_id=normalized_session_user_id,
-                        session_id=session_id,
-                    )
-                    logger.error(
-                        "DEBUG: User ID mismatch - returning access denied",
                         requested_user_id=normalized_requested_user_id,
                         session_user_id=normalized_session_user_id,
                         session_id=session_id,

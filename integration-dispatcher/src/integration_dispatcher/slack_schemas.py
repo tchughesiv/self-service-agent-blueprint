@@ -90,9 +90,6 @@ class SlackInteractionPayload(BaseModel):
     actions: Optional[List[Dict[str, Any]]] = None
     view: Optional[Dict[str, Any]] = None
 
-    class Config:
-        extra = "ignore"  # Ignore extra fields that Slack may send
-
 
 class SlackSlashCommand(BaseModel):
     """Slack slash command payload."""

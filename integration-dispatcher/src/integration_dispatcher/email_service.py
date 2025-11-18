@@ -818,7 +818,6 @@ class EmailService:
                 email_address=email_address,
                 integration_type=IntegrationType.EMAIL,
                 db=db,
-                default_user_id=email_address,
                 created_by="email_service",
             )
 

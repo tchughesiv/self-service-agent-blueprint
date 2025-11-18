@@ -682,11 +682,6 @@ class IntegrationDefaultsService:
 
                     if slack_mapping:
                         slack_user_id = slack_mapping.integration_user_id
-                        logger.info(
-                            "Found Slack user_id from mapping",
-                            user_id=user_id,
-                            slack_user_id=slack_user_id,
-                        )
 
                     # If no mapping found, try to look up by email from context or User table
                     if not slack_user_id:
@@ -703,11 +698,6 @@ class IntegrationDefaultsService:
                             user = result.scalar_one_or_none()
                             if user and user.primary_email:
                                 user_email = user.primary_email
-                                logger.info(
-                                    "Found email from User table",
-                                    user_id=user_id,
-                                    email=user_email,
-                                )
 
                         # If we have an email, try to look up Slack user_id via API
                         if user_email:
@@ -719,12 +709,6 @@ class IntegrationDefaultsService:
 
                     if slack_user_id:
                         self._update_slack_config(config, slack_user_id=slack_user_id)
-                        logger.info(
-                            "Applied Slack user ID for DM lookup (no channel in context)",
-                            user_id=user_id,
-                            slack_user_id=slack_user_id,
-                            config=config["config"],
-                        )
                     else:
                         # No mapping exists - disable Slack integration for this request
                         logger.warning(
@@ -732,18 +716,8 @@ class IntegrationDefaultsService:
                             user_id=user_id,
                         )
                         config["enabled"] = False
-                        logger.info(
-                            "Disabled Slack integration due to missing user mapping",
-                            user_id=user_id,
-                        )
                 else:
                     self._update_slack_config(config, channel_id=channel_id)
-                    logger.info(
-                        "Applied Slack channel context",
-                        user_id=user_id,
-                        channel_id=channel_id,
-                        config=config["config"],
-                    )
 
             # Apply context-specific configuration for EMAIL
             if default_config.integration_type == IntegrationType.EMAIL:
@@ -752,21 +726,6 @@ class IntegrationDefaultsService:
 
                 if context:
                     email_address = context.get("email_from")
-                    if email_address:
-                        logger.info(
-                            "Found email address in context",
-                            user_id=user_id,
-                            email_address=email_address,
-                        )
-
-                # If no context email, check if user_id itself is an email address (legacy support)
-                if not email_address and "@" in user_id:
-                    email_address = user_id
-                    logger.info(
-                        "Using user_id as email address",
-                        user_id=user_id,
-                        email_address=email_address,
-                    )
 
                 # If still no email, look it up from User table or UserIntegrationMapping
                 if not email_address:
@@ -778,11 +737,6 @@ class IntegrationDefaultsService:
                     user = result.scalar_one_or_none()
                     if user and user.primary_email:
                         email_address = user.primary_email
-                        logger.info(
-                            "Found email from User table",
-                            user_id=user_id,
-                            email_address=email_address,
-                        )
                     else:
                         # Fallback: try to get email from EMAIL type mapping
                         stmt = select(UserIntegrationMapping).where(
@@ -794,11 +748,6 @@ class IntegrationDefaultsService:
                         email_mapping = result.scalar_one_or_none()
                         if email_mapping and email_mapping.user_email:
                             email_address = email_mapping.user_email
-                            logger.info(
-                                "Found email from EMAIL mapping",
-                                user_id=user_id,
-                                email_address=email_address,
-                            )
 
                 # Check if email exists as a user (has any integration mapping)
                 if email_address:
@@ -816,12 +765,6 @@ class IntegrationDefaultsService:
                         )
                         email_config["email_address"] = email_address
                         config["config"] = email_config
-                        logger.info(
-                            "Email exists as user - enabled EMAIL integration",
-                            user_id=user_id,
-                            email_address=email_address,
-                            config=config["config"],
-                        )
                     else:
                         # Email not found as a user - disable EMAIL integration for this request
                         logger.warning(
@@ -830,11 +773,6 @@ class IntegrationDefaultsService:
                             email_address=email_address,
                         )
                         config["enabled"] = False
-                        logger.info(
-                            "Disabled EMAIL integration - user not found",
-                            user_id=user_id,
-                            email_address=email_address,
-                        )
                 else:
                     # No email address available - disable EMAIL integration for this request
                     logger.warning(
@@ -842,10 +780,6 @@ class IntegrationDefaultsService:
                         user_id=user_id,
                     )
                     config["enabled"] = False
-                    logger.info(
-                        "Disabled EMAIL integration due to missing email address",
-                        user_id=user_id,
-                    )
 
             # Only include enabled integrations
             if config["enabled"]:
@@ -959,18 +893,6 @@ class IntegrationDefaultsService:
                 if context:
                     channel_id = context.get("slack_channel")
                     slack_user_id = context.get("slack_user_id")
-                    logger.info(
-                        "Found Slack context",
-                        user_id=user_id,
-                        channel_id=channel_id,
-                        slack_user_id=slack_user_id,
-                        context=context,
-                    )
-                else:
-                    logger.warning(
-                        "No context provided for Slack integration",
-                        user_id=user_id,
-                    )
 
                 if not channel_id:
                     # For direct messages, we need to get the DM channel for the user
@@ -981,35 +903,14 @@ class IntegrationDefaultsService:
                         self._update_slack_config(
                             config, slack_user_id=final_slack_user_id
                         )
-                        logger.info(
-                            "Using Slack user ID from context",
-                            user_id=user_id,
-                            slack_user_id=slack_user_id,
-                        )
                     else:
                         # No context (e.g., CLI/web request), use stored mapping with validation
-                        logger.info(
-                            "No Slack context provided, attempting to lookup user mapping",
-                            user_id=user_id,
-                        )
                         final_slack_user_id = await self._get_validated_slack_user_id(
                             user_id
                         )
                         if final_slack_user_id:
-                            logger.info(
-                                "Using validated Slack user ID from mapping",
-                                user_id=user_id,
-                                slack_user_id=final_slack_user_id,
-                            )
                             self._update_slack_config(
                                 config, slack_user_id=final_slack_user_id
-                            )
-                            logger.info(
-                                "Applied Slack user ID for DM lookup (no channel in context)",
-                                user_id=user_id,
-                                slack_user_id_from_context=slack_user_id,
-                                final_slack_user_id=final_slack_user_id,
-                                config=config["config"],
                             )
                         else:
                             # No mapping exists - disable Slack integration for this request
@@ -1018,22 +919,11 @@ class IntegrationDefaultsService:
                                 user_id=user_id,
                             )
                             config["enabled"] = False
-                            logger.info(
-                                "Disabled Slack integration due to missing user mapping",
-                                user_id=user_id,
-                            )
                 else:
                     updates = {"channel_id": channel_id}
                     if slack_user_id:
                         updates["slack_user_id"] = slack_user_id
                     self._update_slack_config(config, **updates)
-                    logger.info(
-                        "Applied Slack channel context",
-                        user_id=user_id,
-                        channel_id=channel_id,
-                        slack_user_id=slack_user_id,
-                        config=config["config"],
-                    )
 
             # Apply context-specific configuration for EMAIL
             if default_config.integration_type == IntegrationType.EMAIL:
@@ -1042,21 +932,6 @@ class IntegrationDefaultsService:
 
                 if context:
                     email_address = context.get("email_from")
-                    if email_address:
-                        logger.info(
-                            "Found email address in context",
-                            user_id=user_id,
-                            email_address=email_address,
-                        )
-
-                # If no context email, check if user_id itself is an email address (legacy support)
-                if not email_address and "@" in user_id:
-                    email_address = user_id
-                    logger.info(
-                        "Using user_id as email address",
-                        user_id=user_id,
-                        email_address=email_address,
-                    )
 
                 # If still no email, look it up from User table or UserIntegrationMapping
                 if not email_address:
@@ -1068,11 +943,6 @@ class IntegrationDefaultsService:
                     user = result.scalar_one_or_none()
                     if user and user.primary_email:
                         email_address = user.primary_email
-                        logger.info(
-                            "Found email from User table",
-                            user_id=user_id,
-                            email_address=email_address,
-                        )
                     else:
                         # Fallback: try to get email from EMAIL type mapping
                         stmt = select(UserIntegrationMapping).where(
@@ -1084,11 +954,6 @@ class IntegrationDefaultsService:
                         email_mapping = result.scalar_one_or_none()
                         if email_mapping and email_mapping.user_email:
                             email_address = email_mapping.user_email
-                            logger.info(
-                                "Found email from EMAIL mapping",
-                                user_id=user_id,
-                                email_address=email_address,
-                            )
 
                 # Check if email exists as a user (has any integration mapping)
                 if email_address:
@@ -1106,12 +971,6 @@ class IntegrationDefaultsService:
                         )
                         email_config["email_address"] = email_address
                         config["config"] = email_config
-                        logger.info(
-                            "Email exists as user - enabled EMAIL integration",
-                            user_id=user_id,
-                            email_address=email_address,
-                            config=config["config"],
-                        )
                     else:
                         # Email not found as a user - disable EMAIL integration for this request
                         logger.warning(
@@ -1120,11 +979,6 @@ class IntegrationDefaultsService:
                             email_address=email_address,
                         )
                         config["enabled"] = False
-                        logger.info(
-                            "Disabled EMAIL integration - user not found",
-                            user_id=user_id,
-                            email_address=email_address,
-                        )
                 else:
                     # No email address available - disable EMAIL integration for this request
                     logger.warning(
@@ -1132,10 +986,6 @@ class IntegrationDefaultsService:
                         user_id=user_id,
                     )
                     config["enabled"] = False
-                    logger.info(
-                        "Disabled EMAIL integration due to missing email address",
-                        user_id=user_id,
-                    )
 
             # Only include enabled integrations
             if config["enabled"]:

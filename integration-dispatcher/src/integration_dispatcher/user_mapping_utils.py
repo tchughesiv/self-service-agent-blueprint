@@ -193,7 +193,6 @@ async def resolve_user_id_from_email(
     email_address: str,
     integration_type: IntegrationType,
     db: Any,
-    default_user_id: str,
     integration_specific_id: Optional[str] = None,
     created_by: str = "system",
 ) -> str:
@@ -209,7 +208,6 @@ async def resolve_user_id_from_email(
         email_address: The user's email address
         integration_type: The integration type to create mapping for (e.g., EMAIL, SLACK)
         db: Database session to use for queries
-        default_user_id: DEPRECATED - no longer used, kept for backward compatibility
         integration_specific_id: The integration-specific ID to store in integration_user_id
             (e.g., Slack user ID). If None, uses email_address.
         created_by: Identifier for who is creating this mapping

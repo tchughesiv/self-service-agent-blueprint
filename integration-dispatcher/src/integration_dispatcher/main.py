@@ -116,43 +116,16 @@ class IntegrationDispatcher:
             slack_channel = request.template_variables.get("slack_channel")
             if slack_channel:
                 context["slack_channel"] = slack_channel
-                logger.info(
-                    "Found Slack channel in template variables",
-                    user_id=user_id,
-                    slack_channel=slack_channel,
-                )
 
             # Look for Slack user ID in template variables
             slack_user_id = request.template_variables.get("slack_user_id")
-            logger.info(
-                "Checking template variables for slack_user_id",
-                user_id=user_id,
-                template_variables=request.template_variables,
-                slack_user_id=slack_user_id,
-            )
             if slack_user_id:
                 context["slack_user_id"] = slack_user_id
-                logger.info(
-                    "Found Slack user ID in template variables",
-                    user_id=user_id,
-                    slack_user_id=slack_user_id,
-                )
-            else:
-                logger.warning(
-                    "No slack_user_id found in template variables",
-                    user_id=user_id,
-                    template_variables=request.template_variables,
-                )
 
             # Look for email address in template variables (from integration context)
             email_from = request.template_variables.get("email_from")
             if email_from:
                 context["email_from"] = email_from
-                logger.info(
-                    "Found email address in template variables",
-                    user_id=user_id,
-                    email_from=email_from,
-                )
 
         # Get smart defaults for all enabled integrations (no database persistence)
         smart_defaults = await integration_defaults_service.get_smart_defaults(
@@ -481,44 +454,6 @@ app = FastAPI(
 slack_service = SlackService()
 email_service = EmailService()
 integration_defaults_service = IntegrationDefaultsService()
-
-
-# Middleware to always log Slack interactive requests
-@app.middleware("http")
-async def log_slack_interactive_requests(request: Request, call_next: Any) -> Any:
-    # Log ALL POST requests to help debug routing issues
-    if request.method == "POST":
-        logger.error(
-            "=== MIDDLEWARE: POST request received ===",
-            path=request.url.path,
-            client_host=request.client.host if request.client else None,
-            is_slack_interactive=(request.url.path == "/slack/interactive"),
-        )
-    if request.method == "POST" and request.url.path == "/slack/interactive":
-        logger.error("=== MIDDLEWARE: POST /slack/interactive request received ===")
-        logger.info(
-            "Slack interactive request in middleware",
-            method=request.method,
-            path=request.url.path,
-            client_host=request.client.host if request.client else None,
-        )
-    try:
-        response = await call_next(request)
-        if request.method == "POST" and request.url.path == "/slack/interactive":
-            logger.error(
-                "=== MIDDLEWARE: POST /slack/interactive response status ===",
-                status_code=response.status_code,
-            )
-        return response
-    except Exception as e:
-        logger.error(
-            "=== MIDDLEWARE: Exception in request handling ===",
-            path=request.url.path,
-            error=str(e),
-            error_type=type(e).__name__,
-            exc_info=True,
-        )
-        raise
 
 
 # Debug middleware to log all requests (only when DEBUG logging is enabled)
@@ -1387,9 +1322,6 @@ async def handle_slack_events(
 async def handle_slack_interactive(request: Request) -> Dict[str, Any]:
     """Handle Slack interactive components (buttons, etc.)."""
     try:
-        # Log immediately to verify requests are reaching this endpoint
-        logger.error("=== SLACK INTERACTIVE ENDPOINT CALLED ===")
-        logger.info("Slack interactive endpoint called")
         body = await request.body()
         headers = request.headers
 
@@ -1397,18 +1329,9 @@ async def handle_slack_interactive(request: Request) -> Dict[str, Any]:
         timestamp = headers.get("x-slack-request-timestamp", "")
         signature = headers.get("x-slack-signature", "")
 
-        logger.info(
-            "Verifying Slack signature for interactive request",
-            has_timestamp=bool(timestamp),
-            has_signature=bool(signature),
-            body_length=len(body),
-        )
-
         if not slack_service.verify_slack_signature(body, timestamp, signature):
             logger.warning("Invalid Slack signature")
             raise HTTPException(status_code=403, detail="Invalid signature")
-
-        logger.info("Slack signature verified successfully")
 
         # Parse form data
         form_data = body.decode("utf-8")
@@ -1422,14 +1345,6 @@ async def handle_slack_interactive(request: Request) -> Dict[str, Any]:
 
         data = json.loads(payload_json)
 
-        # Log the raw data to help debug parsing issues
-        logger.info(
-            "Raw Slack interaction data",
-            data_keys=list(data.keys()) if isinstance(data, dict) else "not_dict",
-            has_user=bool(data.get("user") if isinstance(data, dict) else False),
-            has_actions=bool(data.get("actions") if isinstance(data, dict) else False),
-        )
-
         try:
             payload = SlackInteractionPayload(**data)
         except Exception as parse_error:
@@ -1437,26 +1352,12 @@ async def handle_slack_interactive(request: Request) -> Dict[str, Any]:
                 "Failed to parse Slack interaction payload",
                 error=str(parse_error),
                 error_type=type(parse_error).__name__,
-                data_keys=list(data.keys()) if isinstance(data, dict) else "not_dict",
-                data_preview=(
-                    str(data)[:500] if isinstance(data, dict) else str(data)[:500]
-                ),
             )
             raise
 
-        logger.info(
-            "Parsed Slack interaction payload",
-            interaction_type=payload.type,
-            user_id=payload.user.id if payload.user else None,
-            has_actions=bool(payload.actions),
-            action_count=len(payload.actions) if payload.actions else 0,
-        )
-
         # Handle interaction
         if payload.type == "block_actions":
-            logger.info("Handling block_actions interaction")
             response = await slack_service.handle_button_interaction(payload)
-            logger.info("Button interaction handled successfully")
             return response
         elif payload.type == "view_submission":
             response = await slack_service.handle_modal_submission(payload)
@@ -1472,10 +1373,6 @@ async def handle_slack_interactive(request: Request) -> Dict[str, Any]:
             error_type=type(e).__name__,
             exc_info=True,
         )
-        logger.error(
-            "DEBUG: JSON decode error in handle_slack_interactive",
-            error=str(e),
-        )
         raise HTTPException(status_code=400, detail="Invalid JSON")
     except HTTPException:
         # Re-raise HTTP exceptions (like 403 from signature verification)
@@ -1486,11 +1383,6 @@ async def handle_slack_interactive(request: Request) -> Dict[str, Any]:
             error=str(e),
             error_type=type(e).__name__,
             exc_info=True,
-        )
-        logger.error(
-            "DEBUG: Exception in handle_slack_interactive",
-            error=str(e),
-            error_type=type(e).__name__,
         )
         raise HTTPException(status_code=500, detail="Internal server error")
 

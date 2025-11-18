@@ -41,7 +41,6 @@ def _get_session_timeout_hours() -> int:
 
 # Global polling task (single per pod)
 _pod_polling_task: Optional[asyncio.Task[None]] = None
-_pod_name: Optional[str] = None
 
 
 def get_pod_name() -> Optional[str]:
@@ -76,12 +75,8 @@ def resolve_response_future(request_id: str, response_data: Dict[str, Any]) -> b
                 request_id=request_id,
             )
             return True
-        else:
-            logger.debug(
-                "Response future already resolved",
-                request_id=request_id,
-            )
-            return True
+        # Future already resolved, return True (no need to log - this is expected)
+        return True
     else:
         # No future found - database polling will handle it
         logger.debug(
@@ -164,36 +159,6 @@ async def create_or_get_session_shared(
         ),
         filter_by_integration_type=filter_by_integration_type,
         found_sessions_count=len(existing_sessions),
-        session_ids=[s.session_id for s in existing_sessions],
-        session_integration_types=[
-            (
-                s.integration_type.value
-                if hasattr(s.integration_type, "value")
-                else str(s.integration_type)
-            )
-            for s in existing_sessions
-        ],
-    )
-    logger.error(
-        "DEBUG: Session lookup for incoming request",
-        canonical_user_id=canonical_user_id,
-        original_user_id=request.user_id,
-        request_integration_type=(
-            request.integration_type.value
-            if hasattr(request.integration_type, "value")
-            else str(request.integration_type)
-        ),
-        filter_by_integration_type=filter_by_integration_type,
-        found_sessions_count=len(existing_sessions),
-        session_ids=[s.session_id for s in existing_sessions],
-        session_integration_types=[
-            (
-                s.integration_type.value
-                if hasattr(s.integration_type, "value")
-                else str(s.integration_type)
-            )
-            for s in existing_sessions
-        ],
     )
 
     if existing_sessions:
@@ -424,13 +389,12 @@ async def _start_pod_polling_task(pod_name: str) -> None:
     This task polls the database for responses where pod_name matches this pod
     and request_id is in the _response_futures_registry.
     """
-    global _pod_polling_task, _pod_name
+    global _pod_polling_task
 
     if _pod_polling_task and not _pod_polling_task.done():
         logger.warning("Pod polling task already running")
         return
 
-    _pod_name = pod_name
     _pod_polling_task = asyncio.create_task(_pod_response_poller(pod_name))
     logger.info(
         "Started single per-pod polling task",
