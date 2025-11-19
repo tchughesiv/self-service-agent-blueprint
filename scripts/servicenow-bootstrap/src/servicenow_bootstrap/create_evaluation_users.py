@@ -17,7 +17,7 @@ import sys
 from typing import Any, Optional
 
 import requests
-from mock_employee_data import MOCK_EMPLOYEE_DATA
+from mock_employee_data import get_employee_data
 from requests.auth import HTTPBasicAuth
 
 
@@ -389,15 +389,17 @@ class ServiceNowUserCreator:
         Args:
             skip_existing: If True, skip users that already exist in ServiceNow
         """
+        employee_data_dict = get_employee_data()
+
         print("=" * 80)
         print("Creating ServiceNow Evaluation Users")
         print("=" * 80)
         print(f"Instance: {self.instance_url}")
-        print(f"Total users to create: {len(MOCK_EMPLOYEE_DATA)}")
+        print(f"Total users to create: {len(employee_data_dict)}")
         print("=" * 80)
         print()
 
-        for emp_id, employee_data in MOCK_EMPLOYEE_DATA.items():
+        for emp_id, employee_data in employee_data_dict.items():
             print(f"Processing Employee {emp_id}: {employee_data['name']}")
             print("-" * 80)
 

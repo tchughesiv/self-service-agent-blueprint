@@ -1,5 +1,10 @@
 """Mock employee data for testing purposes."""
 
+import os
+import random
+from datetime import datetime, timedelta
+from typing import Any, Dict
+
 MOCK_EMPLOYEE_DATA = {
     "alice.johnson@company.com": {
         "employee_id": "1001",
@@ -290,3 +295,93 @@ MOCK_EMPLOYEE_DATA = {
         "operational_status": "1",
     },
 }
+
+
+def _generate_user_data_for_email(email: str, employee_id: int) -> Dict[str, Any]:
+    """Generate user data for a TEST_USERS email.
+
+    Args:
+        email: Email address to generate data for
+        employee_id: Unique employee ID to use
+
+    Returns:
+        Dictionary containing employee and laptop information
+    """
+    # Extract username from email (part before @)
+    username = email.split("@")[0]
+    name = username  # Use username directly as name
+
+    # Generate sys_id starting from 9000 to avoid conflicts with existing data
+    sys_id = str(9000 + employee_id)
+
+    # Use static values for simplicity
+    location = "Remote"
+    laptop_model = "MacBook Pro 16-inch"
+    model_id = "macbook_pro_16"
+
+    # Generate dates
+    purchase_date_obj = datetime.now() - timedelta(
+        days=random.randint(365, 1095)
+    )  # 1-3 years ago
+    purchase_date = purchase_date_obj.strftime("%Y-%m-%d")
+    warranty_expiry_obj = purchase_date_obj + timedelta(days=1095)  # 3 years warranty
+    warranty_expiry = warranty_expiry_obj.strftime("%Y-%m-%d")
+    warranty_status = "Active" if datetime.now() < warranty_expiry_obj else "Expired"
+
+    # Generate serial numbers
+    laptop_serial = f"TEST{employee_id:04d}"
+    asset_tag = f"ASSET-TEST-{employee_id:03d}"
+
+    return {
+        "employee_id": str(employee_id),
+        "sys_id": sys_id,
+        "name": name,
+        "email": email,
+        "user_name": username,
+        "location": location,
+        "active": "true",
+        "laptop_model": laptop_model,
+        "laptop_serial_number": laptop_serial,
+        "purchase_date": purchase_date,
+        "warranty_expiry": warranty_expiry,
+        "warranty_status": warranty_status,
+        "asset_tag": asset_tag,
+        "model_id": model_id,
+        "install_status": "1",
+        "operational_status": "1",
+    }
+
+
+def get_employee_data() -> Dict[str, Dict[str, Any]]:
+    """Get employee data, optionally augmented with TEST_USERS.
+
+    Returns:
+        Dictionary of employee data, possibly extended with TEST_USERS
+    """
+    # Start with base mock data
+    result = MOCK_EMPLOYEE_DATA.copy()
+
+    # Check for TEST_USERS environment variable
+    test_users_env = os.getenv("TEST_USERS")
+    if not test_users_env:
+        return result
+
+    # Parse comma-separated emails
+    test_emails = [
+        email.strip() for email in test_users_env.split(",") if email.strip()
+    ]
+    if not test_emails:
+        return result
+
+    # Generate data for TEST_USERS emails
+    for idx, email in enumerate(test_emails):
+        # Skip if email already exists in MOCK_EMPLOYEE_DATA
+        if email.lower() in result:
+            continue
+
+        # Generate unique employee_id starting from 9001
+        employee_id = 9001 + idx
+        user_data = _generate_user_data_for_email(email, employee_id)
+        result[email.lower()] = user_data
+
+    return result
