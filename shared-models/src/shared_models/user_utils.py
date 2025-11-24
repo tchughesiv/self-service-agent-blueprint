@@ -203,13 +203,14 @@ async def resolve_canonical_user_id(
 ) -> str:
     """Resolve user_id to canonical user_id (UUID) if it's an email address.
 
-    This function checks if the user_id is already a UUID. If not, it assumes
-    it's an email address and resolves it to a canonical user_id.
+    This function checks if the user_id is already a UUID. If it is, it verifies
+    the user exists in the users table and creates it if it doesn't. If not a UUID,
+    it assumes it's an email address and resolves it to a canonical user_id.
 
     Args:
         user_id: The user_id from the request (may be email or UUID)
         integration_type: Optional integration type (for logging/debugging)
-        db: Database session (required if user_id is not a UUID)
+        db: Database session (required if user_id is not a UUID, or to verify UUID exists)
 
     Returns:
         str: Canonical user_id (UUID as string)
@@ -219,8 +220,67 @@ async def resolve_canonical_user_id(
     """
     # Check if user_id looks like a UUID
     if is_uuid(user_id):
-        # Already a UUID, return as-is
-        return user_id
+        # Already a UUID, but we need to verify it exists in the users table
+        # This handles cases where a UUID is provided but doesn't exist yet (e.g., test scripts)
+        if db is not None:
+            stmt = select(User).where(User.user_id == user_id)
+            result = await db.execute(stmt)
+            existing_user = result.scalar_one_or_none()
+
+            if existing_user:
+                # User exists, return as-is
+                return user_id
+            else:
+                # UUID provided but user doesn't exist - create it
+                # This is useful for test scripts or cases where UUID is generated client-side
+                logger.info(
+                    "UUID provided but user doesn't exist, creating user",
+                    user_id=user_id,
+                    integration_type=(
+                        (
+                            integration_type.value
+                            if hasattr(integration_type, "value")
+                            else str(integration_type)
+                        )
+                        if integration_type
+                        else None
+                    ),
+                )
+                try:
+                    new_user = User(
+                        user_id=user_id,
+                        primary_email=None,  # No email for UUID-only users
+                    )
+                    db.add(new_user)
+                    await db.flush()
+                    logger.info(
+                        "Created user for provided UUID",
+                        user_id=user_id,
+                    )
+                    return user_id
+                except Exception as e:
+                    # If creation fails (e.g., concurrent creation), try to fetch again
+                    error_str = str(e).lower()
+                    if (
+                        "unique" in error_str
+                        or "duplicate" in error_str
+                        or "constraint" in error_str
+                    ):
+                        logger.debug(
+                            "User creation failed, retrying lookup",
+                            user_id=user_id,
+                            error=str(e),
+                        )
+                        stmt = select(User).where(User.user_id == user_id)
+                        result = await db.execute(stmt)
+                        existing_user = result.scalar_one_or_none()
+                        if existing_user:
+                            return user_id
+                    raise
+        else:
+            # UUID provided but no db session - assume it exists (for backward compatibility)
+            # This maintains the old behavior when db is not provided
+            return user_id
 
     # Looks like an email address, resolve to canonical user_id
     if db is None:
