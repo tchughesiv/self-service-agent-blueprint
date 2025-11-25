@@ -30,6 +30,7 @@ spec:
 
 {{- if and .Values.requestManagement.enabled .Values.requestManagement.integrationDispatcher.externalAccess.enabled }}
 ---
+# Path-restricted Route: Only Slack webhook endpoints are externally accessible
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
@@ -41,6 +42,7 @@ metadata:
   annotations:
     haproxy.router.openshift.io/timeout: "180s"
 spec:
+  path: /slack
   to:
     kind: Service
     name: {{ include "self-service-agent.fullname" . }}-integration-dispatcher
