@@ -4,6 +4,11 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
 
+# Cancel any previous runs of this workflow for the same PR.
+concurrency:
+  group: ${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 env:
   ASSET_MANAGER_DIR: asset-manager    
 
