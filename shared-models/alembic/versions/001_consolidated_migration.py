@@ -1,7 +1,6 @@
-"""Consolidated database schema for self-service agent system
+"""Initial database schema for self-service agent system
 
-This migration consolidates all previous migrations into a single version.
-It creates the complete database schema including:
+Creates all required tables for the self-service agent system including:
 - Users table with canonical UUID-based user_id
 - Request sessions and logging with token tracking
 - User integration configurations and smart defaults
@@ -85,7 +84,7 @@ def upgrade() -> None:
     session_status_enum = ENUM(name="sessionstatus", create_type=False)
     delivery_status_enum = ENUM(name="deliverystatus", create_type=False)
 
-    # Create users table (from migration 007 - canonical user_id architecture)
+    # Create users table
     op.create_table(
         "users",
         sa.Column(
@@ -110,91 +109,78 @@ def upgrade() -> None:
     )
     op.create_index("ix_users_primary_email", "users", ["primary_email"], unique=True)
 
-    # Create request_sessions table with token tracking fields (from migrations 001, 004)
-    try:
-        op.create_table(
-            "request_sessions",
-            sa.Column("id", sa.Integer(), nullable=False),
-            sa.Column("session_id", sa.String(length=36), nullable=False),
-            sa.Column(
-                "user_id",
-                postgresql.UUID(as_uuid=False),
-                nullable=False,
-            ),  # UUID-based from migration 007
-            sa.Column("integration_type", integration_type_enum, nullable=False),
-            sa.Column("status", session_status_enum, nullable=False),
-            sa.Column("channel_id", sa.String(length=255), nullable=True),
-            sa.Column("thread_id", sa.String(length=255), nullable=True),
-            sa.Column("integration_metadata", sa.JSON(), nullable=True),
-            sa.Column("total_requests", sa.Integer(), nullable=False),
-            sa.Column(
-                "last_request_at", postgresql.TIMESTAMP(timezone=True), nullable=True
-            ),
-            sa.Column("expires_at", postgresql.TIMESTAMP(timezone=True), nullable=True),
-            sa.Column(
-                "created_at", postgresql.TIMESTAMP(timezone=True), nullable=False
-            ),
-            sa.Column(
-                "updated_at", postgresql.TIMESTAMP(timezone=True), nullable=False
-            ),
-            # Additional fields
-            sa.Column("external_session_id", sa.String(length=255), nullable=True),
-            sa.Column("current_agent_id", sa.String(length=255), nullable=True),
-            sa.Column("conversation_thread_id", sa.String(length=255), nullable=True),
-            sa.Column("user_context", sa.JSON(), nullable=True),
-            sa.Column("conversation_context", sa.JSON(), nullable=True),
-            sa.Column("last_request_id", sa.String(length=36), nullable=True),
-            # Token tracking fields (from migration 004)
-            sa.Column(
-                "total_input_tokens", sa.Integer(), nullable=False, server_default="0"
-            ),
-            sa.Column(
-                "total_output_tokens", sa.Integer(), nullable=False, server_default="0"
-            ),
-            sa.Column("total_tokens", sa.Integer(), nullable=False, server_default="0"),
-            sa.Column("llm_call_count", sa.Integer(), nullable=False, server_default="0"),
-            sa.Column(
-                "max_input_tokens_per_call",
-                sa.Integer(),
-                nullable=False,
-                server_default="0",
-            ),
-            sa.Column(
-                "max_output_tokens_per_call",
-                sa.Integer(),
-                nullable=False,
-                server_default="0",
-            ),
-            sa.Column(
-                "max_total_tokens_per_call",
-                sa.Integer(),
-                nullable=False,
-                server_default="0",
-            ),
-            sa.PrimaryKeyConstraint("id", name=op.f("pk_request_sessions")),
-            sa.UniqueConstraint(
-                "session_id", name=op.f("uq_request_sessions_session_id")
-            ),
-            sa.ForeignKeyConstraint(
-                ["user_id"],
-                ["users.user_id"],
-                name=op.f("fk_request_sessions_user_id"),
-            ),
-        )
-        op.create_index(
-            op.f("ix_session_id"), "request_sessions", ["session_id"], unique=False
-        )
-        op.create_index(
-            "ix_request_sessions_user_id", "request_sessions", ["user_id"], unique=False
-        )
+    # Create request_sessions table
+    op.create_table(
+        "request_sessions",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("session_id", sa.String(length=36), nullable=False),
+        sa.Column(
+            "user_id",
+            postgresql.UUID(as_uuid=False),
+            nullable=False,
+        ),
+        sa.Column("integration_type", integration_type_enum, nullable=False),
+        sa.Column("status", session_status_enum, nullable=False),
+        sa.Column("channel_id", sa.String(length=255), nullable=True),
+        sa.Column("thread_id", sa.String(length=255), nullable=True),
+        sa.Column("integration_metadata", sa.JSON(), nullable=True),
+        sa.Column("total_requests", sa.Integer(), nullable=False),
+        sa.Column(
+            "last_request_at", postgresql.TIMESTAMP(timezone=True), nullable=True
+        ),
+        sa.Column("expires_at", postgresql.TIMESTAMP(timezone=True), nullable=True),
+        sa.Column("created_at", postgresql.TIMESTAMP(timezone=True), nullable=False),
+        sa.Column("updated_at", postgresql.TIMESTAMP(timezone=True), nullable=False),
+        # Additional fields
+        sa.Column("external_session_id", sa.String(length=255), nullable=True),
+        sa.Column("current_agent_id", sa.String(length=255), nullable=True),
+        sa.Column("conversation_thread_id", sa.String(length=255), nullable=True),
+        sa.Column("user_context", sa.JSON(), nullable=True),
+        sa.Column("conversation_context", sa.JSON(), nullable=True),
+        sa.Column("last_request_id", sa.String(length=36), nullable=True),
+        # Token tracking fields
+        sa.Column(
+            "total_input_tokens", sa.Integer(), nullable=False, server_default="0"
+        ),
+        sa.Column(
+            "total_output_tokens", sa.Integer(), nullable=False, server_default="0"
+        ),
+        sa.Column("total_tokens", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("llm_call_count", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column(
+            "max_input_tokens_per_call",
+            sa.Integer(),
+            nullable=False,
+            server_default="0",
+        ),
+        sa.Column(
+            "max_output_tokens_per_call",
+            sa.Integer(),
+            nullable=False,
+            server_default="0",
+        ),
+        sa.Column(
+            "max_total_tokens_per_call",
+            sa.Integer(),
+            nullable=False,
+            server_default="0",
+        ),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_request_sessions")),
+        sa.UniqueConstraint("session_id", name=op.f("uq_request_sessions_session_id")),
+        sa.ForeignKeyConstraint(
+            ["user_id"],
+            ["users.user_id"],
+            name=op.f("fk_request_sessions_user_id"),
+        ),
+    )
+    op.create_index(
+        op.f("ix_session_id"), "request_sessions", ["session_id"], unique=False
+    )
+    op.create_index(
+        "ix_request_sessions_user_id", "request_sessions", ["user_id"], unique=False
+    )
 
-    except Exception:
-        import traceback
-
-        traceback.print_exc()
-        raise
-
-    # Create request_logs table with pod_name (from migrations 001, 006)
+    # Create request_logs table
     op.create_table(
         "request_logs",
         sa.Column("id", sa.Integer(), nullable=False),
@@ -209,7 +195,7 @@ def upgrade() -> None:
         sa.Column("response_metadata", sa.JSON(), nullable=True),
         sa.Column("cloudevent_id", sa.String(length=36), nullable=True),
         sa.Column("cloudevent_type", sa.String(length=100), nullable=True),
-        sa.Column("pod_name", sa.String(255), nullable=True),  # From migration 006
+        sa.Column("pod_name", sa.String(255), nullable=True),
         sa.Column("completed_at", postgresql.TIMESTAMP(timezone=True), nullable=True),
         sa.Column("created_at", postgresql.TIMESTAMP(timezone=True), nullable=False),
         sa.Column("updated_at", postgresql.TIMESTAMP(timezone=True), nullable=False),
@@ -232,58 +218,46 @@ def upgrade() -> None:
         "ix_request_logs_pod_name", "request_logs", ["pod_name"], unique=False
     )
 
-    # Create user_integration_configs table with UUID user_id (from migrations 001, 007)
-    try:
-        op.create_table(
-            "user_integration_configs",
-            sa.Column("id", sa.Integer(), nullable=False),
-            sa.Column(
-                "user_id",
-                postgresql.UUID(as_uuid=False),
-                nullable=False,
-            ),  # UUID-based from migration 007
-            sa.Column("integration_type", integration_type_enum, nullable=False),
-            sa.Column("enabled", sa.Boolean(), nullable=False),
-            sa.Column("config", sa.JSON(), nullable=False),
-            sa.Column("priority", sa.Integer(), nullable=False),
-            sa.Column("retry_count", sa.Integer(), nullable=False),
-            sa.Column("retry_delay_seconds", sa.Integer(), nullable=False),
-            sa.Column("created_by", sa.String(length=255), nullable=True),
-            sa.Column(
-                "created_at", postgresql.TIMESTAMP(timezone=True), nullable=False
-            ),
-            sa.Column(
-                "updated_at", postgresql.TIMESTAMP(timezone=True), nullable=False
-            ),
-            sa.PrimaryKeyConstraint("id", name=op.f("pk_user_integration_configs")),
-            sa.UniqueConstraint(
-                "user_id", "integration_type", name="uq_user_integration"
-            ),
-            sa.ForeignKeyConstraint(
-                ["user_id"],
-                ["users.user_id"],
-                name=op.f("fk_user_integration_configs_user_id"),
-            ),
-        )
-        op.create_index(
-            "ix_user_integration_configs_user_id",
-            "user_integration_configs",
+    # Create user_integration_configs table
+    op.create_table(
+        "user_integration_configs",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column(
+            "user_id",
+            postgresql.UUID(as_uuid=False),
+            nullable=False,
+        ),
+        sa.Column("integration_type", integration_type_enum, nullable=False),
+        sa.Column("enabled", sa.Boolean(), nullable=False),
+        sa.Column("config", sa.JSON(), nullable=False),
+        sa.Column("priority", sa.Integer(), nullable=False),
+        sa.Column("retry_count", sa.Integer(), nullable=False),
+        sa.Column("retry_delay_seconds", sa.Integer(), nullable=False),
+        sa.Column("created_by", sa.String(length=255), nullable=True),
+        sa.Column("created_at", postgresql.TIMESTAMP(timezone=True), nullable=False),
+        sa.Column("updated_at", postgresql.TIMESTAMP(timezone=True), nullable=False),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_user_integration_configs")),
+        sa.UniqueConstraint("user_id", "integration_type", name="uq_user_integration"),
+        sa.ForeignKeyConstraint(
             ["user_id"],
-            unique=False,
-        )
-        op.create_index(
-            "ix_user_integration_configs_integration_type",
-            "user_integration_configs",
-            ["integration_type"],
-            unique=False,
-        )
-    except Exception:
-        import traceback
+            ["users.user_id"],
+            name=op.f("fk_user_integration_configs_user_id"),
+        ),
+    )
+    op.create_index(
+        "ix_user_integration_configs_user_id",
+        "user_integration_configs",
+        ["user_id"],
+        unique=False,
+    )
+    op.create_index(
+        "ix_user_integration_configs_integration_type",
+        "user_integration_configs",
+        ["integration_type"],
+        unique=False,
+    )
 
-        traceback.print_exc()
-        raise
-
-    # Create integration_credentials table (from migration 001)
+    # Create integration_credentials table
     op.create_table(
         "integration_credentials",
         sa.Column("id", sa.Integer(), nullable=False),
@@ -300,7 +274,7 @@ def upgrade() -> None:
         ),
     )
 
-    # Create delivery_logs table with UUID user_id, without template_used (from migrations 001, 003, 007)
+    # Create delivery_logs table
     op.create_table(
         "delivery_logs",
         sa.Column("id", sa.Integer(), nullable=False),
@@ -310,14 +284,13 @@ def upgrade() -> None:
             "user_id",
             postgresql.UUID(as_uuid=False),
             nullable=False,
-        ),  # UUID-based from migration 007
+        ),
         sa.Column(
             "integration_config_id", sa.Integer(), nullable=True
         ),  # Allow null for smart defaults
         sa.Column("integration_type", integration_type_enum, nullable=False),
         sa.Column("subject", sa.Text(), nullable=True),
         sa.Column("content", sa.Text(), nullable=False),
-        # template_used column removed (was dropped in migration 003)
         sa.Column("status", delivery_status_enum, nullable=False),
         sa.Column("attempts", sa.Integer(), nullable=False),
         sa.Column("max_attempts", sa.Integer(), nullable=False),
@@ -359,7 +332,7 @@ def upgrade() -> None:
         "ix_delivery_logs_user_id", "delivery_logs", ["user_id"], unique=False
     )
 
-    # Create processed_events table (from migration 001)
+    # Create processed_events table
     op.create_table(
         "processed_events",
         sa.Column("id", sa.Integer(), nullable=False),
@@ -394,7 +367,7 @@ def upgrade() -> None:
         unique=False,
     )
 
-    # Create integration_default_configs table (from migration 001)
+    # Create integration_default_configs table
     op.create_table(
         "integration_default_configs",
         sa.Column("id", sa.Integer(), nullable=False),
@@ -411,7 +384,7 @@ def upgrade() -> None:
         sa.UniqueConstraint("integration_type", name="uq_integration_default_type"),
     )
 
-    # Create user_integration_mappings table with UUID user_id (from migrations 001, 007)
+    # Create user_integration_mappings table
     op.create_table(
         "user_integration_mappings",
         sa.Column("id", sa.Integer(), nullable=False),
@@ -426,7 +399,7 @@ def upgrade() -> None:
             "user_id",
             postgresql.UUID(as_uuid=False),
             nullable=False,
-        ),  # UUID-based from migration 007
+        ),
         sa.Column("last_validated_at", sa.TIMESTAMP(timezone=True), nullable=True),
         sa.Column("validation_attempts", sa.Integer(), nullable=False, default=0),
         sa.Column("last_validation_error", sa.Text(), nullable=True),
@@ -493,7 +466,7 @@ def upgrade() -> None:
         ["integration_user_id", "integration_type"],
     )
 
-    # Create pg_advisory_lock_held function (from migration 005)
+    # Create pg_advisory_lock_held function
     op.execute(
         """
         CREATE OR REPLACE FUNCTION pg_advisory_lock_held(key BIGINT)
