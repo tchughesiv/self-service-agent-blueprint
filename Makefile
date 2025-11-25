@@ -1009,10 +1009,11 @@ define helm_install_common
 		"deploy/$(MAIN_CHART_NAME)-request-manager:request manager" \
 		"deploy/$(MAIN_CHART_NAME)-integration-dispatcher:integration dispatcher" \
 		"deploy/$(MAIN_CHART_NAME)-agent-service:agent service" \
-		"deploy/$(MAIN_CHART_NAME)-llama-stack:llama stack" \
+		"deploy/llamastack:llamastack" \
 		"deploy/mcp-self-service-agent-snow:mcp-self-service-agent-snow" \
 		"statefulset/pgvector:pgvector" \
-		"job/$(MAIN_CHART_NAME)-db-migration:db-migration"; do \
+		"job/$(MAIN_CHART_NAME)-db-migration:db-migration" \
+		"job/$(MAIN_CHART_NAME)-init:init"; do \
 		name=$${resource#*:}; \
 		res=$${resource%:*}; \
 		echo "  Waiting for $$name..."; \
