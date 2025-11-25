@@ -45,7 +45,11 @@ runs:
       shell: bash
 
     - name: Validate namespace exists
-      run: kubectl get namespace ${{inputs.namespace}} || (echo "Error: Namespace ${{inputs.namespace}} does not exist" && exit 1)
+      run: |
+        if ! kubectl get namespace ${{inputs.namespace}}; then
+          echo "Error: Namespace ${{inputs.namespace}} does not exist"
+          exit 1
+        fi
       shell: bash
 
     - name: Helm Install (using local registry)
