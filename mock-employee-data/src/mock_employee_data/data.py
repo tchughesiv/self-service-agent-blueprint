@@ -258,24 +258,6 @@ MOCK_EMPLOYEE_DATA = {
         "install_status": "1",
         "operational_status": "1",
     },
-    "tchughesiv@gmail.com": {
-        "employee_id": "3001",
-        "sys_id": "3001",
-        "name": "Tommy Hughes",
-        "email": "tchughesiv@gmail.com",
-        "user_name": "tommy.hughes",
-        "location": "New Orleans - Remote",
-        "active": "true",
-        "laptop_model": "MacBook Pro 16-inch",
-        "laptop_serial_number": "TCH789012",
-        "purchase_date": "2021-01-10",
-        "warranty_expiry": "2024-01-10",
-        "warranty_status": "Expired",
-        "asset_tag": "ASSET-015",
-        "model_id": "macbook_pro_16",
-        "install_status": "1",
-        "operational_status": "1",
-    },
 }
 
 
