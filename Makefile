@@ -1004,12 +1004,24 @@ define helm_install_common
 		$(TEST_USERS_ARGS) \
 		$(if $(filter-out "",$(2)),$(2),) \
 		$(EXTRA_HELM_ARGS)
-	@echo "Waiting for request manager deployment..."
-	@kubectl rollout status deploy/$(MAIN_CHART_NAME)-request-manager -n $(NAMESPACE) --timeout 10m
-	@echo "Waiting for integration dispatcher deployment..."
-	@kubectl rollout status deploy/$(MAIN_CHART_NAME)-integration-dispatcher -n $(NAMESPACE) --timeout 10m
-	@echo "Waiting for agent service deployment..."
-	@kubectl rollout status deploy/$(MAIN_CHART_NAME)-agent-service -n $(NAMESPACE) --timeout 10m
+	@echo "Waiting for deployments to be ready..."
+	@for resource in \
+		"deploy/$(MAIN_CHART_NAME)-request-manager:request manager" \
+		"deploy/$(MAIN_CHART_NAME)-integration-dispatcher:integration dispatcher" \
+		"deploy/$(MAIN_CHART_NAME)-agent-service:agent service" \
+		"deploy/$(MAIN_CHART_NAME)-llama-stack:llama stack" \
+		"deploy/mcp-self-service-agent-snow:mcp-self-service-agent-snow" \
+		"statefulset/pgvector:pgvector" \
+		"job/$(MAIN_CHART_NAME)-db-migration:db-migration"; do \
+		name=$${resource#*:}; \
+		res=$${resource%:*}; \
+		echo "  Waiting for $$name..."; \
+		if echo "$$res" | grep -q "^job/"; then \
+			kubectl wait --for=condition=complete --timeout=10m $$res -n $(NAMESPACE) || echo "    Job check completed (may have already run)"; \
+		else \
+			kubectl rollout status $$res -n $(NAMESPACE) --timeout 10m; \
+		fi; \
+	done
 	$(if $(filter true,$(3)),@echo "Waiting for mock eventing deployment..." && kubectl rollout status deploy/$(MAIN_CHART_NAME)-mock-eventing -n $(NAMESPACE) --timeout 5m,)
 	@echo "$(MAIN_CHART_NAME) $(1) installed successfully"
 endef
