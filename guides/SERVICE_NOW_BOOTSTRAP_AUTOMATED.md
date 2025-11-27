@@ -20,13 +20,7 @@ The scripts automate most of the manual steps described in the [ServiceNow PDI B
 
 ## 📋 Prerequisites
 
-1. **Python 3.12+** and **uv** package manager:
-   ```bash
-   # From the root 
-   make install-all # or install-servicenow-bootstrap
-   ```
-
-2. **ServiceNow PDI Instance**:
+1. **ServiceNow PDI Instance**:
    - Follow [Step 1](SERVICE_NOW_BOOTSTRAP_MANUAL.md#step-1---signup--pdi-new-instance) of the ServiceNow PDI Bootstrap - Manual Setup
      - After the instance is ready click "Manage my instance" and note your: Instance URL, Admin Password
 
@@ -63,11 +57,6 @@ Install the project and its dependencies using uv:
 ```bash
 cd scripts/servicenow-bootstrap
 uv sync
-```
-
-For development dependencies (optional):
-```bash
-uv sync --group dev
 ```
 
 ### 3. Run Complete Setup
@@ -112,11 +101,14 @@ The script will:
 
 
 ### 5. Complete manual steps
-1. **PC Refresh**: Click "All" -> Search for "Catalog Builder" -> Click "PC Refresh" -> Click "Edit catalog item" -> Click "Access" -> Set the [following](SERVICE_NOW_BOOTSTRAP_MANUAL.md#access) -> Click "Review and submit" -> Click "Submit"
+1. **PC Refresh**: Click "All" -> Search for "Catalog Builder" -> Click "PC Refresh" -> Click "Edit catalog item" -> Click "Access" -> 
+   1. Set **Available for:** Browse → Select "Any User" → Click "Save selection"
+   2. Set **Not available for:** Browse → Select "Guest User" → Click "Save selection"
+   3. Click "Review and submit" -> Click "Submit"
 2. **REST API Access**: Click "All" -> Search for "REST API Access Policies" -> 
    1. **Configue MCP Agent - SC**:
       1. **Set REST API:** Click "MCP Agent - SC" -> Click "REST API" dropdown -> Select "Service Catalog API"
-      2. **Set Authentication Profiles** Double Click "Insert new row.." -> Search for "Basic Auth" -> Click Green Checkmark (repeat this step for "API Key")
+      2. **Set Authentication Profiles** Double Click "Insert new row.." -> Search for "API Key" -> Click Green Checkmark
       3. Click "Update"
    2. **Configue "MCP Agent - Table"** 
       1. **Set REST API:**  Click "REST API" dropdown -> Select "Table API"
