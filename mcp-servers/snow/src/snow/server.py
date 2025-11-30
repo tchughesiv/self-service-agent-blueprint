@@ -5,10 +5,12 @@ ServiceNow laptop refresh tickets.
 """
 
 import os
-from typing import Any, Literal
+from contextlib import asynccontextmanager
+from typing import Any, AsyncGenerator, Literal
 
 from mcp.server.fastmcp import Context, FastMCP
 from shared_models import configure_logging
+from snow.servicenow import headers
 from snow.servicenow.client import ServiceNowClient
 from snow.servicenow.models import OpenServiceNowLaptopRefreshRequestParams
 from snow.tracing import trace_mcp_tool
@@ -19,13 +21,69 @@ SERVICE_NAME = "snow-mcp-server"
 logger = configure_logging(SERVICE_NAME)
 auto_tracing_run(SERVICE_NAME, logger)
 
+
+@asynccontextmanager
+async def lifespan(app: FastMCP) -> AsyncGenerator[None, None]:
+    """Initialize and validate ServiceNow configuration at startup."""
+    # Startup: Validate and store required environment variables
+    logger.info("Initializing ServiceNow configuration")
+
+    laptop_refresh_id = os.getenv("SERVICENOW_LAPTOP_REFRESH_ID")
+    if not laptop_refresh_id:
+        logger.error(
+            "SERVICENOW_LAPTOP_REFRESH_ID environment variable is not set. "
+            "Please set it to the ServiceNow catalog item ID for laptop refresh requests."
+        )
+        raise ValueError(
+            "SERVICENOW_LAPTOP_REFRESH_ID environment variable is required but not set. "
+            "Please configure it in your deployment."
+        )
+
+    # Get laptop request limits with None if not set (no default limit)
+    laptop_request_limits_env = os.getenv("SERVICENOW_LAPTOP_REQUEST_LIMITS")
+    laptop_request_limits = (
+        int(laptop_request_limits_env) if laptop_request_limits_env else None
+    )
+
+    # Get laptop avoid duplicates setting with default value of False
+    laptop_avoid_duplicates_env = os.getenv(
+        "SERVICENOW_LAPTOP_AVOID_DUPLICATES", "false"
+    )
+    laptop_avoid_duplicates = laptop_avoid_duplicates_env.lower() in (
+        "true",
+        "1",
+        "yes",
+        "on",
+    )
+
+    # Store the laptop_refresh_id, limits, and avoid_duplicates setting on the app instance
+    setattr(app, "laptop_refresh_id", laptop_refresh_id)
+    setattr(app, "laptop_request_limits", laptop_request_limits)
+    setattr(app, "laptop_avoid_duplicates", laptop_avoid_duplicates)
+    logger.info(
+        "ServiceNow configuration initialized",
+        laptop_refresh_id=laptop_refresh_id,
+        laptop_request_limits=laptop_request_limits,
+        laptop_avoid_duplicates=laptop_avoid_duplicates,
+    )
+
+    try:
+        yield
+    finally:
+        # Cleanup
+        logger.info("Shutting down ServiceNow MCP server")
+
+
 MCP_TRANSPORT: Literal["stdio", "sse", "streamable-http"] = os.environ.get("MCP_TRANSPORT", "sse")  # type: ignore[assignment]
 MCP_PORT = int(
     os.environ.get("SELF_SERVICE_AGENT_SNOW_SERVER_SERVICE_PORT_HTTP", "8001")
 )
 MCP_HOST = os.environ.get("MCP_HOST", "0.0.0.0")
 mcp = FastMCP(
-    "Snow Server", host=MCP_HOST, stateless_http=(MCP_TRANSPORT == "streamable-http")
+    "Snow Server",
+    host=MCP_HOST,
+    stateless_http=(MCP_TRANSPORT == "streamable-http"),
+    lifespan=lifespan,
 )
 
 
@@ -43,7 +101,12 @@ def _create_servicenow_ticket(
         ServiceNow ticket creation result message
     """
     try:
-        client = ServiceNowClient(api_token)
+        client = ServiceNowClient(
+            api_token,
+            getattr(mcp, "laptop_refresh_id"),
+            getattr(mcp, "laptop_request_limits"),
+            getattr(mcp, "laptop_avoid_duplicates"),
+        )
 
         # Look up user sys_id by email as currently only email is supported
         # authoritative user id
@@ -103,64 +166,6 @@ def _create_servicenow_ticket(
         raise  # Re-raise to allow fallback handling
 
 
-def _extract_authoritative_user_id(ctx: Context[Any, Any]) -> str | None:
-    """Extract authoritative user ID from request context headers.
-
-    Args:
-        ctx: Request context containing headers
-
-    Returns:
-        Authoritative user ID if found, None otherwise
-    """
-    try:
-        request_context = ctx.request_context
-        if hasattr(request_context, "request") and request_context.request:
-            request = request_context.request
-            if hasattr(request, "headers"):
-                headers = request.headers
-                user_id = headers.get("AUTHORITATIVE_USER_ID") or headers.get(
-                    "authoritative_user_id"
-                )
-                return str(user_id) if user_id is not None else None
-    except Exception as e:
-        logger.debug(
-            "Error extracting headers from request context",
-            error=str(e),
-            error_type=type(e).__name__,
-        )
-
-    return None
-
-
-def _extract_servicenow_token(ctx: Context[Any, Any]) -> str | None:
-    """Extract ServiceNow API token from request context headers.
-
-    This implements pass-through authentication where the client (agent-service)
-    reads the API key from its environment and passes it via the X-ServiceNow-Token header.
-
-    Args:
-        ctx: Request context containing headers
-
-    Returns:
-        ServiceNow API token if found, None otherwise
-    """
-    try:
-        request_context = ctx.request_context
-        if hasattr(request_context, "request") and request_context.request:
-            request = request_context.request
-            if hasattr(request, "headers"):
-                headers = request.headers
-                # Check both uppercase and lowercase variants
-                token = headers.get("SERVICE_NOW_TOKEN")
-                return str(token) if token is not None else None
-    except Exception as e:
-        logger.debug(
-            "Error extracting ServiceNow token from request context", error=str(e)
-        )
-
-    return None
-
-
 def _get_servicenow_laptop_info(
     authoritative_user_id: str, api_token: str | None = None
 ) -> str:
@@ -176,7 +181,12 @@ def _get_servicenow_laptop_info(
         Formatted laptop information string including employee details and hardware specifications
     """
     try:
-        client = ServiceNowClient(api_token)
+        client = ServiceNowClient(
+            api_token,
+            getattr(mcp, "laptop_refresh_id"),
+            getattr(mcp, "laptop_request_limits"),
+            getattr(mcp, "laptop_avoid_duplicates"),
+        )
 
         laptop_info = client.get_employee_laptop_info(authoritative_user_id)
         if laptop_info:
@@ -227,8 +237,8 @@ def open_laptop_refresh_ticket(
             "ServiceNow laptop code cannot be empty. Must be a valid ServiceNow laptop choice code like 'apple_mac_book_air_m_3'."
         )
 
-    authoritative_user_id = _extract_authoritative_user_id(ctx)
-    api_token = _extract_servicenow_token(ctx)
+    authoritative_user_id = headers.extract_authoritative_user_id(ctx)
+    api_token = headers.extract_servicenow_token(ctx)
 
     if not authoritative_user_id:
         raise ValueError(
@@ -283,8 +293,8 @@ def get_employee_laptop_info(
         # Returns laptop info for alice.johnson@company.com
     """
     # Extract authoritative user ID from request headers - CENTRALIZED HANDLING
-    authoritative_user_id = _extract_authoritative_user_id(ctx)
-    api_token = _extract_servicenow_token(ctx)
+    authoritative_user_id = headers.extract_authoritative_user_id(ctx)
+    api_token = headers.extract_servicenow_token(ctx)
 
     if not authoritative_user_id:
         raise ValueError(
