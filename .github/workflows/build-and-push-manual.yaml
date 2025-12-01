@@ -19,6 +19,11 @@ on:
         default: ''
         type: string
 
+# Cancel any previous runs of this workflow
+concurrency:
+  group: ${{ github.workflow }}-${{ github.sha }}
+  cancel-in-progress: true
+
 env:
   REGISTRY: quay.io/ecosystem-appeng
 

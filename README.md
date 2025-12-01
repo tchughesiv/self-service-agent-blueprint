@@ -320,6 +320,34 @@ spec:
     enabled: false # optional, not necessary for the self-service agent
 ```
 
+**Important:** If you experience `kafka-webhook-eventing` pod crashes due to memory issues (OOM kills), you can configure resource limits in the `KnativeKafka` CR using the `workloads` section. Here's an enhanced example with resource limits for the webhook:
+
+```yaml
+kind: KnativeKafka
+apiVersion: operator.serverless.openshift.io/v1alpha1
+metadata:
+  name: knative-kafka
+  namespace: knative-eventing
+spec:
+  broker:
+    enabled: true
+  source:
+    enabled: false
+  channel:
+    enabled: false
+  # Configure resource limits for webhook to prevent OOM kills
+  workloads:
+  - name: kafka-webhook-eventing
+    resources:
+    - container: kafka-webhook-eventing
+      requests:
+        cpu: "100m"
+        memory: "256Mi"
+      limits:
+        cpu: "500m"
+        memory: "512Mi"  # Increase if webhook is crashing due to OOM (try 1Gi or 2Gi for heavy load)
+```
+
 **Access & Credentials:**
 * OpenShift cluster access
 * Container registry (Quay.io or similar), OPTIONAL, only if you want to make changes
