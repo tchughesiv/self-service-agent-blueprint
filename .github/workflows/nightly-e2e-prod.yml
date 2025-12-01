@@ -4,7 +4,12 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '0 6 * * *'  # Run daily at 6 AM UTC
-  
+
+# Cancel any previous runs of this workflow
+concurrency:
+  group: ${{ github.workflow }}-${{ github.sha }}
+  cancel-in-progress: true
+
 jobs:
   e2e-tests:
     name: Run e2e tests
@@ -89,11 +94,21 @@ jobs:
         run: |
           make helm-uninstall NAMESPACE=self-service-agent-ci-project-1
 
+      - name: Extract version from Makefile
+        id: version
+        run: |
+          BASE_VERSION=$(make version)
+          VERSION_WITH_COMMIT="${BASE_VERSION}-${{ github.sha }}"
+          echo "version=${VERSION_WITH_COMMIT}" >> $GITHUB_OUTPUT
+          echo "Base version: ${BASE_VERSION}"
+          echo "Version with commit: ${VERSION_WITH_COMMIT}"
+
       - name: Install the quickstart
         shell: bash
         run: |
           make helm-install-prod NAMESPACE=self-service-agent-ci-project-1
         env:
+          VERSION: ${{ steps.version.outputs.version }}
           LLM_URL: ${{ vars.LLM_URL_EVAL_70B }}
           LLM_API_TOKEN: ${{ secrets.LLM_API_TOKEN_EVAL_70B }}
           LLM_ID: ${{ vars.LLM_ID_INFERENCE }}

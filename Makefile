@@ -1057,13 +1057,56 @@ helm-install-prod: namespace helm-depend
 	@for i in 1 2 3; do \
 		echo "Attempt $$i of 3..."; \
 		if $(MAKE) _helm-install-prod-single; then \
-			echo "Installation successful, verifying triggers..."; \
+			echo "Installation successful, verifying broker and triggers..."; \
 			EXPECTED_TRIGGERS=8; \
 			ACTUAL_TRIGGERS=$$(kubectl get triggers -n $(NAMESPACE) --no-headers 2>/dev/null | wc -l); \
 			if [ "$$ACTUAL_TRIGGERS" -eq "$$EXPECTED_TRIGGERS" ]; then \
-				echo "✅ All $$EXPECTED_TRIGGERS triggers deployed successfully"; \
-				$(MAKE) print-urls; \
-				exit 0; \
+				echo "✅ All $$EXPECTED_TRIGGERS triggers deployed"; \
+				echo "Waiting for broker to be ready..."; \
+				BROKER_NAME=$$(kubectl get broker -n $(NAMESPACE) -o jsonpath='{.items[0].metadata.name}' 2>/dev/null); \
+				if [ -z "$$BROKER_NAME" ]; then \
+					echo "❌ No broker found in namespace $(NAMESPACE)"; \
+					if [ $$i -lt 3 ]; then \
+						echo "Attempt $$i failed, waiting 30s before retry..."; \
+						sleep 30; \
+						continue; \
+					else \
+						exit 1; \
+					fi; \
+				else \
+					echo "  Waiting for broker $$BROKER_NAME to be Ready..."; \
+					if kubectl wait --for=condition=Ready broker/$$BROKER_NAME -n $(NAMESPACE) --timeout=5m 2>/dev/null; then \
+						echo "✅ Broker $$BROKER_NAME is Ready"; \
+						echo "Waiting for all triggers to be Ready..."; \
+						ALL_READY=true; \
+						for trigger in $$(kubectl get triggers -n $(NAMESPACE) -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do \
+							echo "  Waiting for trigger $$trigger to be Ready..."; \
+							if ! kubectl wait --for=condition=Ready trigger/$$trigger -n $(NAMESPACE) --timeout=5m 2>/dev/null; then \
+								echo "❌ Trigger $$trigger failed to become Ready"; \
+								ALL_READY=false; \
+							else \
+								echo "  ✅ Trigger $$trigger is Ready"; \
+							fi; \
+						done; \
+						if [ "$$ALL_READY" = "true" ]; then \
+							echo "✅ All triggers are Ready"; \
+							$(MAKE) print-urls; \
+							exit 0; \
+						else \
+							echo "❌ Some triggers failed to become Ready"; \
+							if [ $$i -lt 3 ]; then \
+								echo "Attempt $$i failed, waiting 30s before retry..."; \
+								sleep 30; \
+							fi; \
+						fi; \
+					else \
+						echo "❌ Broker $$BROKER_NAME failed to become Ready"; \
+						if [ $$i -lt 3 ]; then \
+							echo "Attempt $$i failed, waiting 30s before retry..."; \
+							sleep 30; \
+						fi; \
+					fi; \
+				fi; \
 			else \
 				echo "❌ Only $$ACTUAL_TRIGGERS out of $$EXPECTED_TRIGGERS triggers deployed"; \
 				if [ $$i -lt 3 ]; then \
