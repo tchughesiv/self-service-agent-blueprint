@@ -87,20 +87,62 @@ mcp = FastMCP(
 )
 
 
-def _create_servicenow_ticket(
-    authoritative_user_id: str, preferred_model: str, api_token: str | None = None
+@mcp.custom_route("/health", methods=["GET"])  # type: ignore
+async def health(request: Any) -> JSONResponse:
+    """Health check endpoint."""
+    return JSONResponse({"status": "OK"})
+
+
+@mcp.tool()
+@trace_mcp_tool()
+def open_laptop_refresh_ticket(
+    employee_name: str,
+    business_justification: str,
+    servicenow_laptop_code: str,
+    ctx: Context[Any, Any],
 ) -> str:
-    """Create a ServiceNow ticket using the API.
+    """Open a ServiceNow laptop refresh ticket for an employee.
 
     Args:
-        authoritative_user_id: Authoritative user ID from request headers
-        preferred_model: ServiceNow laptop model code
-        api_token: Optional API token from request header
-
+        employee_name: The full name of the employee
+        business_justification: Business reason for the laptop refresh request
+        servicenow_laptop_code: ServiceNow laptop choice code from the catalog item.
+                               Examples: 'apple_mac_book_air_m_3', 'lenovo_think_pad_p_16_gen_2',
+                               'lenovo_think_pad_t_14_s_gen_5_amd'
+                               IMPORTANT: This must be the exact ServiceNow Code from the knowledge base,
+                               NOT the human-readable model name.
     Returns:
-        ServiceNow ticket creation result message
+        A formatted string containing the ticket details
     """
     try:
+        if not employee_name:
+            raise ValueError("Employee name cannot be empty")
+
+        if not business_justification:
+            raise ValueError("Business justification cannot be empty")
+
+        if not servicenow_laptop_code:
+            raise ValueError(
+                "ServiceNow laptop code cannot be empty. Must be a valid ServiceNow laptop choice code like 'apple_mac_book_air_m_3'."
+            )
+
+        authoritative_user_id = headers.extract_authoritative_user_id(ctx)
+        api_token = headers.extract_servicenow_token(ctx)
+
+        if not authoritative_user_id:
+            raise ValueError(
+                "Authoritative user ID not found in request headers. Ensure AUTHORITATIVE_USER_ID header is set."
+            )
+
+        # Create ServiceNow ticket using the configured ServiceNow instance
+        # (which could be real ServiceNow or mock server based on SERVICENOW_INSTANCE_URL)
+        logger.info(
+            "Creating ServiceNow ticket",
+            tool="open_laptop_refresh_ticket",
+            authoritative_user_id=authoritative_user_id,
+            laptop_code=servicenow_laptop_code,
+        )
+
         client = ServiceNowClient(
             api_token,
             getattr(mcp, "laptop_refresh_id"),
@@ -135,7 +177,7 @@ def _create_servicenow_ticket(
 
         params = OpenServiceNowLaptopRefreshRequestParams(
             who_is_this_request_for=user_sys_id,
-            laptop_choices=preferred_model,
+            laptop_choices=servicenow_laptop_code,
         )
 
         result = client.open_laptop_refresh_request(params)
@@ -146,7 +188,7 @@ def _create_servicenow_ticket(
                 "ServiceNow API request completed",
                 tool="open_laptop_refresh_ticket",
                 authoritative_user_id=authoritative_user_id,
-                laptop=preferred_model,
+                laptop=servicenow_laptop_code,
                 success=result.get("success", False),
             )
 
@@ -163,99 +205,7 @@ def _create_servicenow_ticket(
     except Exception as e:
         error_msg = f"Error opening ServiceNow laptop refresh request: {str(e)}"
         logger.error(error_msg)
-        raise  # Re-raise to allow fallback handling
-
-
-def _get_servicenow_laptop_info(
-    authoritative_user_id: str, api_token: str | None = None
-) -> str:
-    """Get laptop information from ServiceNow API.
-
-    Note: ServiceNow API currently only supports email-based lookups.
-    If an employee ID is provided, this will likely fail.
-
-    Args:
-        authoritative_user_id: Authoritative user ID from request headers (email or employee ID)
-        api_token: Optional API token from request header
-    Returns:
-        Formatted laptop information string including employee details and hardware specifications
-    """
-    try:
-        client = ServiceNowClient(
-            api_token,
-            getattr(mcp, "laptop_refresh_id"),
-            getattr(mcp, "laptop_request_limits"),
-            getattr(mcp, "laptop_avoid_duplicates"),
-        )
-
-        laptop_info = client.get_employee_laptop_info(authoritative_user_id)
-        if laptop_info:
-            return laptop_info
-        else:
-            return f"Error: Failed to retrieve laptop info for {authoritative_user_id} from ServiceNow"
-    except Exception as e:
-        error_msg = f"Error getting laptop info from ServiceNow: {str(e)}"
-        logger.error(error_msg)
-        raise  # Re-raise to allow fallback handling
-
-
-@mcp.custom_route("/health", methods=["GET"])  # type: ignore
-async def health(request: Any) -> JSONResponse:
-    """Health check endpoint."""
-    return JSONResponse({"status": "OK"})
-
-
-@mcp.tool()
-@trace_mcp_tool()
-def open_laptop_refresh_ticket(
-    employee_name: str,
-    business_justification: str,
-    servicenow_laptop_code: str,
-    ctx: Context[Any, Any],
-) -> str:
-    """Open a ServiceNow laptop refresh ticket for an employee.
-
-    Args:
-        employee_name: The full name of the employee
-        business_justification: Business reason for the laptop refresh request
-        servicenow_laptop_code: ServiceNow laptop choice code from the catalog item.
-                               Examples: 'apple_mac_book_air_m_3', 'lenovo_think_pad_p_16_gen_2',
-                               'lenovo_think_pad_t_14_s_gen_5_amd'
-                               IMPORTANT: This must be the exact ServiceNow Code from the knowledge base,
-                               NOT the human-readable model name.
-    Returns:
-        A formatted string containing the ticket details
-    """
-    if not employee_name:
-        raise ValueError("Employee name cannot be empty")
-
-    if not business_justification:
-        raise ValueError("Business justification cannot be empty")
-
-    if not servicenow_laptop_code:
-        raise ValueError(
-            "ServiceNow laptop code cannot be empty. Must be a valid ServiceNow laptop choice code like 'apple_mac_book_air_m_3'."
-        )
-
-    authoritative_user_id = headers.extract_authoritative_user_id(ctx)
-    api_token = headers.extract_servicenow_token(ctx)
-
-    if not authoritative_user_id:
-        raise ValueError(
-            "Authoritative user ID not found in request headers. Ensure AUTHORITATIVE_USER_ID header is set."
-        )
-
-    # Create ServiceNow ticket using the configured ServiceNow instance
-    # (which could be real ServiceNow or mock server based on SERVICENOW_INSTANCE_URL)
-    logger.info(
-        "Creating ServiceNow ticket",
-        tool="open_laptop_refresh_ticket",
-        authoritative_user_id=authoritative_user_id,
-        laptop_code=servicenow_laptop_code,
-    )
-    return _create_servicenow_ticket(
-        authoritative_user_id, servicenow_laptop_code, api_token
-    )
+        return error_msg
 
 
 @mcp.tool()
@@ -292,32 +242,49 @@ def get_employee_laptop_info(
         >>> get_employee_laptop_info(ctx)
         # Returns laptop info for alice.johnson@company.com
     """
-    # Extract authoritative user ID from request headers - CENTRALIZED HANDLING
-    authoritative_user_id = headers.extract_authoritative_user_id(ctx)
-    api_token = headers.extract_servicenow_token(ctx)
+    try:
+        # Extract authoritative user ID from request headers - CENTRALIZED HANDLING
+        authoritative_user_id = headers.extract_authoritative_user_id(ctx)
+        api_token = headers.extract_servicenow_token(ctx)
 
-    if not authoritative_user_id:
-        raise ValueError(
-            "Authoritative user ID not found in request headers. Ensure AUTHORITATIVE_USER_ID header is set."
+        if not authoritative_user_id:
+            raise ValueError(
+                "Authoritative user ID not found in request headers. Ensure AUTHORITATIVE_USER_ID header is set."
+            )
+
+        # Get laptop info from ServiceNow instance
+        # (which could be real ServiceNow or mock server based on SERVICENOW_INSTANCE_URL)
+        logger.info(
+            "Getting laptop info from ServiceNow",
+            tool="get_employee_laptop_info",
+            authoritative_user_id=authoritative_user_id,
         )
 
-    # Get laptop info from ServiceNow instance
-    # (which could be real ServiceNow or mock server based on SERVICENOW_INSTANCE_URL)
-    logger.info(
-        "Getting laptop info from ServiceNow",
-        tool="get_employee_laptop_info",
-        authoritative_user_id=authoritative_user_id,
-    )
+        client = ServiceNowClient(
+            api_token,
+            getattr(mcp, "laptop_refresh_id"),
+            getattr(mcp, "laptop_request_limits"),
+            getattr(mcp, "laptop_avoid_duplicates"),
+        )
 
-    result = _get_servicenow_laptop_info(authoritative_user_id, api_token)
+        laptop_info = client.get_employee_laptop_info(authoritative_user_id)
+        if laptop_info:
+            result = laptop_info
+        else:
+            result = f"Error: Failed to retrieve laptop info for {authoritative_user_id} from ServiceNow"
 
-    logger.info(
-        "Returning laptop info for employee",
-        tool="get_employee_laptop_info",
-        authoritative_user_id=authoritative_user_id,
-    )
+        logger.info(
+            "Returning laptop info for employee",
+            tool="get_employee_laptop_info",
+            authoritative_user_id=authoritative_user_id,
+            result=result,  # TODO only for debugging
+        )
 
-    return result
+        return result
+    except Exception as e:
+        error_msg = f"Error getting laptop info from ServiceNow: {str(e)}"
+        logger.error(error_msg)
+        return error_msg
 
 
 def main() -> None:
