@@ -1,7 +1,7 @@
 """Slack integration handler."""
 
 import os
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from shared_models import configure_logging
 from shared_models.models import DeliveryRequest, DeliveryStatus, UserIntegrationConfig
@@ -16,10 +16,19 @@ logger = configure_logging("integration-dispatcher")
 class SlackIntegrationHandler(BaseIntegrationHandler):
     """Handler for Slack message delivery."""
 
+    bot_token: Optional[str]
+    client: Optional[AsyncWebClient]
+
     def __init__(self) -> None:
         super().__init__()
-        self.bot_token = os.getenv("SLACK_BOT_TOKEN")
-        self.client = AsyncWebClient(token=self.bot_token) if self.bot_token else None
+        bot_token = os.getenv("SLACK_BOT_TOKEN")
+        # Only use token if it's set and not empty
+        if bot_token and bot_token.strip():
+            self.bot_token = bot_token
+            self.client = AsyncWebClient(token=self.bot_token)
+        else:
+            self.bot_token = None
+            self.client = None
 
     async def deliver(
         self,

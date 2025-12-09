@@ -38,6 +38,9 @@ logger = configure_logging("integration-dispatcher")
 class SlackService:
     """Service for handling Slack events and interactions."""
 
+    bot_token: Optional[str]
+    slack_client: Optional[AsyncWebClient]
+
     def __init__(self) -> None:
         self.signing_secret = os.getenv("SLACK_SIGNING_SECRET")
         self.agent_service_client = AgentServiceClient()
@@ -54,10 +57,14 @@ class SlackService:
             self.broker_url, "integration-dispatcher"
         )
         # Slack client for API calls
-        self.bot_token = os.getenv("SLACK_BOT_TOKEN")
-        self.slack_client = (
-            AsyncWebClient(token=self.bot_token) if self.bot_token else None
-        )
+        bot_token = os.getenv("SLACK_BOT_TOKEN")
+        # Only use token if it's set and not empty
+        if bot_token and bot_token.strip():
+            self.bot_token = bot_token
+            self.slack_client = AsyncWebClient(token=self.bot_token)
+        else:
+            self.bot_token = None
+            self.slack_client = None
 
     def _create_slack_message_id(
         self, event: Dict[str, Any], event_id: str | None = None
