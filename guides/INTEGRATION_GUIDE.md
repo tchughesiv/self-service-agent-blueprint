@@ -29,7 +29,7 @@ The Self-Service Agent system provides a comprehensive integration layer that su
 - **Flexible Deployment**: Development, testing, and production modes
 - **Event-Driven Architecture**: Scalable processing with Knative and CloudEvents
 - **Session Management**: Persistent conversation state across interactions
-- **Unified Request Processing**: Single codebase for both eventing and direct HTTP modes
+- **Unified Request Processing**: All service-to-service communication uses CloudEvents/eventing
 
 ## System Architecture
 
@@ -38,7 +38,7 @@ The system consists of three main services:
 ### 1. Request Manager
 - **Normalizes** incoming requests from different integration types
 - **Manages sessions** using PostgreSQL as a key-value store
-- **Routes requests** to appropriate agents (via HTTP or CloudEvents)
+- **Routes requests** to appropriate agents via CloudEvents
 - **Tracks conversation state** and request history
 - **Returns responses** directly to Web/CLI/Tool/Generic integrations (synchronous HTTP responses)
 - **Forwards responses** to Integration Dispatcher for delivery to Slack/Email/Webhook/Test integrations
@@ -92,27 +92,17 @@ The system uses LangGraph-based state machine conversations for advanced convers
 
 ### System-Initiated Events (Slack Only)
 
-**Production Mode (Eventing Configuration):**
 ```
 Slack → Integration Dispatcher → Request Manager → Knative Broker → Agent Service → Integration Dispatcher → Slack
 ```
 
-**Development Mode (Direct HTTP Configuration):**
-```
-Slack → Integration Dispatcher → Request Manager → Agent Service → Request Manager → Integration Dispatcher → Slack
-```
-
 ### User-Initiated Requests (Web/CLI/Tool/Generic)
 
-**Production Mode (Eventing Configuration):**
 ```
 Web/CLI/Tool/Generic → Request Manager → Knative Broker → Agent Service → Integration Dispatcher → Slack/Email/Webhook/Test
 ```
 
-**Development Mode (Direct HTTP Configuration):**
-```
-Web/CLI/Tool/Generic → Request Manager → Agent Service → Request Manager → Integration Dispatcher → Slack/Email/Webhook/Test
-```
+**Note:** All service-to-service communication uses CloudEvents via Knative Broker. No direct HTTP calls between services.
 
 ## API Endpoints
 
@@ -192,7 +182,7 @@ Slack requests are handled via CloudEvents from Integration Dispatcher to Reques
 3. Request Manager processes and routes to Agent Service
 4. Responses flow back through Integration Dispatcher to Slack
 
-**Note:** There is no direct HTTP endpoint for Slack requests in Request Manager. They are handled internally via CloudEvents.
+**Note:** Slack requests are handled via CloudEvents. Integration Dispatcher receives Slack events and forwards them to Request Manager via CloudEvents.
 
 ### Integration Management Endpoints
 

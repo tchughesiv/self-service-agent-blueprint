@@ -29,7 +29,7 @@ testIntegrationEnabled: false
 # Database Configuration
 database:
   # Expected migration version that services should wait for
-  expectedMigrationVersion: "002"
+  expectedMigrationVersion: "003"
   
   # Database connection URL - leave empty to use default pgvector service
   # Format: postgresql://username:password@host:port/database
@@ -380,6 +380,11 @@ requestManagement:
       cleanupIntervalHours: 24
       # How many days to retain inactive sessions before deletion (default: 30 days)
       inactiveRetentionDays: 30
+      # Enable/disable eventing for session creation (default: "true")
+      # Set to "false" to use direct DB access only (for testing/debugging)
+      # When "true", uses eventing with atomic claiming to prevent race conditions
+      # Falls back to direct DB access if events fail or timeout
+      useSessionEventing: "true"
     # External Access Configuration
     externalAccess:
       enabled: false  # Set to true to create external access via OpenShift Route

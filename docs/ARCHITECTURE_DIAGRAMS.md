@@ -345,8 +345,8 @@ The Integration Dispatcher acts as the **delivery gateway** ensuring responses r
 │   Tracking      │    │   Session Mgmt  │    │                 │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
          │                       │                       │
-         │ HTTP API Calls        │ Direct DB Access      │ HTTP API Calls
-         │ (shared-clients)      │ (shared-models)       │ (shared-clients)
+         │ CloudEvents           │ Direct DB Access      │ CloudEvents
+         │ (eventing)            │ (shared-models)       │ (eventing)
          ▼                       ▼                       ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                    PostgreSQL Database                      │
@@ -386,14 +386,15 @@ Both flows converge at the Agent Service and use the same event-driven architect
 - **Development/Testing Mode**: Mock eventing service for simplicity and debugging without Knative infrastructure
 
 ### **2. Centralized Session Management**
-- **Single Source of Truth**: All session operations handled by Agent Service
-- **HTTP API**: Session CRUD operations exposed via REST endpoints
-- **Shared Clients**: Consistent HTTP client usage across all services
+- **Single Source of Truth**: All session operations use shared-models BaseSessionManager
+- **Database Access**: Direct database access via shared-models (no HTTP calls)
+- **Shared Access**: All services use BaseSessionManager for session operations
 - **Database Separation**: Session data (Agent Service) vs Request logging (Request Manager)
 
 ### **3. Shared Libraries Architecture**
-- **`shared-models`**: Common data models, schemas, and database utilities
-- **`shared-clients`**: Centralized HTTP client implementations for inter-service communication
+- **`shared-models`**: Common data models, schemas, database utilities, and session management
+- **`shared-clients`**: HTTP clients for external API access (user-facing endpoints)
+- **Eventing**: All service-to-service communication uses CloudEvents/eventing
 - **Consistent Naming**: All packages follow `self-service-agent-*` naming convention
 - **Dependency Management**: Proper package dependencies and local path references
 

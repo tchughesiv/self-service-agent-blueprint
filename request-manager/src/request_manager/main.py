@@ -517,7 +517,13 @@ async def handle_cloudevent(
             )
 
         # ✅ CIRCUIT BREAKER: Prevent feedback loops by ignoring self-generated events
-        if "request-manager" in event_source or event_source == "request-manager":
+        # Exception: Allow session events from request-manager (we send them to ourselves)
+        if (
+            "request-manager" in event_source or event_source == "request-manager"
+        ) and event_type not in [
+            EventTypes.SESSION_CREATE_OR_GET,
+            EventTypes.SESSION_READY,
+        ]:
             logger.info(
                 "Ignoring self-generated event to prevent feedback loop",
                 event_id=event_id,
@@ -551,6 +557,18 @@ async def handle_cloudevent(
                     "reason": "duplicate event (already claimed by another pod)",
                     "event_id": event_id,
                 }
+
+        # Handle session create-or-get events
+        if event_type == EventTypes.SESSION_CREATE_OR_GET:
+            from .session_events import _handle_session_create_or_get_event
+
+            return await _handle_session_create_or_get_event(event_data, db)
+
+        # Handle session ready events
+        if event_type == EventTypes.SESSION_READY:
+            from .session_events import _handle_session_ready_event
+
+            return await _handle_session_ready_event(event_data, db)
 
         # Handle request created events (from integration dispatcher)
         if event_type == EventTypes.REQUEST_CREATED:
@@ -587,8 +605,8 @@ async def _process_request_adaptive(
     """Process a request synchronously and return the actual AI response.
 
     All user-facing and system-facing endpoints (web, CLI, Slack, tool, generic)
-    should return immediate responses. The internal architecture (HTTP vs eventing)
-    is handled transparently by the sync processing logic.
+    should return immediate responses. All service-to-service communication uses
+    CloudEvents/eventing.
 
     Args:
         is_cloudevent_request: If True, this is a CloudEvent request from integration-dispatcher
@@ -602,8 +620,7 @@ async def _process_request_adaptive(
         )
 
     try:
-        # Use unified processor for all requests (both agent and responses mode)
-        # The internal processing handles both HTTP and eventing modes appropriately
+        # Use unified processor for all requests (eventing-based communication)
         return await unified_processor.process_request_sync(
             request, db, timeout, set_pod_name=not is_cloudevent_request
         )

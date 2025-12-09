@@ -66,6 +66,29 @@ async def parse_cloudevent_from_request(request: Request) -> Dict[str, Any]:
             "subject": event.get("subject"),
         }
 
+        # Extract extension attributes (custom CloudEvent attributes)
+        # These include correlationid, userid, sessionid, requestid, agentid, etc.
+        # CloudEvent extension attributes are accessed via event.get()
+        extension_attrs = [
+            "correlationid",
+            "correlation_id",
+            "userid",
+            "user_id",
+            "sessionid",
+            "session_id",
+            "requestid",
+            "request_id",
+            "agentid",
+            "agent_id",
+        ]
+
+        for attr in extension_attrs:
+            value = event.get(attr)
+            if value is not None:
+                # Store with both original name and lowercase for easier lookup
+                event_data[attr] = value
+                event_data[attr.lower()] = value
+
         # Log successful parsing
         logger.debug(
             "CloudEvent parsed successfully",

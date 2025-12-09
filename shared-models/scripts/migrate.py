@@ -5,7 +5,9 @@ import asyncio
 import logging
 import os
 import sys
+import threading
 from pathlib import Path
+from typing import Optional
 
 import psycopg
 from alembic import command
@@ -125,17 +127,52 @@ def run_migrations() -> None:
             )
 
             try:
-                # Setup PostgresSaver with extended timeout
+                # Setup PostgresSaver with timeout to prevent hangs
+                # PostgresSaver.setup() is idempotent and handles existing tables gracefully
                 print("Running PostgresSaver.setup()...")
                 logger.info("Running PostgresSaver.setup()...")
                 postgres_saver = PostgresSaver(conn)
-                postgres_saver.setup()
+
+                # Add timeout to prevent hanging (60 seconds)
+                setup_complete = threading.Event()
+                setup_error: list[Optional[Exception]] = [None]
+
+                def run_setup() -> None:
+                    try:
+                        postgres_saver.setup()
+                        setup_complete.set()
+                    except Exception as e:
+                        setup_error[0] = e
+                        setup_complete.set()
+
+                setup_thread = threading.Thread(target=run_setup, daemon=True)
+                setup_thread.start()
+                setup_thread.join(timeout=60)
+
+                if not setup_complete.is_set():
+                    logger.error("PostgresSaver.setup() exceeded 60 second timeout")
+                    raise TimeoutError(
+                        "PostgresSaver.setup() exceeded 60 second timeout"
+                    )
+
+                if setup_error[0]:
+                    raise setup_error[0]
+
                 print(
                     "✅ LangGraph PostgreSQL checkpoint tables setup completed successfully"
                 )
                 logger.info(
                     "✅ LangGraph PostgreSQL checkpoint tables setup completed successfully"
                 )
+            except TimeoutError as timeout_err:
+                # Timeout errors indicate a hang - fail the job so it can retry
+                logger.error(
+                    "PostgresSaver.setup() timed out - this may indicate a database issue. Job will fail and retry.",
+                    error=str(timeout_err),
+                    error_type=type(timeout_err).__name__,
+                )
+                # Re-raise to fail the job and trigger retry
+                raise
             except psycopg.Error as db_error:
                 logger.error(
                     "Database error during PostgresSaver setup",
@@ -161,15 +198,27 @@ def run_migrations() -> None:
                         error_type=type(close_error).__name__,
                     )
 
-        except Exception as e:
+        except TimeoutError as timeout_err:
+            # Timeout errors indicate a hang - fail the job so it can retry
             logger.error(
-                "Failed to setup LangGraph checkpoint tables",
+                "PostgresSaver.setup() timed out - this may indicate a database issue. Job will fail and retry.",
+                error=str(timeout_err),
+                error_type=type(timeout_err).__name__,
+            )
+            logger.exception("Full PostgresSaver setup timeout traceback:")
+            # Re-raise to fail the job and trigger retry
+            raise
+        except Exception as e:
+            # Checkpointing is REQUIRED for agent service functionality
+            # If setup fails, the app cannot create ConversationSession instances
+            logger.error(
+                "Failed to setup LangGraph checkpoint tables - this is required for agent service functionality",
                 error=str(e),
                 error_type=type(e).__name__,
             )
             logger.exception("Full PostgresSaver setup error traceback:")
-            # Don't fail the migration job - this is not critical for basic functionality
-            logger.warning("Continuing without LangGraph checkpoint setup...")
+            # Fail the job so it can retry - checkpointing is required
+            raise
 
         # Restore original working directory
         os.chdir(original_cwd)

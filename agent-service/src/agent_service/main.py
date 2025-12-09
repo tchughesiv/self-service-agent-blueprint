@@ -1,6 +1,5 @@
 """CloudEvent-driven Agent Service."""
 
-import json
 import os
 import uuid
 from datetime import datetime, timezone
@@ -9,10 +8,9 @@ from typing import Any, Dict, List, Optional
 import httpx
 from cloudevents.http import CloudEvent, to_structured
 from fastapi import Depends, FastAPI, HTTPException, Request, status
-from fastapi.responses import StreamingResponse
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-from shared_clients.stream_processor import LlamaStackStreamProcessor
 from shared_models import (
+    BaseSessionManager,
     CloudEventBuilder,
     CloudEventHandler,
     EventTypes,
@@ -37,8 +35,7 @@ from tracing_config.auto_tracing import (
 )
 
 from . import __version__
-from .schemas import SessionCreate, SessionResponse, SessionUpdate
-from .session_manager import BaseSessionManager, ResponsesSessionManager
+from .session_manager import ResponsesSessionManager
 
 # Configure structured logging and auto tracing
 SERVICE_NAME = "agent-service"
@@ -664,103 +661,7 @@ async def detailed_health_check(
     )
 
 
-@app.post("/process", response_model=None)
-async def handle_direct_request(
-    request: Request, stream: bool = False
-) -> StreamingResponse | Dict[str, Any]:
-    """Handle direct HTTP requests with optional streaming support."""
-    if not _agent_service:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Agent service not initialized",
-        )
-
-    try:
-        body = await request.body()
-        request_data = json.loads(body)
-
-        logger.info(
-            "Direct request received",
-            request_id=request_data.get("request_id"),
-            session_id=request_data.get("session_id"),
-            user_id=request_data.get("user_id"),
-            stream=stream,
-        )
-
-        # Create a normalized request for processing
-        normalized_request = _create_normalized_request_from_data(request_data)
-
-        if stream:
-            # Return streaming response
-            async def generate_stream() -> Any:
-                try:
-                    # Process the request using the agent service
-                    agent_response = await _agent_service.process_request(
-                        normalized_request
-                    )
-
-                    # Stream the response as Server-Sent Events using shared utilities
-                    yield LlamaStackStreamProcessor.create_sse_start_event(
-                        agent_response.request_id
-                    )
-
-                    # Stream the content using optimized streaming
-                    async for (
-                        chunk_data
-                    ) in LlamaStackStreamProcessor.stream_content_optimized(
-                        agent_response.content,
-                        content_type="content",
-                    ):
-                        yield chunk_data
-
-                    # Send completion event
-                    if (
-                        agent_response.agent_id is None
-                        or agent_response.processing_time_ms is None
-                    ):
-                        logger.error(
-                            "Cannot send completion event - missing agent_id or processing_time_ms",
-                            request_id=agent_response.request_id,
-                            session_id=agent_response.session_id,
-                            agent_id=agent_response.agent_id,
-                            processing_time_ms=agent_response.processing_time_ms,
-                        )
-                        yield LlamaStackStreamProcessor.create_sse_error_event(
-                            "Missing required response data"
-                        )
-                    else:
-                        yield LlamaStackStreamProcessor.create_sse_complete_event(
-                            agent_response.agent_id,
-                            agent_response.processing_time_ms,
-                        )
-
-                except Exception as e:
-                    logger.error("Error in streaming response", exc_info=e)
-                    yield LlamaStackStreamProcessor.create_sse_error_event(str(e))
-
-            return LlamaStackStreamProcessor.create_sse_response(generate_stream())
-        else:
-            # Return JSON response using existing CloudEvent handler
-            result = await _handle_request_event_from_data(
-                {"data": request_data}, _agent_service
-            )
-            return result
-
-    except json.JSONDecodeError:
-        logger.error("Invalid JSON in direct request")
-        raise HTTPException(status_code=400, detail="Invalid JSON")
-    except Exception as e:
-        logger.error("Error handling direct request", exc_info=e)
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-
-@app.post("/process/stream")
-async def handle_direct_request_stream(
-    request: Request,
-) -> StreamingResponse:
-    """Handle direct HTTP requests with streaming responses (legacy endpoint)."""
-    # Redirect to unified endpoint with streaming enabled
-    return await handle_direct_request(request, stream=True)  # type: ignore[return-value]
+# All requests use CloudEvents via /api/v1/events/cloudevents
 
 
 @app.post("/api/v1/events/cloudevents")
@@ -955,102 +856,6 @@ async def _handle_database_update_event_from_data(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Failed to process database update event",
-        )
-
-
-# Session Management Endpoints
-
-
-@app.post("/api/v1/sessions", response_model=SessionResponse)
-async def create_session(
-    session_data: SessionCreate,
-    db: AsyncSession = Depends(get_db_session_dependency),
-) -> SessionResponse:
-    """Create a new session."""
-    session_manager = BaseSessionManager(db)
-
-    try:
-        session = await session_manager.create_session(session_data)
-        return session
-    except Exception as e:
-        logger.error("Failed to create session", exc_info=e)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create session",
-        )
-
-
-@app.get("/api/v1/sessions/{session_id}", response_model=SessionResponse)
-async def get_session(
-    session_id: str,
-    db: AsyncSession = Depends(get_db_session_dependency),
-) -> SessionResponse:
-    """Get session information."""
-    session_manager = BaseSessionManager(db)
-
-    session = await session_manager.get_session(session_id)
-    if not session:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Session not found",
-        )
-
-    return session
-
-
-@app.put("/api/v1/sessions/{session_id}", response_model=SessionResponse)
-async def update_session(
-    session_id: str,
-    session_update: SessionUpdate,
-    db: AsyncSession = Depends(get_db_session_dependency),
-) -> SessionResponse:
-    """Update session information."""
-    session_manager = BaseSessionManager(db)
-
-    # Check if session exists
-    existing_session = await session_manager.get_session(session_id)
-    if not existing_session:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Session not found",
-        )
-
-    # Update session with provided fields
-    updated_session = await session_manager.update_session(
-        session_id=session_id,
-        agent_id=session_update.current_agent_id,
-        conversation_thread_id=session_update.conversation_thread_id,
-        status=session_update.status,
-        conversation_context=session_update.conversation_context,
-        user_context=session_update.user_context,
-    )
-
-    if not updated_session:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update session",
-        )
-
-    return updated_session
-
-
-@app.post("/api/v1/sessions/{session_id}/increment")
-async def increment_request_count(
-    session_id: str,
-    request_id: str,
-    db: AsyncSession = Depends(get_db_session_dependency),
-) -> Dict[str, str]:
-    """Increment the request count for a session."""
-    session_manager = BaseSessionManager(db)
-
-    try:
-        await session_manager.increment_request_count(session_id, request_id)
-        return {"status": "success", "message": "Request count incremented"}
-    except Exception as e:
-        logger.error("Failed to increment request count", exc_info=e)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to increment request count",
         )
 
 

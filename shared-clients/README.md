@@ -32,14 +32,6 @@ Base HTTP client for service-to-service communication with:
 - Standard REST methods (GET, POST, PUT, DELETE)
 - Streaming support for Server-Sent Events
 
-### AgentServiceClient
-
-Specialized client for the Agent Service with:
-
-- Request processing methods
-- Streaming response support
-- Default configuration for Agent Service URL
-
 ### IntegrationDispatcherClient
 
 Client for the Integration Dispatcher service with:
@@ -119,52 +111,8 @@ async def main():
 
 ### Service-to-Service Communication
 
-```python
-from shared_clients import AgentServiceClient
 
-async def main():
-    # Using default Agent Service URL from environment
-    client = AgentServiceClient()
-
-    # Or specify custom URL
-    # client = AgentServiceClient(base_url="http://custom-agent-service:80")
-
-    response = await client.process_request({
-        "user_id": "user123",
-        "content": "Process this request",
-        "integration_type": "WEB"
-    })
-
-    print(response)
-    await client.close()
-```
-
-### Using Helper Functions
-
-```python
-from shared_clients import (
-    initialize_service_clients,
-    get_agent_client,
-    get_integration_dispatcher_client,
-    cleanup_service_clients
-)
-
-# Initialize all service clients with custom URLs
-initialize_service_clients(
-    agent_service_url="http://agent-service:80",
-    integration_dispatcher_url="http://integration-dispatcher:80"
-)
-
-# Get clients
-agent_client = get_agent_client()
-dispatcher_client = get_integration_dispatcher_client()
-
-# Use clients...
-response = await agent_client.process_request(data)
-
-# Clean up when done
-await cleanup_service_clients()
-```
+For session management, use `shared-models.BaseSessionManager` directly for database access.
 
 ### Stream Processing
 
@@ -206,7 +154,6 @@ uv sync --group dev
 - `AGENT_MESSAGE_TERMINATOR`: Message terminator for agent responses (optional)
 
 ### Service Clients
-- `AGENT_SERVICE_URL`: URL of the Agent Service (default: `http://self-service-agent-agent-service:80`)
 - `INTEGRATION_DISPATCHER_URL`: URL of the Integration Dispatcher (default: `http://self-service-agent-integration-dispatcher:80`)
 
 ## Development
@@ -249,13 +196,11 @@ uv run mypy src/
 - `RequestManagerClient` - Base client for Request Manager
 - `CLIChatClient` - CLI chat interface
 - `ServiceClient` - Base HTTP client
-- `AgentServiceClient` - Agent Service client
 - `IntegrationDispatcherClient` - Integration Dispatcher client
 
 ### Helper Functions
 - `initialize_service_clients()` - Initialize all service clients
 - `cleanup_service_clients()` - Clean up all service clients
-- `get_agent_client()` - Get Agent Service client instance
 - `get_request_manager_client()` - Get Request Manager client instance
 - `get_integration_dispatcher_client()` - Get Integration Dispatcher client instance
 

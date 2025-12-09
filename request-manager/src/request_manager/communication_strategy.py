@@ -6,9 +6,8 @@ from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
-from agent_service.schemas import SessionResponse
 from fastapi import HTTPException, status
-from shared_models import CloudEventSender, configure_logging
+from shared_models import CloudEventSender, SessionResponse, configure_logging
 from shared_models.models import NormalizedRequest
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +17,7 @@ logger = configure_logging("request-manager")
 
 # Global registry for response futures (event-driven approach)
 _response_futures_registry: dict[str, Any] = {}
+_session_futures_registry: dict[str, Any] = {}
 
 
 def _should_filter_sessions_by_integration_type() -> bool:
@@ -103,12 +103,8 @@ async def create_or_get_session_shared(
     Returns:
         SessionResponse object for the session (existing or newly created)
     """
-    import uuid
-
-    from agent_service.schemas import SessionResponse
-
     # Resolve user_id to canonical user_id if it's an email address
-    from shared_models import resolve_canonical_user_id
+    from shared_models import SessionResponse, resolve_canonical_user_id
     from shared_models.models import RequestSession, SessionStatus
     from sqlalchemy import select
 
@@ -172,6 +168,7 @@ async def create_or_get_session_shared(
     now = datetime.now(timezone.utc)
 
     # Try to find existing active session (not expired)
+    # Use SELECT FOR UPDATE to lock rows and prevent concurrent session creation
     where_conditions = [
         RequestSession.user_id == canonical_user_id,
         RequestSession.status == SessionStatus.ACTIVE.value,
@@ -185,10 +182,13 @@ async def create_or_get_session_shared(
             RequestSession.integration_type == request.integration_type
         )
 
+    # Use SELECT FOR UPDATE SKIP LOCKED to prevent race conditions
+    # SKIP LOCKED allows other transactions to proceed if row is locked
     stmt = (
         select(RequestSession)
         .where(*where_conditions)
         .order_by(RequestSession.last_request_at.desc())
+        .with_for_update(skip_locked=True)
     )
 
     result = await db.execute(stmt)
@@ -269,38 +269,180 @@ async def create_or_get_session_shared(
         )
         return SessionResponse.model_validate(existing_session)
 
-    # Create new session with expiration
+    # Create new session via event (with fallback to direct DB access)
+    # This uses eventing for race condition prevention while maintaining resilience
+    import uuid
     from datetime import timedelta
+
+    from shared_models import BaseSessionManager, SessionCreate
 
     session_timeout_hours = _get_session_timeout_hours()
     expires_at = datetime.now(timezone.utc) + timedelta(hours=session_timeout_hours)
 
     # Get integration_type from request, with fallback to None if not available
-    # This handles cases where BaseRequest might have integration_type=None
     request_integration_type = getattr(request, "integration_type", None)
 
-    session = RequestSession(
-        session_id=str(uuid.uuid4()),
+    # SessionCreate requires integration_type, so we need to handle None case
+    if request_integration_type is None:
+        from shared_models.models import IntegrationType
+
+        # Default to WEB if not specified
+        request_integration_type = IntegrationType.WEB
+
+    # Try eventing-based session creation first
+    use_eventing = os.getenv("USE_SESSION_EVENTING", "true").lower() == "true"
+
+    if use_eventing:
+        try:
+            # Send SESSION_CREATE_OR_GET event
+            correlation_id = str(uuid.uuid4())
+            event_id = str(uuid.uuid4())
+
+            broker_url = os.getenv("BROKER_URL", "http://knative-broker:8080")
+            event_sender = CloudEventSender(broker_url, "request-manager")
+
+            session_request_data = {
+                "user_id": canonical_user_id,
+                "integration_type": (
+                    request_integration_type.value
+                    if hasattr(request_integration_type, "value")
+                    else str(request_integration_type)
+                ),
+                "channel_id": getattr(request, "channel_id", None),
+                "thread_id": getattr(request, "thread_id", None),
+                "external_session_id": None,
+                "integration_metadata": request.metadata or {},
+                "user_context": {},
+            }
+
+            success = await event_sender.send_session_create_or_get_event(
+                session_data=session_request_data,
+                event_id=event_id,
+                user_id=canonical_user_id,
+                correlation_id=correlation_id,
+            )
+
+            if success:
+                logger.info(
+                    "Sent SESSION_CREATE_OR_GET event",
+                    event_id=event_id,
+                    correlation_id=correlation_id,
+                    user_id=canonical_user_id,
+                )
+
+                # Wait for SESSION_READY event
+                from .session_events import wait_for_session_ready
+
+                session_response = await wait_for_session_ready(
+                    correlation_id, timeout=1.0, db=db
+                )
+
+                if session_response:
+                    logger.info(
+                        "Received session via event",
+                        session_id=session_response.session_id,
+                        correlation_id=correlation_id,
+                    )
+
+                    # Update expires_at if needed
+                    if expires_at:
+                        from sqlalchemy import update as sql_update
+
+                        update_stmt = (
+                            sql_update(RequestSession)
+                            .where(
+                                RequestSession.session_id == session_response.session_id
+                            )
+                            .values(expires_at=expires_at)
+                        )
+                        await db.execute(update_stmt)
+                        await db.commit()
+
+                    return session_response
+                else:
+                    logger.warning(
+                        "Timeout waiting for SESSION_READY event, falling back to direct DB access",
+                        correlation_id=correlation_id,
+                    )
+            else:
+                logger.warning(
+                    "Failed to send SESSION_CREATE_OR_GET event, falling back to direct DB access",
+                    event_id=event_id,
+                )
+
+        except Exception as e:
+            logger.warning(
+                "Error in eventing-based session creation, falling back to direct DB access",
+                error=str(e),
+                user_id=canonical_user_id,
+            )
+
+    # Fallback: Direct database access (resilience)
+    logger.debug(
+        "Using direct database access for session creation",
+        user_id=canonical_user_id,
+    )
+
+    session_manager = BaseSessionManager(db)
+    session_data = SessionCreate(
         user_id=canonical_user_id,
         integration_type=request_integration_type,
         channel_id=getattr(request, "channel_id", None),
         thread_id=getattr(request, "thread_id", None),
-        integration_metadata=request.metadata,
-        status=SessionStatus.ACTIVE.value,
-        expires_at=expires_at,
+        external_session_id=None,
+        integration_metadata=request.metadata or {},
+        user_context={},
     )
 
-    db.add(session)
-    await db.commit()
-    await db.refresh(session)
+    try:
+        session_response = await session_manager.create_session(session_data)
 
-    logger.info(
-        "Created new session",
-        session_id=session.session_id,
-        user_id=canonical_user_id,
-        original_user_id=request.user_id,
-    )
-    return SessionResponse.model_validate(session)
+        # Update expires_at separately since it's not in SessionCreate
+        if expires_at:
+            from sqlalchemy import update as sql_update
+
+            update_stmt = (
+                sql_update(RequestSession)
+                .where(RequestSession.session_id == session_response.session_id)
+                .values(expires_at=expires_at)
+            )
+            await db.execute(update_stmt)
+            await db.commit()
+            # Re-fetch the session to get updated expires_at
+            select_stmt = select(RequestSession).where(
+                RequestSession.session_id == session_response.session_id
+            )
+            result = await db.execute(select_stmt)
+            updated_session = result.scalar_one_or_none()
+            if updated_session:
+                session_response = SessionResponse.model_validate(updated_session)
+
+        logger.info(
+            "Created new session via direct DB access",
+            session_id=session_response.session_id,
+            user_id=canonical_user_id,
+            original_user_id=request.user_id,
+        )
+        return session_response
+    except Exception as e:
+        # If creation failed, try one more time to get existing session
+        logger.warning(
+            "Session creation failed, checking for existing session",
+            user_id=canonical_user_id,
+            error=str(e),
+        )
+        existing_session_obj = await session_manager.get_active_session(
+            canonical_user_id, request_integration_type
+        )
+        if existing_session_obj:
+            logger.info(
+                "Found existing session after creation failure",
+                session_id=existing_session_obj.session_id,
+                user_id=canonical_user_id,
+            )
+            return SessionResponse.model_validate(existing_session_obj)
+        # Re-raise the original exception if no existing session found
+        raise
 
 
 class CommunicationStrategy(ABC):

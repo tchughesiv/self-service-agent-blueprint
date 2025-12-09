@@ -24,6 +24,10 @@ class EventTypes:
     # Database update events
     DATABASE_UPDATE_REQUESTED = "com.self-service-agent.request.database-update"
 
+    # Session events
+    SESSION_CREATE_OR_GET = "com.self-service-agent.session.create-or-get"
+    SESSION_READY = "com.self-service-agent.session.ready"
+
 
 class CloudEventBuilder:
     """Builder for creating standardized CloudEvents."""
@@ -86,6 +90,54 @@ class CloudEventBuilder:
 
         return CloudEvent(attributes, response_data)
 
+    def create_session_create_or_get_event(
+        self,
+        session_data: Dict[str, Any],
+        event_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        correlation_id: Optional[str] = None,
+    ) -> CloudEvent:
+        """Create a session create-or-get event."""
+        event_id = event_id or str(uuid.uuid4())
+
+        attributes = {
+            **self.base_attributes,
+            "type": EventTypes.SESSION_CREATE_OR_GET,
+            "id": event_id,
+            "time": datetime.now(timezone.utc).isoformat(),
+        }
+
+        # Add optional attributes
+        if user_id:
+            attributes["userid"] = user_id
+        if correlation_id:
+            attributes["correlationid"] = correlation_id
+
+        return CloudEvent(attributes, session_data)
+
+    def create_session_ready_event(
+        self,
+        session_data: Dict[str, Any],
+        event_id: Optional[str] = None,
+        correlation_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+    ) -> CloudEvent:
+        """Create a session ready event."""
+        attributes = {
+            **self.base_attributes,
+            "type": EventTypes.SESSION_READY,
+            "id": event_id or str(uuid.uuid4()),
+            "time": datetime.now(timezone.utc).isoformat(),
+        }
+
+        # Add optional attributes
+        if correlation_id:
+            attributes["correlationid"] = correlation_id
+        if session_id:
+            attributes["sessionid"] = session_id
+
+        return CloudEvent(attributes, session_data)
+
 
 class CloudEventSender:
     """Sender for CloudEvents to brokers."""
@@ -127,6 +179,40 @@ class CloudEventSender:
             return await self._send_event(event)
         except Exception as e:
             logger.error("Failed to send response event", error=str(e))
+            return False
+
+    async def send_session_create_or_get_event(
+        self,
+        session_data: Dict[str, Any],
+        event_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        correlation_id: Optional[str] = None,
+    ) -> bool:
+        """Send a session create-or-get event."""
+        try:
+            event = self.builder.create_session_create_or_get_event(
+                session_data, event_id, user_id, correlation_id
+            )
+            return await self._send_event(event)
+        except Exception as e:
+            logger.error("Failed to send session create-or-get event", error=str(e))
+            return False
+
+    async def send_session_ready_event(
+        self,
+        session_data: Dict[str, Any],
+        event_id: Optional[str] = None,
+        correlation_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+    ) -> bool:
+        """Send a session ready event."""
+        try:
+            event = self.builder.create_session_ready_event(
+                session_data, event_id, correlation_id, session_id
+            )
+            return await self._send_event(event)
+        except Exception as e:
+            logger.error("Failed to send session ready event", error=str(e))
             return False
 
     async def _send_event(self, event: CloudEvent) -> bool:

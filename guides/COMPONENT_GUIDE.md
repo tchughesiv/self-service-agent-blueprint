@@ -69,7 +69,8 @@ The quickstart consists of reusable **core platform components** and **use-case-
 - **Alembic Migrations:** Schema evolution management without manual SQL scripts
 
 **shared-clients:**
-- **HTTP Clients:** Standardized implementations for inter-service communication (AgentServiceClient, IntegrationDispatcherClient)
+- **HTTP Clients:** For external API access (RequestManagerClient for user-facing APIs)
+- **Note:** Service-to-service communication uses CloudEvents/eventing, not direct HTTP
 
 **Documentation:** See `shared-models/README.md` and `shared-clients/README.md`
 

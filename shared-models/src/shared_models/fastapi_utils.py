@@ -151,7 +151,6 @@ async def create_shared_lifespan(
         raise
 
     # Service client initialization removed - services use eventing for communication
-    # Direct HTTP client initialization is no longer supported
     if service_client_init:
         logger.debug(
             "Service client initialization skipped - using eventing for inter-service communication"

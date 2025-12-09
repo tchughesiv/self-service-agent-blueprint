@@ -3,21 +3,13 @@
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
-from shared_models import (
-    configure_logging,
-    get_enum_value,
-)
-from shared_models.models import (
-    RequestSession,
-    SessionStatus,
-)
+from shared_models import BaseSessionManager, configure_logging
+from shared_models.models import RequestSession, SessionStatus
 from shared_models.user_utils import is_uuid
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from .schemas import SessionCreate, SessionResponse
 
 logger = configure_logging("agent-service")
 
@@ -38,109 +30,6 @@ def get_session_token_context(session_id: str | None) -> str:
     if session_id is None:
         return "fallback_session"
     return f"session_{session_id}"
-
-
-class BaseSessionManager:
-    """Base session management for LlamaStack Agent API.
-
-    This class handles core database operations for Request Manager sessions:
-    - Session lifecycle (create, update, get)
-    - User context and integration metadata storage
-    - Current agent assignment tracking
-    - Request count tracking
-
-    """
-
-    def __init__(self, db_session: AsyncSession) -> None:
-        """Initialize base session manager for database operations only."""
-        self.db_session = db_session
-
-    async def create_session(self, session_data: SessionCreate) -> SessionResponse:
-        """Create a new Request Manager session in the database."""
-        session = RequestSession(
-            session_id=str(uuid.uuid4()),
-            user_id=session_data.user_id,
-            integration_type=get_enum_value(session_data.integration_type),
-            channel_id=session_data.channel_id,
-            thread_id=session_data.thread_id,
-            external_session_id=session_data.external_session_id,
-            integration_metadata=session_data.integration_metadata,
-            user_context=session_data.user_context,
-            status=SessionStatus.ACTIVE.value,
-        )
-
-        self.db_session.add(session)
-        await self.db_session.commit()
-        await self.db_session.refresh(session)
-
-        return SessionResponse.model_validate(session)
-
-    async def get_session(self, session_id: str) -> Optional[SessionResponse]:
-        """Get Request Manager session by ID from database."""
-        stmt = select(RequestSession).where(RequestSession.session_id == session_id)
-        result = await self.db_session.execute(stmt)
-        session = result.scalar_one_or_none()
-
-        if session:
-            return SessionResponse.model_validate(session)
-        return None
-
-    async def update_session(
-        self,
-        session_id: str,
-        agent_id: Optional[str] = None,
-        conversation_thread_id: Optional[str] = None,
-        status: Optional[SessionStatus] = None,
-        conversation_context: Optional[Dict[str, Any]] = None,
-        user_context: Optional[Dict[str, Any]] = None,
-    ) -> Optional[SessionResponse]:
-        """Update Request Manager session information in database."""
-        update_data: Dict[str, Any] = {
-            "updated_at": datetime.now(timezone.utc),
-            "last_request_at": datetime.now(timezone.utc),
-        }
-
-        if agent_id is not None:
-            update_data["current_agent_id"] = agent_id
-        if conversation_thread_id is not None:
-            update_data["conversation_thread_id"] = conversation_thread_id
-        if status is not None:
-            update_data["status"] = status
-        if conversation_context is not None:
-            update_data["conversation_context"] = conversation_context
-        if user_context is not None:
-            update_data["user_context"] = user_context
-
-        stmt = (
-            update(RequestSession)
-            .where(RequestSession.session_id == session_id)
-            .values(**update_data)
-            .returning(RequestSession)
-        )
-
-        result = await self.db_session.execute(stmt)
-        await self.db_session.commit()
-        updated_session = result.scalar_one_or_none()
-
-        if updated_session:
-            return SessionResponse.model_validate(updated_session)
-        return None
-
-    async def increment_request_count(self, session_id: str, request_id: str) -> None:
-        """Increment the request count for a session."""
-        stmt = (
-            update(RequestSession)
-            .where(RequestSession.session_id == session_id)
-            .values(
-                total_requests=RequestSession.total_requests + 1,
-                last_request_id=request_id,
-                last_request_at=datetime.now(timezone.utc),
-                updated_at=datetime.now(timezone.utc),
-            )
-        )
-
-        await self.db_session.execute(stmt)
-        await self.db_session.commit()
 
 
 class ResponsesSessionManager(BaseSessionManager):
@@ -1172,13 +1061,11 @@ class ResponsesSessionManager(BaseSessionManager):
             )
 
             # Use session_id if available to target the specific session
-            # Otherwise fall back to user_id (for backward compatibility)
             if self.request_manager_session_id:
                 stmt = (
                     update(RequestSession)
                     .where(
                         RequestSession.session_id == self.request_manager_session_id,
-                        RequestSession.user_id == self.user_id,
                         RequestSession.status == SessionStatus.ACTIVE.value,
                     )
                     .values(
@@ -1192,10 +1079,25 @@ class ResponsesSessionManager(BaseSessionManager):
             else:
                 # Fallback: update all active sessions for user (legacy behavior)
                 # This is less precise but needed if session_id is not available
+                from shared_models.user_utils import resolve_canonical_user_id
+
+                try:
+                    canonical_user_id = await resolve_canonical_user_id(
+                        self.user_id,
+                        db=self.db_session,
+                    )
+                except Exception as e:
+                    logger.error(
+                        "Failed to resolve canonical user_id for session reset",
+                        error=str(e),
+                        user_id=self.user_id,
+                    )
+                    return
+
                 stmt = (
                     update(RequestSession)
                     .where(
-                        RequestSession.user_id == self.user_id,
+                        RequestSession.user_id == canonical_user_id,
                         RequestSession.status == SessionStatus.ACTIVE.value,
                     )
                     .values(
@@ -1206,8 +1108,18 @@ class ResponsesSessionManager(BaseSessionManager):
                         updated_at=datetime.now(timezone.utc),
                     )
                 )
-            await self.db_session.execute(stmt)
+
+            # Execute and commit once for both branches
+            result = await self.db_session.execute(stmt)
             await self.db_session.commit()
+
+            # Log if no rows were updated
+            if result.rowcount == 0:
+                logger.warning(
+                    "No session updated - session not found, not active, or no active sessions for user",
+                    request_manager_session_id=self.request_manager_session_id,
+                    user_id=self.user_id,
+                )
 
             logger.info(
                 "Conversation state reset successfully",

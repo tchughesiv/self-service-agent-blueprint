@@ -23,8 +23,12 @@ class KnowledgeBaseManager:
         else:
             logger.debug("Already connected to LlamaStack client")
 
-    def register_knowledge_bases(self) -> None:
-        """Register all knowledge bases by processing directories in knowledge_bases path"""
+    def register_knowledge_bases(self) -> bool:
+        """Register all knowledge bases by processing directories in knowledge_bases path.
+
+        Returns:
+            bool: True if all knowledge bases were registered successfully, False otherwise.
+        """
         if self._llama_client is None:
             self.connect_to_llamastack_client()
 
@@ -35,8 +39,9 @@ class KnowledgeBaseManager:
                 "Knowledge bases path does not exist",
                 path=str(self._knowledge_bases_path),
             )
-            return
+            return True  # No knowledge bases to register is not a failure
 
+        success = True
         # Process each directory in knowledge_bases
         for kb_dir in self._knowledge_bases_path.iterdir():
             if kb_dir.is_dir():
@@ -55,6 +60,9 @@ class KnowledgeBaseManager:
                         "Failed to register knowledge base via LlamaStack",
                         kb_name=kb_name,
                     )
+                    success = False
+
+        return success
 
     def register_knowledge_base(self, kb_directory: Path) -> Optional[str]:
         """Register a single knowledge base from a directory via LlamaStack OpenAI-compatible API"""

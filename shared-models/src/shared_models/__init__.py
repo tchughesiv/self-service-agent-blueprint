@@ -54,6 +54,10 @@ from .logging import (
 # Export security utilities
 from .security import verify_slack_signature
 
+# Export session management
+from .session_manager import BaseSessionManager
+from .session_schemas import SessionCreate, SessionResponse, SessionUpdate
+
 # Export user utilities
 from .user_utils import (
     get_or_create_canonical_user,
@@ -102,4 +106,8 @@ __all__ = [
     "CloudEventBuilder",
     "CloudEventSender",
     "EventTypes",
+    "BaseSessionManager",
+    "SessionCreate",
+    "SessionResponse",
+    "SessionUpdate",
 ]

@@ -9,9 +9,9 @@ from typing import Any, Dict, Optional
 
 import httpx
 from cloudevents.http import CloudEvent, to_structured
-from shared_clients import AgentServiceClient
 from shared_clients.stream_processor import LlamaStackStreamProcessor
 from shared_models import (
+    BaseSessionManager,
     CloudEventSender,
     DatabaseUtils,
     EventTypes,
@@ -43,7 +43,6 @@ class SlackService:
 
     def __init__(self) -> None:
         self.signing_secret = os.getenv("SLACK_SIGNING_SECRET")
-        self.agent_service_client = AgentServiceClient()
         # Simple rate limiting: track last request time per user
         self._last_request_time: Dict[str, float] = {}
         # Eventing configuration (required - validated at startup)
@@ -496,9 +495,14 @@ class SlackService:
 
                 # Close the current session by marking it as completed
                 try:
-                    await self.agent_service_client.update_session(
-                        old_session_id, {"status": "INACTIVE"}
-                    )
+                    from shared_models.models import SessionStatus
+
+                    db_manager = get_database_manager()
+                    async with db_manager.get_session() as db:
+                        session_manager = BaseSessionManager(db)
+                        await session_manager.update_session(
+                            old_session_id, status=SessionStatus.INACTIVE
+                        )
                     logger.debug(
                         "Session closed successfully", session_id=old_session_id
                     )
@@ -514,9 +518,11 @@ class SlackService:
                 user_id = None  # Initialize before try block to avoid UnboundLocalError
                 try:
                     # Extract user info from the payload
-                    slack_user_id = payload.user["id"]  # type: ignore[index]
-                    channel_id = payload.channel["id"] if payload.channel else None  # type: ignore[index]
-                    team_id = payload.team["id"] if payload.team else None
+                    if not payload.user:
+                        raise ValueError("Missing user in payload")
+                    slack_user_id = payload.user.id
+                    channel_id = payload.channel.id if payload.channel else None
+                    team_id = payload.team.get("id") if payload.team else None
 
                     # Resolve user ID (email or fallback to Slack user ID)
                     user_id, original_slack_user_id = await self._resolve_user_id(
@@ -1025,7 +1031,7 @@ class SlackService:
                 thread_id=thread_id,
             )
 
-            # Send via CloudEvent instead of direct HTTP call
+            # Send via CloudEvent
             success = await self._send_cloudevent(
                 event_data, EventTypes.REQUEST_CREATED
             )
@@ -1052,7 +1058,7 @@ class SlackService:
     async def _get_session_details(
         self, session_id: str, user_id: Optional[str] = None
     ) -> str:
-        """Fetch session details from Agent Service.
+        """Fetch session details from database.
 
         Args:
             session_id: The session ID to retrieve
@@ -1064,97 +1070,107 @@ class SlackService:
                 session_id=session_id,
                 user_id=user_id,
             )
-            try:
-                session_data = await self.agent_service_client.get_session(session_id)
-            except Exception as e:
-                logger.error(
-                    "Exception calling Agent Service get_session",
-                    session_id=session_id,
-                    user_id=user_id,
-                    error=str(e),
-                    error_type=type(e).__name__,
-                    exc_info=True,
-                )
-                return "Session not found"
 
-            if not session_data:
-                logger.warning(
-                    "Session not found in Agent Service (returned None)",
-                    session_id=session_id,
-                    user_id=user_id,
-                )
-                return (
-                    "❌ Session not found: The session may have expired or been deleted. "
-                    "Please start a new conversation."
-                )
+            db_manager = get_database_manager()
+            async with db_manager.get_session() as db:
+                session_manager = BaseSessionManager(db)
+                try:
+                    session_data = await session_manager.get_session(session_id)
+                except Exception as e:
+                    logger.error(
+                        "Exception getting session from database",
+                        session_id=session_id,
+                        user_id=user_id,
+                        error=str(e),
+                        error_type=type(e).__name__,
+                        exc_info=True,
+                    )
+                    return "Session not found"
 
-            logger.info(
-                "Session data retrieved from Agent Service",
-                session_id=session_id,
-                session_user_id=session_data.get("user_id"),
-                requested_user_id=user_id,
-                has_user_id=bool(session_data.get("user_id")),
-            )
-
-            # Verify user has access to this session if user_id is provided
-            if user_id:
-                session_user_id = session_data.get("user_id")
-                # Normalize both user_ids to strings for comparison
-                normalized_requested_user_id = str(user_id).strip() if user_id else None
-                normalized_session_user_id = (
-                    str(session_user_id).strip() if session_user_id else None
-                )
+                if not session_data:
+                    logger.warning(
+                        "Session not found in database (returned None)",
+                        session_id=session_id,
+                        user_id=user_id,
+                    )
+                    return (
+                        "❌ Session not found: The session may have expired or been deleted. "
+                        "Please start a new conversation."
+                    )
 
                 logger.info(
-                    "Comparing user_ids for session access",
+                    "Session data retrieved from database",
                     session_id=session_id,
-                    requested_user_id=normalized_requested_user_id,
-                    session_user_id=normalized_session_user_id,
-                    match=(normalized_session_user_id == normalized_requested_user_id),
+                    session_user_id=session_data.user_id,
+                    requested_user_id=user_id,
+                    has_user_id=bool(session_data.user_id),
                 )
 
-                if normalized_session_user_id != normalized_requested_user_id:
-                    logger.warning(
-                        "User attempted to access session they don't own",
+                # Verify user has access to this session if user_id is provided
+                if user_id:
+                    session_user_id = session_data.user_id
+                    # Normalize both user_ids to strings for comparison
+                    normalized_requested_user_id = (
+                        str(user_id).strip() if user_id else None
+                    )
+                    normalized_session_user_id = (
+                        str(session_user_id).strip() if session_user_id else None
+                    )
+
+                    logger.info(
+                        "Comparing user_ids for session access",
+                        session_id=session_id,
                         requested_user_id=normalized_requested_user_id,
                         session_user_id=normalized_session_user_id,
-                        session_id=session_id,
-                    )
-                    # Return a more specific error message for user_id mismatch
-                    return (
-                        "❌ Access denied: This session belongs to a different user. "
-                        "Please ensure you're using the correct Slack account."
+                        match=(
+                            normalized_session_user_id == normalized_requested_user_id
+                        ),
                     )
 
-            # Format session information
-            created_at = session_data.get("created_at", "Unknown")
-            if created_at != "Unknown":
-                # Parse and format the datetime
-                from datetime import datetime
+                    if normalized_session_user_id != normalized_requested_user_id:
+                        logger.warning(
+                            "User attempted to access session they don't own",
+                            requested_user_id=normalized_requested_user_id,
+                            session_user_id=normalized_session_user_id,
+                            session_id=session_id,
+                        )
+                        # Return a more specific error message for user_id mismatch
+                        return (
+                            "❌ Access denied: This session belongs to a different user. "
+                            "Please ensure you're using the correct Slack account."
+                        )
 
-                try:
-                    dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
-                    created_at = dt.strftime("%Y-%m-%d %H:%M UTC")
-                except Exception:
-                    pass
+                # Format session information
+                created_at = session_data.created_at
+                if created_at:
+                    try:
+                        created_at_str = created_at.strftime("%Y-%m-%d %H:%M UTC")
+                    except Exception:
+                        created_at_str = str(created_at)
+                else:
+                    created_at_str = "Unknown"
 
-            total_requests = session_data.get("total_requests", 0)
-            status = session_data.get("status", "Unknown")
-            agent_name = session_data.get("current_agent_id", None) or "Not assigned"
+                total_requests = session_data.total_requests
+                status = (
+                    session_data.status.value
+                    if hasattr(session_data.status, "value")
+                    else str(session_data.status)
+                )
+                agent_name = session_data.current_agent_id or "Not assigned"
 
-            return (
-                f"📋 *Session Information*\n\n"
-                f"**Session ID:** `{session_id}`\n"
-                f"**Status:** {status}\n"
-                f"**Created:** {created_at}\n"
-                f"**Total Requests:** {total_requests}\n"
-                f"**Current Agent:** {agent_name}\n\n"
-                f"💡 **Continue this conversation by:**\n"
-                f"• Using `/agent [your message]` in Slack\n"
-                f"• Mentioning me in your message\n"
-                f"• Sending a DM to this bot\n\n"
-                f"Your session context will be maintained automatically!"
-            )
+                return (
+                    f"📋 *Session Information*\n\n"
+                    f"**Session ID:** `{session_id}`\n"
+                    f"**Status:** {status}\n"
+                    f"**Created:** {created_at_str}\n"
+                    f"**Total Requests:** {total_requests}\n"
+                    f"**Current Agent:** {agent_name}\n\n"
+                    f"💡 **Continue this conversation by:**\n"
+                    f"• Using `/agent [your message]` in Slack\n"
+                    f"• Mentioning me in your message\n"
+                    f"• Sending a DM to this bot\n\n"
+                    f"Your session context will be maintained automatically!"
+                )
 
         except Exception as e:
             logger.error(

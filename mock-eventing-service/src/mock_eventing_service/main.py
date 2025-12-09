@@ -251,6 +251,18 @@ async def initialize_default_subscriptions() -> None:
                 "subscriber_url": f"http://{service_name}-agent-service.{namespace}.svc.cluster.local/api/v1/events/cloudevents",
                 "filter_attributes": {"source": "request-manager"},
             },
+            # Session events: SESSION_CREATE_OR_GET → Request Manager
+            {
+                "event_type": "com.self-service-agent.session.create-or-get",
+                "subscriber_url": f"http://{service_name}-request-manager.{namespace}.svc.cluster.local/api/v1/events/cloudevents",
+                "filter_attributes": {"source": "request-manager"},
+            },
+            # Session events: SESSION_READY → Request Manager (for waiting futures)
+            {
+                "event_type": "com.self-service-agent.session.ready",
+                "subscriber_url": f"http://{service_name}-request-manager.{namespace}.svc.cluster.local/api/v1/events/cloudevents",
+                "filter_attributes": {"source": "request-manager"},
+            },
         ]
 
         for sub_data in default_subscriptions:
