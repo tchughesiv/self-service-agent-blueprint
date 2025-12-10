@@ -135,6 +135,8 @@ Generate Request Manager specific environment variables
   value: {{ if and (hasKey .Values.requestManagement "requestManager") (hasKey .Values.requestManagement.requestManager "sessions") (hasKey .Values.requestManagement.requestManager.sessions "cleanupIntervalHours") }}{{ .Values.requestManagement.requestManager.sessions.cleanupIntervalHours | quote }}{{ else }}"24"{{ end }}
 - name: INACTIVE_SESSION_RETENTION_DAYS
   value: {{ if and (hasKey .Values.requestManagement "requestManager") (hasKey .Values.requestManagement.requestManager "sessions") (hasKey .Values.requestManagement.requestManager.sessions "inactiveRetentionDays") }}{{ .Values.requestManagement.requestManager.sessions.inactiveRetentionDays | quote }}{{ else }}"30"{{ end }}
+- name: USE_SESSION_EVENTING
+  value: {{ if and (hasKey .Values.requestManagement "requestManager") (hasKey .Values.requestManagement.requestManager "sessions") (hasKey .Values.requestManagement.requestManager.sessions "useSessionEventing") }}{{ .Values.requestManagement.requestManager.sessions.useSessionEventing | quote }}{{ else }}"true"{{ end }}
 {{- end }}
 
 {{/*

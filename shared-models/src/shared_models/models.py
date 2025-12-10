@@ -159,6 +159,9 @@ class RequestSession(Base, TimestampMixin):  # type: ignore[misc]
     max_output_tokens_per_call = Column(Integer, default=0, nullable=False)
     max_total_tokens_per_call = Column(Integer, default=0, nullable=False)
 
+    # Optimistic locking
+    version = Column(Integer, default=0, nullable=False, server_default="0")
+
     # Relationships
     user = relationship("User", back_populates="sessions")
     request_logs = relationship(

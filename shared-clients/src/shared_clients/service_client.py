@@ -1,11 +1,10 @@
 """Centralized HTTP client for service-to-service communication."""
 
 import os
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional
 
 import httpx
 import structlog
-from shared_models.models import AgentResponse
 
 logger = structlog.get_logger()
 
@@ -61,99 +60,6 @@ class ServiceClient:
     async def close(self) -> None:
         """Close the HTTP client."""
         await self.client.aclose()
-
-
-class AgentServiceClient(ServiceClient):
-    """Client for communicating with the Agent Service."""
-
-    def __init__(self, base_url: Optional[str] = None, timeout: float = 60.0):
-        url = (
-            base_url
-            or os.getenv(
-                "AGENT_SERVICE_URL", "http://self-service-agent-agent-service:80"
-            )
-            or "http://self-service-agent-agent-service:80"
-        )
-        super().__init__(url, timeout=timeout)
-
-    async def process_request(
-        self, request_data: Union[Dict[str, Any], Any]
-    ) -> Optional[AgentResponse]:
-        """Process a request with the agent service."""
-        try:
-            # Handle both Pydantic models and dictionaries
-            if hasattr(request_data, "model_dump"):
-                json_data = request_data.model_dump(mode="json")
-            else:
-                json_data = request_data
-
-            # Use optimized timeout for agent processing
-            response = await self.post("/process", json=json_data, timeout=45.0)
-            response.raise_for_status()
-            return AgentResponse.model_validate(response.json())
-        except Exception as e:
-            logger.error("Failed to process request with agent service", error=str(e))
-            return None
-
-    async def process_request_stream(
-        self, request_data: Union[Dict[str, Any], Any]
-    ) -> Any:
-        """Process a request with the agent service using streaming."""
-        try:
-            # Handle both Pydantic models and dictionaries
-            if hasattr(request_data, "model_dump"):
-                json_data = request_data.model_dump(mode="json")
-            else:
-                json_data = request_data
-
-            # Return the streaming context manager
-            return await self.stream_post(
-                "/process/stream", json=json_data, timeout=60.0
-            )
-        except Exception as e:
-            logger.error(
-                "Failed to process streaming request with agent service", error=str(e)
-            )
-            return None
-
-    async def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
-        """Get session details via REST API."""
-        try:
-            response = await self.get(f"/api/v1/sessions/{session_id}")
-            response.raise_for_status()
-            result = response.json()
-            return result if isinstance(result, dict) else None
-        except Exception as e:
-            logger.error("Failed to get session", session_id=session_id, error=str(e))
-            return None
-
-    async def create_session(
-        self, session_data: Dict[str, Any]
-    ) -> Optional[Dict[str, Any]]:
-        """Create session via REST API."""
-        try:
-            response = await self.post("/api/v1/sessions", json=session_data)
-            response.raise_for_status()
-            result = response.json()
-            return result if isinstance(result, dict) else None
-        except Exception as e:
-            logger.error("Failed to create session", error=str(e))
-            return None
-
-    async def update_session(
-        self, session_id: str, updates: Dict[str, Any]
-    ) -> Optional[Dict[str, Any]]:
-        """Update session via REST API."""
-        try:
-            response = await self.put(f"/api/v1/sessions/{session_id}", json=updates)
-            response.raise_for_status()
-            result = response.json()
-            return result if isinstance(result, dict) else None
-        except Exception as e:
-            logger.error(
-                "Failed to update session", session_id=session_id, error=str(e)
-            )
-            return None
 
 
 class RequestManagerClient(ServiceClient):
@@ -227,14 +133,8 @@ class IntegrationDispatcherClient(ServiceClient):
 
 
 # Global client instances
-_agent_client: Optional[AgentServiceClient] = None
 _request_manager_client: Optional[RequestManagerClient] = None
 _integration_dispatcher_client: Optional[IntegrationDispatcherClient] = None
-
-
-def get_agent_client() -> Optional[AgentServiceClient]:
-    """Get the global agent service client."""
-    return _agent_client
 
 
 def get_request_manager_client() -> Optional[RequestManagerClient]:
@@ -248,18 +148,13 @@ def get_integration_dispatcher_client() -> Optional[IntegrationDispatcherClient]
 
 
 def initialize_service_clients(
-    agent_service_url: Optional[str] = None,
     request_manager_url: Optional[str] = None,
     integration_dispatcher_url: Optional[str] = None,
-    agent_timeout: float = 120.0,
     integration_timeout: float = 30.0,
 ) -> None:
     """Initialize the global service client instances."""
-    global _agent_client, _request_manager_client, _integration_dispatcher_client
+    global _request_manager_client, _integration_dispatcher_client
 
-    _agent_client = AgentServiceClient(
-        base_url=agent_service_url, timeout=agent_timeout
-    )
     _request_manager_client = RequestManagerClient(
         base_url=request_manager_url, timeout=integration_timeout
     )
@@ -272,11 +167,7 @@ def initialize_service_clients(
 
 async def cleanup_service_clients() -> None:
     """Clean up the global service client instances."""
-    global _agent_client, _request_manager_client, _integration_dispatcher_client
-
-    if _agent_client:
-        await _agent_client.close()
-        _agent_client = None
+    global _request_manager_client, _integration_dispatcher_client
 
     if _request_manager_client:
         await _request_manager_client.close()

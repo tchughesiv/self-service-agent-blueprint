@@ -74,11 +74,6 @@ spec:
               # Activate virtual environment and run the asset registration script
               echo "Running asset registration script..."
               /app/.venv/bin/python -m agent_service.scripts.register_assets
-
-              echo "Knowledge bases registered successfully"
               
+              # If we get here, the script succeeded (set -e will exit on failure)
               echo "Initialization job completed successfully"
-              
-              # Job completed successfully
-              
-              exit 0

@@ -1,5 +1,7 @@
 """Asset registration script for agent service."""
 
+import sys
+
 from agent_service.knowledge import KnowledgeBaseManager
 
 
@@ -10,9 +12,16 @@ def main() -> None:
 
     # Register knowledge bases
     print("Registering knowledge bases...")
-    kb_manager.register_knowledge_bases()
+    success = kb_manager.register_knowledge_bases()
 
-    print("Asset registration completed successfully")
+    if success:
+        print("Asset registration completed successfully")
+        sys.exit(0)
+    else:
+        print(
+            "Asset registration failed - one or more knowledge bases could not be registered"
+        )
+        sys.exit(1)
 
 
 if __name__ == "__main__":

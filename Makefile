@@ -1104,7 +1104,7 @@ helm-install-prod: namespace helm-depend
 		echo "Attempt $$i of 3..."; \
 		if $(MAKE) _helm-install-prod-single; then \
 			echo "Installation successful, verifying broker and triggers..."; \
-			EXPECTED_TRIGGERS=8; \
+			EXPECTED_TRIGGERS=10; \
 			ACTUAL_TRIGGERS=$$(kubectl get triggers -n $(NAMESPACE) --no-headers 2>/dev/null | wc -l); \
 			if [ "$$ACTUAL_TRIGGERS" -eq "$$EXPECTED_TRIGGERS" ]; then \
 				echo "✅ All $$EXPECTED_TRIGGERS triggers deployed"; \
@@ -1189,7 +1189,7 @@ print-urls:
 .PHONY: verify-triggers
 verify-triggers:
 	@echo "Verifying all triggers are deployed..."
-	@EXPECTED_TRIGGERS=8; \
+	@EXPECTED_TRIGGERS=10; \
 	ACTUAL_TRIGGERS=$$(kubectl get triggers -n $(NAMESPACE) --no-headers 2>/dev/null | wc -l); \
 	if [ "$$ACTUAL_TRIGGERS" -eq "$$EXPECTED_TRIGGERS" ]; then \
 		echo "✅ All $$EXPECTED_TRIGGERS triggers deployed successfully"; \
@@ -1209,6 +1209,8 @@ verify-triggers:
 		echo "  ✅ self-service-agent-request-notification-trigger"; \
 		echo "  ✅ self-service-agent-processing-notification-trigger"; \
 		echo "  ✅ self-service-agent-database-update-trigger"; \
+		echo "  ✅ self-service-agent-session-create-or-get-trigger"; \
+		echo "  ✅ self-service-agent-session-ready-trigger"; \
 		echo ""; \
 		echo "To fix missing triggers, run:"; \
 		echo "  make helm-install-prod"; \
