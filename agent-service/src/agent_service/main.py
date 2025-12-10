@@ -661,8 +661,6 @@ async def detailed_health_check(
     )
 
 
-
-
 @app.post("/api/v1/events/cloudevents")
 async def handle_cloudevent(request: Request) -> Dict[str, Any]:
     """Handle incoming CloudEvents."""
