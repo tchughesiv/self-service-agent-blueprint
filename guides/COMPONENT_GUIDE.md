@@ -70,7 +70,6 @@ The quickstart consists of reusable **core platform components** and **use-case-
 
 **shared-clients:**
 - **HTTP Clients:** For external API access (RequestManagerClient for user-facing APIs)
-- **Note:** Service-to-service communication uses CloudEvents/eventing, not direct HTTP
 
 **Documentation:** See `shared-models/README.md` and `shared-clients/README.md`
 
