@@ -661,7 +661,6 @@ async def detailed_health_check(
     )
 
 
-# All requests use CloudEvents via /api/v1/events/cloudevents
 
 
 @app.post("/api/v1/events/cloudevents")
