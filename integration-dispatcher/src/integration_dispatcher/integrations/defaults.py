@@ -39,10 +39,12 @@ class IntegrationDefaultsService:
     def _init_slack_client(self) -> None:
         """Initialize Slack client."""
         bot_token = os.getenv("SLACK_BOT_TOKEN")
-        if bot_token:
+        # Only use token if it's set and not empty
+        if bot_token and bot_token.strip():
             self.slack_client = AsyncWebClient(token=bot_token)
             logger.info("Slack client initialized for user lookup")
         else:
+            self.slack_client = None
             logger.warning("SLACK_BOT_TOKEN not found, Slack user lookup disabled")
 
     async def _validate_mapping_with_ttl(
