@@ -1,7 +1,7 @@
 name: Build and push images
 
 on:
-  pull_request:
+  pull_request_target:
     types: [closed]
     branches:
       - 'main'
