@@ -23,12 +23,15 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
 
       - name: Extract version from Makefile
         id: version
         run: |
           BASE_VERSION=$(make version)
-          VERSION_WITH_COMMIT="${BASE_VERSION}-${{ github.sha }}"
+          MERGE_SHA="${{ github.event.pull_request.merge_commit_sha }}"
+          VERSION_WITH_COMMIT="${BASE_VERSION}-${MERGE_SHA}"
           echo "base_version=${BASE_VERSION}" >> $GITHUB_OUTPUT
           echo "version_with_commit=${VERSION_WITH_COMMIT}" >> $GITHUB_OUTPUT
 
