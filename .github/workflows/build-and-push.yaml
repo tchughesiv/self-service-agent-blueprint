@@ -1,7 +1,8 @@
 name: Build and push images
 
 on:
-  push:
+  pull_request:
+    types: [closed]
     branches:
       - 'main'
       - 'dev'
@@ -16,7 +17,7 @@ env:
 
 jobs:
   build-and-push:
-    if: github.repository_owner == 'RHEcosystemAppEng' && github.event_name == 'push'
+    if: github.repository_owner == 'RHEcosystemAppEng' && github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     
     steps:
@@ -33,7 +34,7 @@ jobs:
 
           # Build versions list - add latest only for main branch
           VERSIONS="${BASE_VERSION} ${VERSION_WITH_COMMIT}"
-          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+          if [[ "${{ github.event.pull_request.base.ref }}" == "main" ]]; then
             VERSIONS="${VERSIONS} latest"
             echo "Adding 'latest' tag for main branch"
           else
