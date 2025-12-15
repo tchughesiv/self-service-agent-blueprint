@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - 'main'
+      - 'dev'
 
 # Cancel any previous runs of this workflow
 concurrency:
@@ -26,6 +27,10 @@ jobs:
         id: version
         run: |
           BASE_VERSION=$(make version)
+          # Append -dev for dev branch
+          if [[ "${{ github.ref }}" != "refs/heads/main" ]]; then
+            BASE_VERSION="${BASE_VERSION}-dev"
+          fi
           VERSION_WITH_COMMIT="${BASE_VERSION}-${{ github.sha }}"
           echo "base_version=${BASE_VERSION}" >> $GITHUB_OUTPUT
           echo "version_with_commit=${VERSION_WITH_COMMIT}" >> $GITHUB_OUTPUT
@@ -36,7 +41,8 @@ jobs:
             VERSIONS="${VERSIONS} latest"
             echo "Adding 'latest' tag for main branch"
           else
-            echo "Skipping 'latest' tag for non-main branch: ${{ github.ref_name }}"
+            VERSIONS="${VERSIONS} dev"
+            echo "Adding 'dev' tag for dev branch"
           fi
 
           echo "versions=${VERSIONS}" >> $GITHUB_OUTPUT
