@@ -22,7 +22,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: dev
 
       - name: Prepare Runner
         uses: ./.github/actions/prepare-runner
