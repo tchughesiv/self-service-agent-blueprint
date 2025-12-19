@@ -100,9 +100,12 @@ jobs:
         id: version
         run: |
           BASE_VERSION=$(make version)
-          VERSION_WITH_COMMIT="${BASE_VERSION}-${{ github.sha }}"
+          # Get actual commit SHA from checked out dev branch
+          COMMIT_SHA=$(git rev-parse HEAD)
+          VERSION_WITH_COMMIT="${BASE_VERSION}-${COMMIT_SHA}"
           echo "version=${VERSION_WITH_COMMIT}" >> $GITHUB_OUTPUT
           echo "Base version: ${BASE_VERSION}"
+          echo "Commit SHA: ${COMMIT_SHA}"
           echo "Version with commit: ${VERSION_WITH_COMMIT}"
 
       - name: Install the quickstart
