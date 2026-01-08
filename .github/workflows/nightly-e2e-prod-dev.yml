@@ -82,6 +82,17 @@ jobs:
           make oc
           echo "$GITHUB_WORKSPACE/bin" >> $GITHUB_PATH
 
+      - name: Check ServiceNow hibernation and wake up if needed
+        shell: bash
+        env:
+          SERVICENOW_INSTANCE_URL: ${{ secrets.SERVICENOW_INSTANCE_URL }}
+          SERVICENOW_API_KEY: ${{ secrets.SERVICENOW_API_KEY }}
+          SERVICENOW_DEV_PORTAL_USERNAME: ${{ secrets.SERVICENOW_DEV_PORTAL_USERNAME }}
+          SERVICENOW_DEV_PORTAL_PASSWORD: ${{ secrets.SERVICENOW_DEV_PORTAL_PASSWORD }}
+        run: |
+          make servicenow-wake-install
+          ./scripts/ci/check-servicenow-hibernation.sh
+
       - name: log into the cluster
         shell: bash
         run: |
