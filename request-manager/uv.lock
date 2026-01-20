@@ -963,7 +963,7 @@ wheels = [
 
 [[package]]
 name = "llama-stack-client"
-version = "0.2.18"
+version = "0.3.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -2100,7 +2100,7 @@ requires-dist = [
     { name = "langfuse", specifier = ">=3.0.0" },
     { name = "langgraph", specifier = "==1.0.7" },
     { name = "langgraph-checkpoint-postgres", specifier = ">=2.0.0" },
-    { name = "llama-stack-client", specifier = "==0.2.18" },
+    { name = "llama-stack-client", specifier = "==0.3.5" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.17.1" },
     { name = "openai", specifier = ">=1.0.0" },
     { name = "opentelemetry-exporter-otlp-proto-http", specifier = "==1.37.0" },
