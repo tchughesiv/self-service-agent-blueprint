@@ -51,6 +51,7 @@ jobs:
       - name: Initialize cluster and deploy application
         uses: ./.github/actions/kind
         with:
+          replica_count: "2"
           llm: ${{ vars.LLM_INFERENCE }}
           llm_id: ${{ vars.LLM_ID_INFERENCE }}
           llm_url: ${{ vars.LLM_URL_INFERENCE }}
