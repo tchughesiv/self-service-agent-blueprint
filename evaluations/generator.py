@@ -172,16 +172,34 @@ def _parse_arguments() -> argparse.Namespace:
         help="Timeout in seconds for individual message send/response operations (default: 60). "
         "Increase for slower agents or high concurrency scenarios.",
     )
+    parser.add_argument(
+        "--use-structured-output",
+        action="store_true",
+        default=False,
+        help="Enable structured output mode using Pydantic schema validation with retries. "
+        "Recommended for models like Gemini that benefit from explicit schema validation.",
+    )
     return parser.parse_args()
 
 
-def _create_conversation_golden(conversation_number: int) -> ConversationalGolden:
-    """Create a single ConversationalGolden object for simulation."""
+def _create_conversation_golden(
+    conversation_number: int, use_structured_output: bool = False
+) -> ConversationalGolden:
+    """Create a single ConversationalGolden object for simulation based on the use_structured_output flag."""
+
+    if use_structured_output:
+        # for models with structured output like Gemini
+        scenario = "An Employee wants to refresh their laptop. The user initiates the conversation by asking to refresh their laptop. Then, if the agent provides a list of options, the user selects the appropriate laptop."
+        user_description = "An employee interacting with an IT self-service agent."
+    else:
+        # for models without structured output like Llama
+        scenario = "An Employee wants to refresh their laptop. The agent shows them a list they can choose from, they select the appropriate laptop and a service now ticket number is returned."
+        user_description = "user who tries to answer the asssitants last question"
 
     conversation_golden = ConversationalGolden(
-        scenario="An Employee wants to refresh their laptop. The agent shows them a list they can choose from, they select the appropriate laptop and a service now ticket number is returned.",
+        scenario=scenario,
         expected_outcome="They get a Service now ticket number for their refresh request",
-        user_description="user who tries to answer the asssitants last question",
+        user_description=user_description,
     )
 
     return conversation_golden
@@ -195,6 +213,7 @@ def _run_worker(
     test_script: str,
     reset_conversation: bool,
     message_timeout: int = 60,
+    use_structured_output: bool = False,
 ) -> dict[str, Any]:
     """
     Worker function to generate conversations in parallel.
@@ -207,6 +226,7 @@ def _run_worker(
         test_script: Test script to use
         reset_conversation: Whether to reset conversation at start
         message_timeout: Timeout for individual message send/response operations
+        use_structured_output: Enable structured output with Pydantic schema validation
 
     Returns:
         Dictionary with saved_files, token_counts, and test_case_count
@@ -231,7 +251,10 @@ def _run_worker(
 
     # Initialize the custom LLM for this worker
     custom_llm = CustomLLM(
-        api_key=api_key, base_url=api_endpoint, model_name=model_name
+        api_key=api_key,
+        base_url=api_endpoint,
+        model_name=model_name,
+        use_structured_output=use_structured_output,
     )
 
     # Create a client variable for this worker
@@ -331,7 +354,9 @@ def _run_worker(
             worker_client.get_agent_initialization()
 
             # Create conversation golden
-            conversation_golden = _create_conversation_golden(conversation_number)
+            conversation_golden = _create_conversation_golden(
+                conversation_number, use_structured_output=use_structured_output
+            )
 
             # Simulate conversation
             conversational_test_cases = simulator.simulate(
@@ -411,7 +436,23 @@ def _convert_test_case_to_conversation_format(
     # Extract turns from the test case
     if hasattr(test_case, "turns") and test_case.turns:
         for turn in test_case.turns:
-            conversation_turns.append({"role": turn.role, "content": turn.content})
+            content = turn.content
+
+            # This handles cases where Structured Output mode saves the whole Pydantic object as a string
+            if (
+                isinstance(content, str)
+                and content.strip().startswith("{")
+                and "simulated_input" in content
+            ):
+                try:
+                    data = json.loads(content)
+                    if isinstance(data, dict) and "simulated_input" in data:
+                        content = str(data["simulated_input"])
+                except Exception:
+                    # If parsing fails, keep original content
+                    pass
+
+            conversation_turns.append({"role": turn.role, "content": content})
 
     return {
         "metadata": {
@@ -513,6 +554,7 @@ if __name__ == "__main__":
                 args.test_script,
                 args.reset_conversation,
                 args.message_timeout,
+                args.use_structured_output,
             )
             for i in range(args.concurrency)
         ]
