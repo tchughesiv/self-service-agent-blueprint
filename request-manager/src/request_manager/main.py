@@ -5,10 +5,10 @@ import json
 # Configure structured logging
 import os
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 import jwt
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -837,7 +837,7 @@ async def _handle_agent_response_event_from_data(
             response_data_keys=list(response_data.keys()),
         )
 
-        # Use unified response handler
+        # Use unified response handler (payload is in response_data = event_data["data"])
         response_handler = UnifiedResponseHandler(db)
         result = await response_handler.process_agent_response(
             request_id=request_id,
@@ -845,10 +845,10 @@ async def _handle_agent_response_event_from_data(
             user_id=user_id,
             agent_id=agent_id,
             content=content,
-            metadata=event_data.get("metadata", {}),
-            processing_time_ms=event_data.get("processing_time_ms"),
-            requires_followup=event_data.get("requires_followup", False),
-            followup_actions=event_data.get("followup_actions", []),
+            metadata=response_data.get("metadata", {}),
+            processing_time_ms=response_data.get("processing_time_ms"),
+            requires_followup=response_data.get("requires_followup", False),
+            followup_actions=response_data.get("followup_actions", []),
         )
 
         # Resolve any waiting response futures for this request (fast path)
@@ -859,16 +859,16 @@ async def _handle_agent_response_event_from_data(
         try:
             from request_manager.communication_strategy import resolve_response_future
 
-            # Construct complete response_data dict with all required fields
+            # Construct complete response_data dict with all required fields (payload is in response_data)
             complete_response_data = {
                 "request_id": request_id,
                 "session_id": session_id,
                 "agent_id": agent_id,
                 "content": content,
-                "metadata": event_data.get("metadata", {}),
-                "processing_time_ms": event_data.get("processing_time_ms"),
-                "requires_followup": event_data.get("requires_followup", False),
-                "followup_actions": event_data.get("followup_actions", []),
+                "metadata": response_data.get("metadata", {}),
+                "processing_time_ms": response_data.get("processing_time_ms"),
+                "requires_followup": response_data.get("requires_followup", False),
+                "followup_actions": response_data.get("followup_actions", []),
             }
 
             future_resolved = resolve_response_future(
@@ -1193,6 +1193,307 @@ async def _forward_response_to_integration_dispatcher(
             session_id=event_data.get("session_id"),
         )
         return False
+
+
+@app.get("/api/v1/conversations")
+async def get_conversations(
+    session_id: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    user_id: Optional[str] = None,
+    user_email: Optional[str] = None,
+    integration_type: Optional[str] = None,
+    integration_types: Optional[List[str]] = Query(
+        None,
+        description="Only include sessions that used at least one of these channels; full conversation returned. E.g. CLI,SLACK.",
+    ),
+    agent_id: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+    random: bool = False,
+    include_messages: bool = True,
+    current_user: Optional[Dict[str, Any]] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session_dependency),
+) -> Dict[str, Any]:
+    """Get conversations with flexible filtering. No auth required (matches generic).
+
+    Query Parameters:
+        session_id: Get specific session's conversation
+        start_date: ISO 8601 datetime (e.g., 2026-01-01T00:00:00Z)
+        end_date: ISO 8601 datetime
+        user_id: UUID or email address to filter by user
+        user_email: Email address to filter by user (alternative to user_id)
+        integration_type: Filter by channel where the conversation started (session record)
+        integration_types: Only include sessions that used at least one of these
+            channels; returned conversations are full. E.g. ?integration_types=CLI&integration_types=SLACK
+        agent_id: Only include sessions that used this agent at least once; returned
+            conversations are full (routing + specialist + etc.). E.g. laptop-refresh.
+        limit: Number of results (default: 100, max: 1000)
+        offset: Pagination offset (default: 0)
+        random: Random sampling instead of ordered (default: false)
+        include_messages: Include full conversation messages (default: true)
+    """
+    from shared_models.models import IntegrationType, RequestLog, RequestSession
+    from shared_models.user_utils import (
+        get_or_create_canonical_user,
+        is_uuid,
+        resolve_canonical_user_id,
+    )
+    from sqlalchemy import exists, func, select
+    from sqlalchemy.orm import selectinload
+
+    # Validate limit
+    if limit > 1000:
+        limit = 1000
+    if limit < 1:
+        limit = 100
+
+    # Build base query; eager-load user to avoid async lazy-load errors
+    stmt = select(RequestSession).options(selectinload(RequestSession.user))
+
+    # Filter by session_id if provided
+    if session_id:
+        stmt = stmt.where(RequestSession.session_id == session_id)
+
+    # Resolve user filter (UUID or email)
+    resolved_user_id = None
+    if user_id or user_email:
+        try:
+            if user_id:
+                if is_uuid(user_id):
+                    resolved_user_id = user_id
+                else:
+                    # Treat as email
+                    resolved_user_id = await resolve_canonical_user_id(user_id, db=db)
+            elif user_email:
+                resolved_user_id = await get_or_create_canonical_user(user_email, db)
+
+            if resolved_user_id:
+                stmt = stmt.where(RequestSession.user_id == resolved_user_id)
+        except Exception as e:
+            logger.warning(
+                "Failed to resolve user_id filter",
+                user_id=user_id,
+                user_email=user_email,
+                error=str(e),
+            )
+            # Continue without user filter if resolution fails
+
+    # Filter by date range
+    if start_date:
+        try:
+            start_dt = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
+            stmt = stmt.where(RequestSession.created_at >= start_dt)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid start_date format. Use ISO 8601 (e.g., 2026-01-01T00:00:00Z)",
+            )
+
+    if end_date:
+        try:
+            end_dt = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
+            stmt = stmt.where(RequestSession.created_at <= end_dt)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid end_date format. Use ISO 8601 (e.g., 2026-01-01T00:00:00Z)",
+            )
+
+    # Filter by integration_type
+    if integration_type:
+        try:
+            integration_enum = IntegrationType(integration_type.upper())
+            stmt = stmt.where(RequestSession.integration_type == integration_enum)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid integration_type: {integration_type}. Valid values: {', '.join([e.value for e in IntegrationType])}",
+            )
+
+    # Filter by agent_id at query level so we get up to limit sessions that used this agent
+    if agent_id:
+        exists_stmt = select(1).where(
+            RequestLog.session_id == RequestSession.session_id,
+            RequestLog.agent_id == agent_id,
+        )
+        stmt = stmt.where(exists(exists_stmt))
+
+    # Get total count before pagination
+    count_stmt = select(func.count()).select_from(stmt.subquery())
+    total_result = await db.execute(count_stmt)
+    total = total_result.scalar() or 0
+
+    # Apply ordering and pagination
+    if random:
+        stmt = stmt.order_by(func.random()).limit(limit).offset(offset)
+    else:
+        stmt = (
+            stmt.order_by(RequestSession.last_request_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+
+    result = await db.execute(stmt)
+    sessions = result.scalars().all()
+
+    # Parse and validate integration_types filter (session used at least one of these channels)
+    requested_integration_types: Optional[set[str]] = None
+    if integration_types:
+        requested_integration_types = set()
+        for raw in integration_types:
+            if not raw or not str(raw).strip():
+                continue
+            try:
+                integration_enum = IntegrationType(str(raw).upper())
+                requested_integration_types.add(integration_enum.value)
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid integration_types value: {raw}. Valid values: {', '.join([e.value for e in IntegrationType])}",
+                )
+        if not requested_integration_types:
+            requested_integration_types = None
+
+    # Build response with optional conversation messages
+    session_results = []
+    for session in sessions:
+        session_data = {
+            "session_id": session.session_id,
+            "user_id": session.user_id,
+            "integration_type": session.integration_type.value,
+            "status": session.status.value,
+            "created_at": session.created_at.isoformat(),
+            "last_request_at": (
+                session.last_request_at.isoformat() if session.last_request_at else None
+            ),
+            "total_requests": session.total_requests,
+            "current_agent_id": session.current_agent_id,
+            "current_thread_id": session.conversation_thread_id,
+        }
+
+        # Get user email if available
+        if session.user:
+            session_data["user_email"] = session.user.primary_email
+
+        # Filter by agent_id if specified: include session only if it has at least one
+        # message from that agent; return full conversation (routing + specialist + etc.)
+        filter_by_agent = agent_id is not None
+
+        # Include conversation messages if requested
+        if include_messages:
+            # Get all request logs for this session
+            log_stmt = (
+                select(RequestLog)
+                .where(RequestLog.session_id == session.session_id)
+                .order_by(RequestLog.created_at.asc())
+            )
+            log_result = await db.execute(log_stmt)
+            request_logs = log_result.scalars().all()
+
+            # Session-level filter: skip session if no message from the requested agent
+            if filter_by_agent and not any(
+                log.agent_id == agent_id for log in request_logs
+            ):
+                continue
+
+            conversation = []
+            integration_types_used: set[str] = set()
+            for log in request_logs:
+                # Extract thread_id from metadata or use session's current thread_id
+                thread_id = None
+                thread_id_source = "none"
+                if log.response_metadata:
+                    thread_id = log.response_metadata.get("conversation_thread_id")
+                    if thread_id:
+                        thread_id_source = "metadata"
+
+                if not thread_id:
+                    thread_id = session.conversation_thread_id
+                    thread_id_source = "session"
+
+                # Per-message origin: use integration_type from the request that created this log
+                # (stored in normalized_request); fall back to session's type for older logs or if missing
+                log_integration_type = None
+                if log.normalized_request and isinstance(log.normalized_request, dict):
+                    raw = log.normalized_request.get("integration_type")
+                    log_integration_type = (
+                        raw
+                        if isinstance(raw, str)
+                        else (getattr(raw, "value", None) if raw else None)
+                    )
+                if not log_integration_type:
+                    log_integration_type = session.integration_type.value
+                integration_types_used.add(log_integration_type)
+
+                conversation.append(
+                    {
+                        "request_id": log.request_id,
+                        "timestamp": log.created_at.isoformat(),
+                        "integration_type": log_integration_type,
+                        "user_message": log.request_content,
+                        "agent_response": log.response_content,
+                        "agent_id": log.agent_id,
+                        "thread_id": thread_id,
+                        "thread_id_source": thread_id_source,
+                        "processing_time_ms": log.processing_time_ms,
+                        "completed_at": (
+                            log.completed_at.isoformat() if log.completed_at else None
+                        ),
+                    }
+                )
+
+            session_data["integration_types"] = sorted(integration_types_used)
+            session_data["conversation"] = conversation
+
+            # Session-level filter: skip if session used none of the requested channels
+            if requested_integration_types and not (
+                integration_types_used & requested_integration_types
+            ):
+                continue
+        else:
+            # No messages loaded: use session's single integration_type
+            session_data["integration_types"] = [session.integration_type.value]
+            # If filtering by agent_id but not including messages, check session's current_agent_id
+            if filter_by_agent and session.current_agent_id != agent_id:
+                continue
+            # If filtering by integration_types, session's type must be in the set
+            if (
+                requested_integration_types
+                and session.integration_type.value not in requested_integration_types
+            ):
+                continue
+
+        session_results.append(session_data)
+
+    logger.info(
+        "Conversations retrieved",
+        admin_user=(current_user or {}).get("user_id"),
+        session_count=len(session_results),
+        total=total,
+        filters={
+            "session_id": session_id,
+            "start_date": start_date,
+            "end_date": end_date,
+            "user_id": resolved_user_id,
+            "user_email": user_email,
+            "integration_type": integration_type,
+            "integration_types": (
+                list(requested_integration_types)
+                if requested_integration_types
+                else None
+            ),
+            "agent_id": agent_id,
+        },
+    )
+
+    return {
+        "sessions": session_results,
+        "count": len(session_results),
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 if tracingIsActive():

@@ -31,6 +31,8 @@ dependencies = [
     # LLM integration
     "openai>=1.99.0",
     "instructor>=1.7.0",
+    # Request Manager API (for export_conversations_from_api)
+    "self-service-agent-shared-clients",
 ]
 
 [project.optional-dependencies]
@@ -50,12 +52,18 @@ all = [
     "conversation-evaluations[dev]",
 ]
 
+[tool.uv.sources]
+self-service-agent-shared-clients = { path = "../shared-clients" }
+# Required by shared-clients
+self-service-agent-shared-models = { path = "../shared-models" }
+
 [project.scripts]
 # Main evaluation commands
 evaluate = "evaluate:main"
 run-conversations = "run_conversations:main"
 generate-conversations = "generator:main"
 deep-eval = "deep_eval:main"
+export-conversations-from-api = "export_conversations_from_api:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
@@ -107,7 +115,7 @@ extend-exclude = '''
 profile = "black"
 multi_line_output = 3
 line_length = 88
-known_first_party = ["helpers"]
+known_first_party = ["helpers", "shared_clients"]
 known_third_party = ["deepeval", "instructor", "openai"]
 
 [tool.flake8]
@@ -128,5 +136,7 @@ python_version = "3.12"
 [[tool.mypy.overrides]]
 module = [
     "deepeval.*",
+    "shared_clients",
+    "shared_clients.*",
 ]
 ignore_missing_imports = true

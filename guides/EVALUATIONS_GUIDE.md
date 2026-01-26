@@ -284,6 +284,38 @@ python generator.py 20 --max-turns 30
 # - generated_flow_3_20251009_143705.json
 ```
 
+#### Exported Conversations (from Request Manager API)
+
+**Location**: Created in `results/conversation_results/` with prefix `from_api_`
+
+You can pull **actual** conversations from the deployed Request Manager (GET /api/v1/conversations) and save them in the same eval format (metadata + conversation with role/content). The `export_conversations_from_api.py` script does this so they can be evaluated with `deep_eval.py` alongside predefined and generated conversations.
+
+**Characteristics:**
+
+- **Real production/conversations**: Sessions that actually happened (CLI, Slack, etc.)
+- **Same JSON format**: `metadata.authoritative_user_id`, `metadata.description`, `conversation: [ { role, content }, ... ]`
+- **No auth required**: The conversations endpoint allows unauthenticated reads (matches generic)
+
+**How It Works:**
+
+1. Script calls GET /api/v1/conversations with optional filters. Pass `--agent-id laptop-refresh` (or another agent name) to restrict export to sessions that used that agent; otherwise all sessions are eligible. Other filters: limit, user_email, session_id, integration_types, etc.
+2. For each session, converts API shape (user_message / agent_response per turn) into eval shape (alternating user/assistant turns with role/content)
+3. Saves one JSON file per session to `results/conversation_results/from_api_<session_id_short>_<timestamp>.json`
+
+**Example:**
+
+```bash
+cd evaluations
+# Export up to 20 sessions (default; use -n/--num-conversations to change). Runs via kubectl/oc exec into request-manager pod (set NAMESPACE or --namespace if needed).
+uv run export_conversations_from_api.py
+
+# With different count or filters
+uv run export_conversations_from_api.py -n 10 --user-email john.doe@company.com
+
+# Then evaluate (includes these files with the rest)
+uv run deep_eval.py --results-dir results/conversation_results
+```
+
 #### Known Bad Conversations
 
 **Location**: `results/known_bad_conversation_results/`

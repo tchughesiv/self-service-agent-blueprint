@@ -68,6 +68,8 @@ CONTAINER_TOOL ?= podman
 REGISTRY ?= quay.io/rh-ai-quickstart
 PYTHON_VERSION ?= 3.12
 ARCH ?= linux/amd64
+# Pull policy: --policy=always for podman (pull newest); empty for docker (always pulls by default)
+PULL_POLICY := $(if $(filter podman,$(CONTAINER_TOOL)),--policy=always,)
 REQUEST_MGR_IMG ?= $(REGISTRY)/self-service-agent-request-manager:$(VERSION)
 AGENT_SERVICE_IMG ?= $(REGISTRY)/self-service-agent-service:$(VERSION)
 INTEGRATION_DISPATCHER_IMG ?= $(REGISTRY)/self-service-agent-integration-dispatcher:$(VERSION)
@@ -75,6 +77,10 @@ MCP_SNOW_IMG ?= $(REGISTRY)/self-service-agent-snow-mcp:$(VERSION)
 MOCK_EVENTING_IMG ?= $(REGISTRY)/self-service-agent-mock-eventing:$(VERSION)
 MOCK_SERVICENOW_IMG ?= $(REGISTRY)/self-service-agent-mock-servicenow:$(VERSION)
 PROMPTGUARD_IMG ?= $(REGISTRY)/self-service-agent-promptguard:$(VERSION)
+
+# For retag-all-images: tag from REGISTRY/VERSION to NEW_REGISTRY/NEW_VERSION (set both when retagging)
+NEW_REGISTRY ?=
+NEW_VERSION ?=
 
 MAKEFLAGS += --no-print-directory
 
@@ -282,6 +288,26 @@ help:
 	@echo "  reinstall-mock-employee-data        - Force reinstall mock employee data dependencies"
 	@echo "  reinstall-mock-servicenow           - Force reinstall mock ServiceNow dependencies"
 	@echo ""
+	@echo "Pull Commands (pull images at REGISTRY/VERSION with --platform=\$$(ARCH)):"
+	@echo "  pull-all-images                     - Pull all container images"
+	@echo "  pull-request-mgr-image              - Pull request manager image"
+	@echo "  pull-agent-service-image            - Pull agent service image"
+	@echo "  pull-integration-dispatcher-image   - Pull integration dispatcher image"
+	@echo "  pull-mcp-snow-image                 - Pull snow MCP image"
+	@echo "  pull-mock-eventing-image            - Pull mock eventing image"
+	@echo "  pull-mock-servicenow-image          - Pull mock ServiceNow image"
+	@echo "  pull-promptguard-image              - Pull PromptGuard image"
+	@echo ""
+	@echo "Retag Commands (pull at REGISTRY/VERSION then tag -> NEW_REGISTRY/NEW_VERSION; set both NEW_* vars):"
+	@echo "  retag-all-images                    - Pull all images, then retag all to NEW_REGISTRY/NEW_VERSION"
+	@echo "  retag-request-mgr-image             - Retag request manager image"
+	@echo "  retag-agent-service-image           - Retag agent service image"
+	@echo "  retag-integration-dispatcher-image  - Retag integration dispatcher image"
+	@echo "  retag-mcp-snow-image                - Retag snow MCP image"
+	@echo "  retag-mock-eventing-image           - Retag mock eventing image"
+	@echo "  retag-mock-servicenow-image         - Retag mock ServiceNow image"
+	@echo "  retag-promptguard-image             - Retag PromptGuard image"
+	@echo ""
 	@echo "Push Commands:"
 	@echo "  push-all-images                     - Push all container images to registry"
 	@echo "  push-agent-service-image            - Push the agent service container image to registry"
@@ -346,6 +372,8 @@ help:
 	@echo "    CONTAINER_TOOL                    - Container build tool (default: podman)"
 	@echo "    REGISTRY                          - Container registry (default: quay.io/rh-ai-quickstart)"
 	@echo "    VERSION                           - Image version tag (auto-detected from git branch if not set)"
+	@echo "    NEW_REGISTRY                      - Destination registry for retag-all-images (set with NEW_VERSION)"
+	@echo "    NEW_VERSION                       - Destination tag for retag-all-images (set with NEW_REGISTRY)"
 	@echo "                                        - main branch: uses base version '0.0.2' (stable builds)"
 	@echo "                                        - dev branch: uses '0.0.2-dev' tag (latest dev builds)"
 	@echo "                                        - branches forked from dev: uses '0.0.2-dev' tag (dev builds)"
@@ -440,6 +468,22 @@ define push_image
 	@echo "Pushing $(2): $(1)"
 	$(CONTAINER_TOOL) push $(1)
 	@echo "Successfully pushed $(1)"
+endef
+
+# Pull with platform (and --policy=always for podman so we get newest build): $(call pull_image,IMAGE,DESCRIPTION)
+define pull_image
+	@echo "Pulling $(2): $(1) (--platform=$(ARCH)$(if $(PULL_POLICY), $(PULL_POLICY),))"
+	$(CONTAINER_TOOL) pull --platform=$(ARCH) $(PULL_POLICY) $(1)
+	@echo "Successfully pulled $(2): $(1)"
+endef
+
+# Retag: $(call retag_image,IMAGE_STEM,DESCRIPTION) — tags REGISTRY/STEM:VERSION -> NEW_REGISTRY/STEM:NEW_VERSION
+# Requires NEW_REGISTRY and NEW_VERSION to be set.
+define retag_image
+	@[ -n "$(NEW_REGISTRY)" ] && [ -n "$(NEW_VERSION)" ] || (echo "Error: NEW_REGISTRY and NEW_VERSION must be set for retag targets" && exit 1)
+	@echo "Retagging $(2): $(REGISTRY)/$(1):$(VERSION) -> $(NEW_REGISTRY)/$(1):$(NEW_VERSION)"
+	$(CONTAINER_TOOL) tag $(REGISTRY)/$(1):$(VERSION) $(NEW_REGISTRY)/$(1):$(NEW_VERSION)
+	@echo "Successfully retagged $(2)"
 endef
 
 # Generic function to get external host for a service
@@ -573,6 +617,72 @@ push-mock-servicenow-image:
 .PHONY: push-promptguard-image
 push-promptguard-image:
 	$(call push_image,$(PROMPTGUARD_IMG) $(PUSH_EXTRA_AGRS),PromptGuard service image)
+
+# Pull images at REGISTRY/VERSION with --platform=$(ARCH)
+.PHONY: pull-all-images
+pull-all-images: pull-request-mgr-image pull-agent-service-image pull-integration-dispatcher-image pull-mcp-snow-image pull-mock-eventing-image pull-mock-servicenow-image pull-promptguard-image
+	@echo "All images pulled successfully!"
+
+.PHONY: pull-request-mgr-image
+pull-request-mgr-image:
+	$(call pull_image,$(REQUEST_MGR_IMG),request manager image)
+
+.PHONY: pull-agent-service-image
+pull-agent-service-image:
+	$(call pull_image,$(AGENT_SERVICE_IMG),agent service image)
+
+.PHONY: pull-integration-dispatcher-image
+pull-integration-dispatcher-image:
+	$(call pull_image,$(INTEGRATION_DISPATCHER_IMG),integration dispatcher image)
+
+.PHONY: pull-mcp-snow-image
+pull-mcp-snow-image:
+	$(call pull_image,$(MCP_SNOW_IMG),snow MCP image)
+
+.PHONY: pull-mock-eventing-image
+pull-mock-eventing-image:
+	$(call pull_image,$(MOCK_EVENTING_IMG),mock eventing service image)
+
+.PHONY: pull-mock-servicenow-image
+pull-mock-servicenow-image:
+	$(call pull_image,$(MOCK_SERVICENOW_IMG),mock ServiceNow server image)
+
+.PHONY: pull-promptguard-image
+pull-promptguard-image:
+	$(call pull_image,$(PROMPTGUARD_IMG),PromptGuard service image)
+
+# Retag images from REGISTRY/VERSION to NEW_REGISTRY/NEW_VERSION (both NEW_* must be set)
+.PHONY: retag-all-images
+retag-all-images: retag-request-mgr-image retag-agent-service-image retag-integration-dispatcher-image retag-mcp-snow-image retag-mock-eventing-image retag-mock-servicenow-image retag-promptguard-image
+	@echo "All images retagged to $(NEW_REGISTRY)/*:$(NEW_VERSION)"
+
+.PHONY: retag-request-mgr-image
+retag-request-mgr-image: pull-request-mgr-image
+	$(call retag_image,self-service-agent-request-manager,request manager image)
+
+.PHONY: retag-agent-service-image
+retag-agent-service-image: pull-agent-service-image
+	$(call retag_image,self-service-agent-service,agent service image)
+
+.PHONY: retag-integration-dispatcher-image
+retag-integration-dispatcher-image: pull-integration-dispatcher-image
+	$(call retag_image,self-service-agent-integration-dispatcher,integration dispatcher image)
+
+.PHONY: retag-mcp-snow-image
+retag-mcp-snow-image: pull-mcp-snow-image
+	$(call retag_image,self-service-agent-snow-mcp,snow MCP image)
+
+.PHONY: retag-mock-eventing-image
+retag-mock-eventing-image: pull-mock-eventing-image
+	$(call retag_image,self-service-agent-mock-eventing,mock eventing service image)
+
+.PHONY: retag-mock-servicenow-image
+retag-mock-servicenow-image: pull-mock-servicenow-image
+	$(call retag_image,self-service-agent-mock-servicenow,mock ServiceNow server image)
+
+.PHONY: retag-promptguard-image
+retag-promptguard-image: pull-promptguard-image
+	$(call retag_image,self-service-agent-promptguard,PromptGuard service image)
 
 # Code quality
 .PHONY: lint

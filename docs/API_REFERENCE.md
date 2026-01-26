@@ -302,6 +302,137 @@ curl -X POST https://your-request-manager/api/v1/requests/web \
   }'
 ```
 
+### GET /api/v1/conversations
+
+Retrieve conversations for review, audit, and quality assurance purposes.
+
+**Authentication**: None. No headers required (matches generic endpoint).
+
+**Query Parameters**:
+- `session_id` (optional, string) - Get specific session's conversation
+- `start_date` (optional, string) - ISO 8601 datetime (e.g., `2026-01-01T00:00:00Z`)
+- `end_date` (optional, string) - ISO 8601 datetime
+- `user_id` (optional, string) - UUID or email address to filter by user
+- `user_email` (optional, string) - Email address to filter by user (alternative to user_id)
+- `integration_type` (optional, string) - Filter by channel where the conversation started (session record).
+- `integration_types` (optional, list of strings) - Only include sessions that used at least one of these channels; returned conversations are full. E.g. `?integration_types=CLI&integration_types=SLACK`.
+- `agent_id` (optional, string) - Only include sessions that used this agent at least once; returned conversations are full (routing + specialist + etc.). E.g. `laptop-refresh`.
+- `limit` (optional, integer, default: 100, max: 1000) - Number of results
+- `offset` (optional, integer, default: 0) - Pagination offset
+- `random` (optional, boolean, default: false) - Random sampling instead of ordered
+- `include_messages` (optional, boolean, default: true) - Include full conversation messages
+
+**Response**:
+```json
+{
+  "sessions": [
+    {
+      "integration_type": "CLI",
+      "integration_types": ["CLI"],
+      "session_id": "uuid",
+      "user_id": "uuid",
+      "user_email": "user@example.com",
+      "status": "ACTIVE",
+      "created_at": "2026-01-26T10:00:00Z",
+      "last_request_at": "2026-01-26T10:05:00Z",
+      "total_requests": 5,
+      "current_agent_id": "laptop-refresh",
+      "current_thread_id": "langgraph-thread-id",
+      "conversation": [
+        {
+          "request_id": "uuid",
+          "timestamp": "2026-01-26T10:00:00Z",
+          "integration_type": "CLI",
+          "user_message": "hi",
+          "agent_response": "Hello! I'm the routing agent...",
+          "agent_id": "routing-agent",
+          "thread_id": "langgraph-thread-id",
+          "thread_id_source": "metadata",
+          "processing_time_ms": 1234,
+          "completed_at": "2026-01-26T10:00:01Z"
+        }
+      ]
+    }
+  ],
+  "count": 10,
+  "total": 150,
+  "limit": 100,
+  "offset": 0
+}
+```
+
+- `integration_type`: Per session, channel where the conversation started (session record).
+- `integration_types`: Per session, sorted list of channels used in that session (from messages; when `include_messages=false`, derived from the session record). Single-channel sessions have one element; multi-channel sessions have multiple (e.g. `["CLI", "SLACK"]`).
+- Each conversation item includes `integration_type` (channel for that message).
+
+**Examples**:
+
+Get random sample of conversations:
+```bash
+curl -X GET "https://your-request-manager/api/v1/conversations?random=true&limit=10&start_date=2026-01-01T00:00:00Z&end_date=2026-01-26T23:59:59Z"
+```
+
+Get conversations for specific user by email:
+```bash
+curl -X GET "https://your-request-manager/api/v1/conversations?user_email=user@example.com&start_date=2026-01-01T00:00:00Z"
+```
+
+Get conversations for specific user by UUID:
+```bash
+curl -X GET "https://your-request-manager/api/v1/conversations?user_id=550e8400-e29b-41d4-a716-446655440000"
+```
+
+Get specific session conversation:
+```bash
+curl -X GET "https://your-request-manager/api/v1/conversations?session_id=session-uuid&include_messages=true"
+```
+
+Get conversations that started on CLI (without full messages for faster listing):
+```bash
+curl -X GET "https://your-request-manager/api/v1/conversations?integration_type=CLI&limit=50&include_messages=false"
+```
+
+Get conversations that used at least one of several channels (full conversation):
+```bash
+curl -X GET "https://your-request-manager/api/v1/conversations?integration_types=CLI&integration_types=SLACK"
+```
+
+Get conversations that used a given agent (full conversation, including routing):
+```bash
+curl -X GET "https://your-request-manager/api/v1/conversations?agent_id=laptop-refresh&start_date=2026-01-01T00:00:00Z"
+```
+
+**Error Responses**:
+
+400 Bad Request (invalid `start_date` or `end_date` format):
+```json
+{
+  "detail": "Invalid start_date format. Use ISO 8601 (e.g., 2026-01-01T00:00:00Z)"
+}
+```
+(The same pattern is used for invalid `end_date`.)
+
+400 Bad Request (invalid integration type):
+```json
+{
+  "detail": "Invalid integration_type: INVALID. Valid values: CLI, WEB, SLACK, ..."
+}
+```
+
+400 Bad Request (invalid integration_types value):
+```json
+{
+  "detail": "Invalid integration_types value: INVALID. Valid values: CLI, WEB, SLACK, ..."
+}
+```
+
+**Notes**:
+- Each session has `integration_type` (channel where the conversation started) and `integration_types` (channels used in that session). Each conversation item has `integration_type` (channel for that message).
+- Thread IDs are extracted from `response_metadata` when available, otherwise fall back to session's `current_thread_id`
+- The `thread_id_source` field indicates whether the thread_id came from `metadata` or `session`
+- For performance, set `include_messages=false` when you only need session metadata (then `integration_types` is derived from the session's single type).
+- Random sampling uses PostgreSQL's `random()` function for efficient sampling
+
 ### POST /api/v1/events/cloudevents
 
 Handle incoming CloudEvents from Integration Dispatcher and Agent Service.
