@@ -210,6 +210,16 @@ export VERSION=1.0.0
 make build-all-images
 ```
 
+**Troubleshooting QEMU issues on Mac M1/M2/M3:**
+If you encounter QEMU segmentation faults when building Linux AMD64 containers on Apple Silicon, use the `USE_PIP_INSTALL` workaround:
+
+```bash
+# Use pip install method instead of uv sync (workaround for QEMU issues)
+make build-all-images USE_PIP_INSTALL=true
+```
+
+This workaround uses `pip install` from `requirements.txt` instead of `uv sync`, which can avoid QEMU emulation issues when cross-compiling for Linux on Apple Silicon. The default `uv sync` method is faster and more reliable on native Linux/CI environments.
+
 #### Pushing Container Images
 
 **Push all images:**

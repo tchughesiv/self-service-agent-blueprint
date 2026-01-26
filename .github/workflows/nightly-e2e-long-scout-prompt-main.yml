@@ -42,8 +42,8 @@ jobs:
       - name: Setup uv
         uses: astral-sh/setup-uv@v6
         with:
-          version: "0.6.17"
-          python-version: "3.12"
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install Local Dependencies
         shell: bash

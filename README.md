@@ -303,7 +303,10 @@ can be used to deploy the required meta-llama/Meta-Llama-3-70B model. It lists t
 
 **Local Tools:**
 * [Python 3.12+](https://www.python.org/downloads/)
-* [uv](https://github.com/astral-sh/uv) - Fast Python package installer
+* [uv](https://github.com/astral-sh/uv) - Fast Python package installer (version 0.8.9 required to match CI)
+  * Install specific version: `curl -LsSf https://astral.sh/uv/0.8.9/install.sh | sh`
+  * Update to latest: `uv self update` (may install newer version)
+  * Check version: `make check-uv-version`
 * [Podman](https://podman.io/getting-started/installation) - Container runtime for building images
 * [Helm](https://helm.sh/docs/intro/install/) - Kubernetes package manager
 * [oc CLI](https://docs.openshift.com/container-platform/latest/cli_reference/openshift_cli/getting-started-cli.html) - OpenShift command line tool
@@ -436,6 +439,15 @@ make push-all-images
 ```
 
 **Expected outcome:** All images built and pushed to registry
+
+**Troubleshooting:** If you encounter QEMU segmentation faults when building Linux AMD64 containers on Mac M1/M2/M3, use the `USE_PIP_INSTALL` workaround:
+
+```bash
+# Use pip install method instead of uv sync (workaround for QEMU issues)
+make build-all-images USE_PIP_INSTALL=true
+```
+
+This workaround uses `pip install` from `requirements.txt` instead of `uv sync`, which can avoid QEMU emulation issues when cross-compiling for Linux on Apple Silicon. Note that the default `uv sync` method is faster and more reliable on native Linux/CI environments.
 
 #### Step 4: deploy with Helm
 

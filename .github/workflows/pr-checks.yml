@@ -10,7 +10,10 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  ASSET_MANAGER_DIR: asset-manager    
+  ASSET_MANAGER_DIR: asset-manager
+  # uv version must match Makefile UV_VERSION (currently 0.8.9)
+  # Update this when UV_VERSION in Makefile changes
+  UV_VERSION: "0.8.9"    
 
 jobs:
   code-quality-check:
@@ -29,8 +32,22 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
-          # Install a specific version of uv.
-          version: "0.8.9"
+          version: ${{ env.UV_VERSION }}
+
+      - name: Check uv version matches requirement
+        run: make check-uv-version
+
+      - name: Check lockfiles are up-to-date
+        run: |
+          echo "🔍 Checking uv.lock files are up-to-date..."
+          make check-lockfiles || {
+            echo "::error::Lockfiles are out of sync with pyproject.toml files"
+            echo "Run 'make update-lockfiles' locally to update lockfiles"
+            exit 1
+          }
+
+      - name: Check requirements.txt files are in sync with lockfiles
+        run: make check-requirements
 
       - name: Install the project
         run: make install-all
@@ -95,8 +112,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
-          # Install a specific version of uv.
-          version: "0.8.9"
+          version: ${{ env.UV_VERSION }}
 
       - name: Install the project
         run: make install-all

@@ -11,6 +11,12 @@ on:
   schedule:
     - cron: '0 2 * * 0'  # Run weekly on Sunday at 2 AM UTC
 
+env:
+  # uv version must match Makefile UV_VERSION (currently 0.8.9)
+  # Update this when UV_VERSION in Makefile changes
+  UV_VERSION: "0.8.9"
+  PYTHON_VERSION: "3.12"
+
 jobs:
   e2e-tests:
     name: Run e2e tests
@@ -42,8 +48,8 @@ jobs:
       - name: Setup uv
         uses: astral-sh/setup-uv@v6
         with:
-          version: "0.6.17"
-          python-version: "3.12"
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install Local Dependencies
         shell: bash

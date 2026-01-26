@@ -226,6 +226,7 @@ help:
 	@echo "  build-mock-servicenow-image          - Build the mock ServiceNow server container image (checks lockfiles first)"
 	@echo "  build-promptguard-image              - Build the PromptGuard service container image (checks lockfiles first)"
 	@echo "  build-request-mgr-image              - Build the request manager container image (checks lockfiles first)"
+	@echo "                                        💡 Tip: If you encounter QEMU issues on Mac M1/M2/M3, add USE_PIP_INSTALL=true"
 	@echo ""
 	@echo "Helm Commands:"
 	@echo "  helm-install-test                   - Install with mock eventing service (testing/development/CI - default)"
@@ -289,7 +290,10 @@ help:
 	@echo ""
 	@echo "Lockfile Management:"
 	@echo "  check-lockfiles                     - Check if all uv.lock files are up-to-date"
-	@echo "  update-lockfiles                    - Update all uv.lock files to match pyproject.toml"
+	@echo "  check-requirements                  - Check if all requirements.txt files exist and are in sync with uv.lock"
+	@echo "  check-uv-version                    - Check if local uv version matches CI requirement ($(UV_VERSION))"
+	@echo "  update-lockfiles                    - Update all uv.lock files and export requirements.txt for services with lockfiles"
+	@echo "  export-requirements                - Export requirements.txt for all services with uv.lock files"
 	@echo "  check-lockfile-<service>            - Check lockfile for specific service"
 	@echo "  update-lockfile-<service>           - Update lockfile for specific service"
 	@echo "  test-agent-service                  - Run tests for agent service"
@@ -338,6 +342,12 @@ help:
 	@echo "    MCP_SNOW_IMG                      - Full snow MCP image name (default: \$${REGISTRY}/self-service-agent-snow-mcp:\$${VERSION})"
 	@echo "    MOCK_SERVICENOW_IMG               - Full mock ServiceNow image name (default: \$${REGISTRY}/self-service-agent-mock-servicenow:\$${VERSION})"
 	@echo "    REQUEST_MGR_IMG                   - Full request manager image name (default: \$${REGISTRY}/self-service-agent-request-manager:\$${VERSION})"
+	@echo "    USE_PIP_INSTALL                   - Use pip install from requirements.txt instead of uv sync (default: false)"
+	@echo "                                        ⚠️  Troubleshooting: If you encounter QEMU segmentation faults when building"
+	@echo "                                        Linux AMD64 containers on Mac M1/M2/M3, set this to 'true' as a workaround."
+	@echo "                                        This is especially common when using QEMU emulation for cross-platform builds."
+	@echo "                                        Example: make build-agent-service-image USE_PIP_INSTALL=true"
+	@echo "                                        Note: Default (uv sync) is faster and more reliable on native Linux/CI environments."
 	@echo ""
 	@echo "  Model Configuration:"
 	@echo "    HF_TOKEN                          - Hugging Face Token (will prompt if not provided)"
@@ -386,32 +396,20 @@ help:
 	@echo "                                        Set to 'true' to enable: USE_STRUCTURED_OUTPUT=true"
 	@echo "                                        Uses Pydantic schema validation with retries (recommended for Gemini)"
 
-# Build function: $(call build_image,IMAGE_NAME,DESCRIPTION,CONTAINERFILE_PATH,BUILD_CONTEXT)
-define build_image
-	@echo "Building $(2): $(1)"
-	$(CONTAINER_TOOL) build -t $(1) --platform=$(ARCH) $(if $(3),-f $(3),) $(4)
-	@echo "Successfully built $(1)"
-endef
-
-# Template build function: $(call build_template_image,IMAGE_NAME,DESCRIPTION,SERVICE_NAME,MODULE_NAME,BUILD_CONTEXT)
+# Template build function: $(call build_template_image,IMAGE_NAME,DESCRIPTION,CONTAINERFILE,SERVICE_NAME,MODULE_NAME,BUILD_CONTEXT)
+# Optional: Set USE_PIP_INSTALL=true to use pip install from requirements.txt instead of uv sync
+# Optional: Set UV_VERSION=<version> to override uv version (default: $(UV_VERSION))
+# Example: make build-agent-service-image USE_PIP_INSTALL=true
+# Example: make build-agent-service-image UV_VERSION=0.9.27
 define build_template_image
 	@echo "Building $(2) using template: $(1)"
 	$(CONTAINER_TOOL) build -t $(1) --platform=$(ARCH) \
-		-f Containerfile.services-template \
-		--build-arg SERVICE_NAME=$(3) \
-		--build-arg MODULE_NAME=$(4) \
-		$(5)
-	@echo "Successfully built $(1)"
-endef
-
-# MCP template build function: $(call build_mcp_image,IMAGE_NAME,DESCRIPTION,SERVICE_NAME,MODULE_NAME)
-define build_mcp_image
-	@echo "Building $(2) using MCP template: $(1)"
-	$(CONTAINER_TOOL) build -t $(1) --platform=$(ARCH) \
-		-f Containerfile.mcp-template \
-		--build-arg SERVICE_NAME=$(3) \
-		--build-arg MODULE_NAME=$(4) \
-		.
+		-f $(3) \
+		--build-arg SERVICE_NAME=$(4) \
+		--build-arg MODULE_NAME=$(5) \
+		--build-arg USE_PIP_INSTALL=$(USE_PIP_INSTALL) \
+		--build-arg UV_VERSION=$(UV_VERSION) \
+		$(if $(6),$(6),.)
 	@echo "Successfully built $(1)"
 endef
 
@@ -475,6 +473,14 @@ define PRINT_INTEGRATION_DISPATCHER_URL
 	fi
 endef
 
+# Template-specific dependency checks
+# These check all common dependencies for each container template
+.PHONY: check-deps-services-template
+check-deps-services-template: check-lockfile-shared-models check-lockfile-shared-clients check-lockfile-agent-service check-lockfile-mock-employee-data
+
+.PHONY: check-deps-mcp-template
+check-deps-mcp-template: check-lockfile-shared-models
+
 # Build container images
 .PHONY: build-all-images
 build-all-images: build-request-mgr-image build-agent-service-image build-integration-dispatcher-image build-mcp-snow-image build-mock-eventing-image build-mock-servicenow-image build-promptguard-image
@@ -483,44 +489,32 @@ build-all-images: build-request-mgr-image build-agent-service-image build-integr
 
 
 .PHONY: build-request-mgr-image
-build-request-mgr-image: check-lockfile-request-manager check-lockfile-shared-models check-lockfile-shared-clients
-	$(call build_template_image,$(REQUEST_MGR_IMG),request manager image,request-manager,request_manager.main,.)
+build-request-mgr-image: check-lockfile-request-manager check-deps-services-template
+	$(call build_template_image,$(REQUEST_MGR_IMG),request manager image,Containerfile.services-template,request-manager,request_manager.main,.)
 
 .PHONY: build-agent-service-image
-build-agent-service-image: check-lockfile-agent-service check-lockfile-shared-models
-	$(call build_template_image,$(AGENT_SERVICE_IMG),agent service image,agent-service,agent_service.main,.)
+build-agent-service-image: check-lockfile-agent-service check-deps-services-template
+	$(call build_template_image,$(AGENT_SERVICE_IMG),agent service image,Containerfile.services-template,agent-service,agent_service.main,.)
 
 .PHONY: build-integration-dispatcher-image
-build-integration-dispatcher-image: check-lockfile-integration-dispatcher check-lockfile-shared-models check-lockfile-shared-clients
-	$(call build_template_image,$(INTEGRATION_DISPATCHER_IMG),integration dispatcher image,integration-dispatcher,integration_dispatcher.main,.)
+build-integration-dispatcher-image: check-lockfile-integration-dispatcher check-deps-services-template
+	$(call build_template_image,$(INTEGRATION_DISPATCHER_IMG),integration dispatcher image,Containerfile.services-template,integration-dispatcher,integration_dispatcher.main,.)
 
 .PHONY: build-promptguard-image
-build-promptguard-image: check-lockfile-promptguard check-lockfile-shared-models
-	$(call build_template_image,$(PROMPTGUARD_IMG),PromptGuard service image,promptguard-service,promptguard_service.server,.)
+build-promptguard-image: check-lockfile-promptguard check-deps-services-template
+	$(call build_template_image,$(PROMPTGUARD_IMG),PromptGuard service image,Containerfile.services-template,promptguard-service,promptguard_service.server,.)
 
 .PHONY: build-mcp-snow-image
-build-mcp-snow-image: check-lockfile-mcp-snow
-	$(call build_mcp_image,$(MCP_SNOW_IMG),snow MCP image,mcp-servers/snow,snow.server)
+build-mcp-snow-image: check-lockfile-mcp-snow check-deps-mcp-template
+	$(call build_template_image,$(MCP_SNOW_IMG),snow MCP image,Containerfile.mcp-template,mcp-servers/snow,snow.server,.)
 
 .PHONY: build-mock-eventing-image
-build-mock-eventing-image: check-lockfile-mock-eventing check-lockfile-shared-models
-	@echo "Building mock eventing service image using services template: $(MOCK_EVENTING_IMG)"
-	$(CONTAINER_TOOL) build -t $(MOCK_EVENTING_IMG) --platform=$(ARCH) \
-		-f Containerfile.services-template \
-		--build-arg SERVICE_NAME=mock-eventing-service \
-		--build-arg MODULE_NAME=mock_eventing_service.main \
-		.
-	@echo "Successfully built mock eventing service image: $(MOCK_EVENTING_IMG)"
+build-mock-eventing-image: check-lockfile-mock-eventing check-deps-services-template
+	$(call build_template_image,$(MOCK_EVENTING_IMG),mock eventing service image,Containerfile.services-template,mock-eventing-service,mock_eventing_service.main,.)
 
 .PHONY: build-mock-servicenow-image
-build-mock-servicenow-image: check-lockfile-mock-servicenow check-lockfile-mock-employee-data
-	@echo "Building mock ServiceNow server image using services template: $(MOCK_SERVICENOW_IMG)"
-	$(CONTAINER_TOOL) build -t $(MOCK_SERVICENOW_IMG) --platform=$(ARCH) \
-		-f Containerfile.services-template \
-		--build-arg SERVICE_NAME=mock-service-now \
-		--build-arg MODULE_NAME=mock_servicenow.server \
-		.
-	@echo "Successfully built mock ServiceNow server image: $(MOCK_SERVICENOW_IMG)"
+build-mock-servicenow-image: check-lockfile-mock-servicenow check-deps-services-template
+	$(call build_template_image,$(MOCK_SERVICENOW_IMG),mock ServiceNow server image,Containerfile.services-template,mock-service-now,mock_servicenow.server,.)
 
 # Push container images
 .PHONY: push-all-images
@@ -855,6 +849,10 @@ define update_lockfile
 	@if [ -d "$(1)" ]; then \
 		cd "$(1)" && uv lock; \
 		echo "✅ $(1) lockfile updated"; \
+		if [ -f "$(1)/uv.lock" ]; then \
+			cd "$(1)" && uv export --format requirements-txt --no-dev -o requirements.txt && \
+			echo "✅ $(1) requirements.txt exported"; \
+		fi; \
 	else \
 		echo "⚠️  $(1) directory not found, skipping..."; \
 	fi
@@ -1001,6 +999,127 @@ update-lockfile-promptguard:
 
 update-lockfile-servicenow-bootstrap:
 	$(call update_lockfile,scripts/servicenow-bootstrap)
+
+# Export requirements.txt for containerized services
+define export_requirements
+	@echo "📦 Exporting requirements.txt for $(1)..."
+	@if [ -d "$(1)" ] && [ -f "$(1)/uv.lock" ]; then \
+		cd "$(1)" && uv export --format requirements-txt --no-dev -o requirements.txt; \
+		echo "✅ $(1) requirements.txt exported"; \
+	else \
+		echo "⚠️  $(1) directory or lockfile not found, skipping..."; \
+	fi
+endef
+
+# Requirements.txt management
+# Only export/check requirements.txt for directories that are built into containers AND have uv.lock files:
+# - Services: agent-service, integration-dispatcher, promptguard-service, request-manager, mock-eventing-service, mock-service-now
+# - MCP servers: mcp-servers/snow
+# - Dependencies copied into containers: shared-models, shared-clients, mock-employee-data
+# We exclude: evaluations, scripts/servicenow-bootstrap, root directory, tracing-config (no uv.lock)
+# IMPORTANT: uv version must match CI (currently 0.8.9) to ensure consistent exports
+# CI uses: astral-sh/setup-uv@v5 with version: "0.8.9"
+# To install locally: curl -LsSf https://astral.sh/uv/0.8.9/install.sh | sh
+# Or update: uv self update (may install newer version - check with make check-uv-version)
+REQUIREMENTS_DIRS := agent-service integration-dispatcher promptguard-service request-manager mock-eventing-service mock-service-now mcp-servers/snow shared-models shared-clients mock-employee-data
+# UV_VERSION: uv version for CI validation and container builds (default: 0.8.9, can be overridden)
+UV_VERSION ?= 0.8.9
+EXTRACT_TORCH_HASH_SCRIPT := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))scripts/extract_torch_hash.py)
+UPDATE_TORCH_HASH_SCRIPT := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))scripts/update_torch_hash.py)
+
+# Function to add/update torch hash in requirements.txt
+# Always replaces the hash to ensure it's correct (even if one already exists)
+# Handles both formats: with backslash continuation and without, with or without existing hash
+# Usage: $(call add_torch_hash,requirements_file_path)
+# Note: We use Python 3.12 (312) since that's what the containers use, not the local Python version
+define add_torch_hash
+	if [ -f "uv.lock" ] && grep -q "^torch==.*+cpu" $(1) 2>/dev/null; then \
+		TORCH_HASH=$$(python3 "$(EXTRACT_TORCH_HASH_SCRIPT)" "uv.lock" "312" 2>/dev/null) && \
+		if [ -n "$$TORCH_HASH" ]; then \
+			python3 "$(UPDATE_TORCH_HASH_SCRIPT)" "$(1)" "$$TORCH_HASH" > /dev/null 2>&1 && \
+			echo "  ✅ Updated hash for torch from lockfile"; \
+		fi; \
+	fi
+endef
+
+.PHONY: check-uv-version
+check-uv-version:
+	@echo "🔍 Checking uv version..."
+	@LOCAL_UV_VERSION=$$(uv --version 2>/dev/null | sed 's/uv //' | sed 's/ .*//' || echo ""); \
+	if [ -z "$$LOCAL_UV_VERSION" ]; then \
+		echo "❌ uv is not installed. Install with: curl -LsSf https://astral.sh/uv/$(UV_VERSION)/install.sh | sh"; \
+		exit 1; \
+	fi; \
+	if [ "$$LOCAL_UV_VERSION" != "$(UV_VERSION)" ]; then \
+		echo "⚠️  Warning: uv version is $$LOCAL_UV_VERSION, but CI uses $(UV_VERSION)"; \
+		echo "   Different versions may produce different exports, causing CI failures"; \
+		echo "   Update with: uv self update"; \
+		echo "   Or install specific version: curl -LsSf https://astral.sh/uv/$(UV_VERSION)/install.sh | sh"; \
+	else \
+		echo "✅ uv version $$LOCAL_UV_VERSION matches CI requirement"; \
+	fi
+
+
+.PHONY: export-requirements
+export-requirements: check-uv-version
+	@echo "📦 Exporting requirements.txt for containerized services..."
+	@echo
+	@for dir in $(REQUIREMENTS_DIRS); do \
+		echo "📦 Exporting requirements.txt for $$dir..."; \
+		if cd "$$dir" 2>/dev/null; then \
+			uv export --format requirements-txt --no-dev -o requirements.txt > /dev/null 2>&1 && \
+			$(call add_torch_hash,requirements.txt) && \
+			echo "✅ $$dir requirements.txt exported"; \
+			cd - > /dev/null; \
+		else \
+			echo "⚠️  $$dir directory not found, skipping..."; \
+		fi; \
+		echo; \
+	done
+	@echo "🎉 All requirements.txt files exported successfully!"
+
+.PHONY: check-requirements
+check-requirements: check-uv-version
+	@echo "🔍 Checking requirements.txt files are in sync with uv.lock files..."
+	@echo
+	@MISSING=""; \
+	OUT_OF_SYNC=""; \
+	for dir in $(REQUIREMENTS_DIRS); do \
+		normalized_dir="$$dir"; \
+		req_file="$$dir/requirements.txt"; \
+		display_dir="$$dir"; \
+		echo "📦 Checking $$display_dir..."; \
+		if [ ! -f "$$req_file" ]; then \
+			echo "❌ $$req_file is missing"; \
+			MISSING="$$MISSING $$display_dir"; \
+		else \
+			cd "$$normalized_dir" && \
+			uv export --format requirements-txt --no-dev -o /tmp/current-requirements-$$$$.txt > /dev/null 2>&1 && \
+			$(call add_torch_hash,/tmp/current-requirements-$$$$.txt) && \
+			grep -v '^#' requirements.txt > /tmp/existing-requirements-$$$$.txt && \
+			grep -v '^#' /tmp/current-requirements-$$$$.txt > /tmp/new-requirements-$$$$.txt && \
+			if ! diff -q /tmp/existing-requirements-$$$$.txt /tmp/new-requirements-$$$$.txt > /dev/null 2>&1; then \
+				echo "❌ $$req_file is out of sync with uv.lock"; \
+				OUT_OF_SYNC="$$OUT_OF_SYNC $$display_dir"; \
+			else \
+				echo "✅ $$req_file is in sync"; \
+			fi && \
+			rm -f /tmp/current-requirements-$$$$.txt /tmp/existing-requirements-$$$$.txt /tmp/new-requirements-$$$$.txt && \
+			cd - > /dev/null 2>&1; \
+		fi; \
+		echo; \
+	done; \
+	if [ -n "$$MISSING" ]; then \
+		echo "❌ Missing requirements.txt files:$$MISSING"; \
+		echo "Run 'make export-requirements' to generate missing requirements.txt files"; \
+		exit 1; \
+	fi; \
+	if [ -n "$$OUT_OF_SYNC" ]; then \
+		echo "❌ Out-of-sync requirements.txt files:$$OUT_OF_SYNC"; \
+		echo "Run 'make export-requirements' to regenerate requirements.txt files"; \
+		exit 1; \
+	fi; \
+	echo "✅ All requirements.txt files are in sync with their uv.lock files"
 
 
 .PHONY: test-shared-models
