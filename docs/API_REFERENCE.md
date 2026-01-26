@@ -302,6 +302,142 @@ curl -X POST https://your-request-manager/api/v1/requests/web \
   }'
 ```
 
+### GET /api/v1/conversations
+
+Retrieve conversations for review, audit, and quality assurance purposes.
+
+**Authentication**: Required (Admin only - JWT with admin groups or audit API key)
+
+**Access Control**: 
+- Only users with admin groups (`admin`, `audit`, `support`, `review`) can access
+- Or users with audit API keys configured in `AUDIT_API_KEYS` environment variable
+- Regular users **cannot** access their own conversations
+
+**Query Parameters**:
+- `session_id` (optional, string) - Get specific session's conversation
+- `start_date` (optional, string) - ISO 8601 datetime (e.g., `2026-01-01T00:00:00Z`)
+- `end_date` (optional, string) - ISO 8601 datetime
+- `user_id` (optional, string) - UUID or email address to filter by user
+- `user_email` (optional, string) - Email address to filter by user (alternative to user_id)
+- `integration_type` (optional, string) - Filter by integration type (CLI, WEB, SLACK, etc.)
+- `agent_id` (optional, string) - Filter by agent ID
+- `limit` (optional, integer, default: 100, max: 1000) - Number of results
+- `offset` (optional, integer, default: 0) - Pagination offset
+- `random` (optional, boolean, default: false) - Random sampling instead of ordered
+- `include_messages` (optional, boolean, default: true) - Include full conversation messages
+
+**Response**:
+```json
+{
+  "sessions": [
+    {
+      "session_id": "uuid",
+      "user_id": "uuid",
+      "user_email": "user@example.com",
+      "integration_type": "CLI",
+      "status": "ACTIVE",
+      "created_at": "2026-01-26T10:00:00Z",
+      "last_request_at": "2026-01-26T10:05:00Z",
+      "total_requests": 5,
+      "current_agent_id": "laptop-refresh",
+      "current_thread_id": "langgraph-thread-id",
+      "conversation": [
+        {
+          "request_id": "uuid",
+          "timestamp": "2026-01-26T10:00:00Z",
+          "user_message": "hi",
+          "agent_response": "Hello! I'm the routing agent...",
+          "agent_id": "routing-agent",
+          "thread_id": "langgraph-thread-id",
+          "thread_id_source": "metadata",
+          "processing_time_ms": 1234,
+          "completed_at": "2026-01-26T10:00:01Z"
+        }
+      ]
+    }
+  ],
+  "count": 10,
+  "total": 150,
+  "limit": 100,
+  "offset": 0
+}
+```
+
+**Examples**:
+
+Get random sample of conversations for audit:
+```bash
+curl -X GET "https://your-request-manager/api/v1/conversations?random=true&limit=10&start_date=2026-01-01T00:00:00Z&end_date=2026-01-26T23:59:59Z" \
+  -H "Authorization: Bearer admin-token"
+```
+
+Get conversations for specific user by email:
+```bash
+curl -X GET "https://your-request-manager/api/v1/conversations?user_email=user@example.com&start_date=2026-01-01T00:00:00Z" \
+  -H "Authorization: Bearer admin-token"
+```
+
+Get conversations for specific user by UUID:
+```bash
+curl -X GET "https://your-request-manager/api/v1/conversations?user_id=550e8400-e29b-41d4-a716-446655440000" \
+  -H "Authorization: Bearer admin-token"
+```
+
+Get specific session conversation:
+```bash
+curl -X GET "https://your-request-manager/api/v1/conversations?session_id=session-uuid&include_messages=true" \
+  -H "Authorization: Bearer admin-token"
+```
+
+Get CLI conversations only (without full messages for faster listing):
+```bash
+curl -X GET "https://your-request-manager/api/v1/conversations?integration_type=CLI&limit=50&include_messages=false" \
+  -H "Authorization: Bearer admin-token"
+```
+
+Get conversations filtered by agent:
+```bash
+curl -X GET "https://your-request-manager/api/v1/conversations?agent_id=laptop-refresh&start_date=2026-01-01T00:00:00Z" \
+  -H "Authorization: Bearer admin-token"
+```
+
+**Error Responses**:
+
+401 Unauthorized:
+```json
+{
+  "detail": "Authentication required"
+}
+```
+
+403 Forbidden:
+```json
+{
+  "detail": "Admin access required for conversation review"
+}
+```
+
+400 Bad Request (invalid date format):
+```json
+{
+  "detail": "Invalid start_date format. Use ISO 8601 (e.g., 2026-01-01T00:00:00Z)"
+}
+```
+
+400 Bad Request (invalid integration type):
+```json
+{
+  "detail": "Invalid integration_type: INVALID. Valid values: CLI, WEB, SLACK, ..."
+}
+```
+
+**Notes**:
+- Thread IDs are extracted from `response_metadata` when available, otherwise fall back to session's `current_thread_id`
+- The `thread_id_source` field indicates whether the thread_id came from `metadata` or `session`
+- For performance, set `include_messages=false` when you only need session metadata
+- Random sampling uses PostgreSQL's `random()` function for efficient sampling
+- All access attempts are logged for audit purposes
+
 ### POST /api/v1/events/cloudevents
 
 Handle incoming CloudEvents from Integration Dispatcher and Agent Service.
