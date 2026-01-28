@@ -306,12 +306,7 @@ curl -X POST https://your-request-manager/api/v1/requests/web \
 
 Retrieve conversations for review, audit, and quality assurance purposes.
 
-**Authentication**: Required (Admin only - JWT with admin groups or audit API key)
-
-**Access Control**: 
-- Only users with admin groups (`admin`, `audit`, `support`, `review`) can access
-- Or users with audit API keys configured in `AUDIT_API_KEYS` environment variable
-- Regular users **cannot** access their own conversations
+**Authentication**: Required (JWT or API Key)
 
 **Query Parameters**:
 - `session_id` (optional, string) - Get specific session's conversation
@@ -331,6 +326,7 @@ Retrieve conversations for review, audit, and quality assurance purposes.
 {
   "sessions": [
     {
+      "integration_types": ["CLI"],
       "session_id": "uuid",
       "user_id": "uuid",
       "user_email": "user@example.com",
@@ -345,6 +341,7 @@ Retrieve conversations for review, audit, and quality assurance purposes.
         {
           "request_id": "uuid",
           "timestamp": "2026-01-26T10:00:00Z",
+          "integration_type": "CLI",
           "user_message": "hi",
           "agent_response": "Hello! I'm the routing agent...",
           "agent_id": "routing-agent",
@@ -363,57 +360,53 @@ Retrieve conversations for review, audit, and quality assurance purposes.
 }
 ```
 
+- `integration_types`: Per session, sorted list of integration types used in that session's messages (e.g. `["CLI", "SLACK"]`).
+- Each conversation item includes `integration_type` (channel for that message).
+
 **Examples**:
 
-Get random sample of conversations for audit:
+Get random sample of conversations:
 ```bash
 curl -X GET "https://your-request-manager/api/v1/conversations?random=true&limit=10&start_date=2026-01-01T00:00:00Z&end_date=2026-01-26T23:59:59Z" \
-  -H "Authorization: Bearer admin-token"
+  -H "Authorization: Bearer your-token"
 ```
 
 Get conversations for specific user by email:
 ```bash
 curl -X GET "https://your-request-manager/api/v1/conversations?user_email=user@example.com&start_date=2026-01-01T00:00:00Z" \
-  -H "Authorization: Bearer admin-token"
+  -H "Authorization: Bearer your-token"
 ```
 
 Get conversations for specific user by UUID:
 ```bash
 curl -X GET "https://your-request-manager/api/v1/conversations?user_id=550e8400-e29b-41d4-a716-446655440000" \
-  -H "Authorization: Bearer admin-token"
+  -H "Authorization: Bearer your-token"
 ```
 
 Get specific session conversation:
 ```bash
 curl -X GET "https://your-request-manager/api/v1/conversations?session_id=session-uuid&include_messages=true" \
-  -H "Authorization: Bearer admin-token"
+  -H "Authorization: Bearer your-token"
 ```
 
 Get CLI conversations only (without full messages for faster listing):
 ```bash
 curl -X GET "https://your-request-manager/api/v1/conversations?integration_type=CLI&limit=50&include_messages=false" \
-  -H "Authorization: Bearer admin-token"
+  -H "Authorization: Bearer your-token"
 ```
 
 Get conversations filtered by agent:
 ```bash
 curl -X GET "https://your-request-manager/api/v1/conversations?agent_id=laptop-refresh&start_date=2026-01-01T00:00:00Z" \
-  -H "Authorization: Bearer admin-token"
+  -H "Authorization: Bearer your-token"
 ```
 
 **Error Responses**:
 
-401 Unauthorized:
+401 Unauthorized (no or invalid auth):
 ```json
 {
   "detail": "Authentication required"
-}
-```
-
-403 Forbidden:
-```json
-{
-  "detail": "Admin access required for conversation review"
 }
 ```
 
@@ -432,11 +425,11 @@ curl -X GET "https://your-request-manager/api/v1/conversations?agent_id=laptop-r
 ```
 
 **Notes**:
+- `integration_types` on each session is the cumulative list of channels used in that session's messages; each conversation item has `integration_type` for that message.
 - Thread IDs are extracted from `response_metadata` when available, otherwise fall back to session's `current_thread_id`
 - The `thread_id_source` field indicates whether the thread_id came from `metadata` or `session`
-- For performance, set `include_messages=false` when you only need session metadata
+- For performance, set `include_messages=false` when you only need session metadata (then `integration_types` is derived from the session's single type).
 - Random sampling uses PostgreSQL's `random()` function for efficient sampling
-- All access attempts are logged for audit purposes
 
 ### POST /api/v1/events/cloudevents
 
