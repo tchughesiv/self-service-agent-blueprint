@@ -73,16 +73,14 @@ async def main():
 
 ### Get conversations
 
+No auth required (matches generic endpoint). Optional filters: `user_email`, `user_id`, `session_id`, `start_date`, `end_date`, `integration_type`, `agent_id`, plus `limit`, `offset`, `include_messages`, `random`.
+
 ```python
 from shared_clients import RequestManagerClient
 
 async def main():
-    client = RequestManagerClient(
-        request_manager_url="http://localhost:8080",
-        user_id="user123"
-    )
+    client = RequestManagerClient(request_manager_url="http://localhost:8080")
 
-    # By user email (same auth as other calls: JWT, API key, or legacy headers)
     result = await client.get_conversations(user_email="user@example.com")
     print(result["sessions"])
     print(result["count"], result["total"])

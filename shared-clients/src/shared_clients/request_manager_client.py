@@ -36,7 +36,7 @@ class RequestManagerClient:
 
         Args:
             request_manager_url: URL of the Request Manager service
-            user_id: User ID for authentication (generates UUID if not provided)
+            user_id: User ID for requests (generates UUID if not provided); sent as x-user-id
             timeout: HTTP client timeout in seconds
         """
         self.request_manager_url = request_manager_url or os.getenv(
@@ -98,7 +98,6 @@ class RequestManagerClient:
         }
 
         headers = {"x-user-id": self.user_id}
-
         response = await self.client.post(
             f"{self.request_manager_url}/api/v1/requests/{endpoint}",
             json=payload,
@@ -176,11 +175,10 @@ class RequestManagerClient:
             params["integration_type"] = integration_type
         if agent_id is not None:
             params["agent_id"] = agent_id
-        headers = {"x-user-id": self.user_id}
+        # No auth required for conversations (matches generic)
         response = await self.client.get(
             f"{self.request_manager_url}/api/v1/conversations",
             params=params,
-            headers=headers,
         )
         response.raise_for_status()
         result = response.json()
