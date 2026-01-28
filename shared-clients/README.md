@@ -8,9 +8,8 @@ This package provides reusable client libraries for interacting with the self-se
 
 Base client for interacting with the Request Manager service. Provides methods for:
 
-- Sending requests to various endpoints
-- Getting request status
-- Updating sessions
+- Sending requests to various endpoints (web, cli, tool, generic)
+- Getting conversations (filter by user_email, session_id, etc.)
 - Managing HTTP connections
 
 ### CLIChatClient
@@ -69,6 +68,25 @@ async def main():
     )
 
     print(response)
+    await client.close()
+```
+
+### Get conversations
+
+```python
+from shared_clients import RequestManagerClient
+
+async def main():
+    client = RequestManagerClient(
+        request_manager_url="http://localhost:8080",
+        user_id="user123"
+    )
+
+    # By user email (same auth as other calls: JWT, API key, or legacy headers)
+    result = await client.get_conversations(user_email="user@example.com")
+    print(result["sessions"])
+    print(result["count"], result["total"])
+
     await client.close()
 ```
 

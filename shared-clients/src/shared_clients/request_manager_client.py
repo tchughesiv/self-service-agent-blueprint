@@ -122,22 +122,64 @@ class RequestManagerClient:
                 "raw_response": response.text,
             }
 
-    async def get_request_status(self, request_id: str) -> Dict[str, Any]:
+    async def get_conversations(
+        self,
+        *,
+        session_id: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        user_id: Optional[str] = None,
+        user_email: Optional[str] = None,
+        integration_type: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0,
+        random: bool = False,
+        include_messages: bool = True,
+    ) -> Dict[str, Any]:
         """
-        Get the status of a specific request.
+        Get conversations with optional filters. Uses same auth as other client calls.
 
         Args:
-            request_id: The request ID to check
+            session_id: Get specific session's conversation
+            start_date: ISO 8601 datetime (e.g. 2026-01-01T00:00:00Z)
+            end_date: ISO 8601 datetime
+            user_id: UUID or email to filter by user
+            user_email: Email to filter by user (alternative to user_id)
+            integration_type: Filter by integration (CLI, WEB, SLACK, etc.)
+            agent_id: Filter by agent ID
+            limit: Number of results (default 100, max 1000)
+            offset: Pagination offset
+            random: Random sampling
+            include_messages: Include full conversation messages (default True)
 
         Returns:
-            Request status dictionary
-
-        Raises:
-            httpx.HTTPError: If the HTTP request fails
+            Dict with keys: sessions, count, total, limit, offset
         """
+        params: Dict[str, Union[str, int, bool]] = {
+            "limit": limit,
+            "offset": offset,
+            "random": random,
+            "include_messages": include_messages,
+        }
+        if session_id is not None:
+            params["session_id"] = session_id
+        if start_date is not None:
+            params["start_date"] = start_date
+        if end_date is not None:
+            params["end_date"] = end_date
+        if user_id is not None:
+            params["user_id"] = user_id
+        if user_email is not None:
+            params["user_email"] = user_email
+        if integration_type is not None:
+            params["integration_type"] = integration_type
+        if agent_id is not None:
+            params["agent_id"] = agent_id
         headers = {"x-user-id": self.user_id}
         response = await self.client.get(
-            f"{self.request_manager_url}/api/v1/requests/{request_id}",
+            f"{self.request_manager_url}/api/v1/conversations",
+            params=params,
             headers=headers,
         )
         response.raise_for_status()
