@@ -24,9 +24,29 @@ class TestConversationReviewEndpoint:
         app.dependency_overrides.clear()
 
     def test_get_conversations_no_auth(self) -> None:
-        """Test get_conversations endpoint without authentication."""
-        response = self.client.get("/api/v1/conversations")
-        assert response.status_code == 401 or response.status_code == 403
+        """Test get_conversations endpoint without authentication (no auth required, matches generic)."""
+        mock_session = MagicMock(spec=AsyncSession)
+        mock_count_result = MagicMock()
+        mock_count_result.scalar.return_value = 0
+        mock_sessions_result = MagicMock()
+        mock_sessions_result.scalars.return_value.all.return_value = []
+        mock_session.execute = AsyncMock(
+            side_effect=[mock_count_result, mock_sessions_result]
+        )
+
+        async def override_get_db() -> AsyncSession:
+            return mock_session
+
+        app.dependency_overrides[get_db_session_dependency] = override_get_db
+
+        try:
+            response = self.client.get("/api/v1/conversations")
+            assert response.status_code == 200
+            data = response.json()
+            assert "sessions" in data
+            assert "count" in data
+        finally:
+            app.dependency_overrides.pop(get_db_session_dependency, None)
 
     def test_get_conversations_authenticated_user(self) -> None:
         """Test get_conversations endpoint with any authenticated user (no admin required)."""

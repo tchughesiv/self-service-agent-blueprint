@@ -306,7 +306,7 @@ curl -X POST https://your-request-manager/api/v1/requests/web \
 
 Retrieve conversations for review, audit, and quality assurance purposes.
 
-**Authentication**: Required (JWT or API Key)
+**Authentication**: None. No headers required (matches generic endpoint).
 
 **Query Parameters**:
 - `session_id` (optional, string) - Get specific session's conversation
@@ -367,48 +367,35 @@ Retrieve conversations for review, audit, and quality assurance purposes.
 
 Get random sample of conversations:
 ```bash
-curl -X GET "https://your-request-manager/api/v1/conversations?random=true&limit=10&start_date=2026-01-01T00:00:00Z&end_date=2026-01-26T23:59:59Z" \
-  -H "Authorization: Bearer your-token"
+curl -X GET "https://your-request-manager/api/v1/conversations?random=true&limit=10&start_date=2026-01-01T00:00:00Z&end_date=2026-01-26T23:59:59Z"
 ```
 
 Get conversations for specific user by email:
 ```bash
-curl -X GET "https://your-request-manager/api/v1/conversations?user_email=user@example.com&start_date=2026-01-01T00:00:00Z" \
-  -H "Authorization: Bearer your-token"
+curl -X GET "https://your-request-manager/api/v1/conversations?user_email=user@example.com&start_date=2026-01-01T00:00:00Z"
 ```
 
 Get conversations for specific user by UUID:
 ```bash
-curl -X GET "https://your-request-manager/api/v1/conversations?user_id=550e8400-e29b-41d4-a716-446655440000" \
-  -H "Authorization: Bearer your-token"
+curl -X GET "https://your-request-manager/api/v1/conversations?user_id=550e8400-e29b-41d4-a716-446655440000"
 ```
 
 Get specific session conversation:
 ```bash
-curl -X GET "https://your-request-manager/api/v1/conversations?session_id=session-uuid&include_messages=true" \
-  -H "Authorization: Bearer your-token"
+curl -X GET "https://your-request-manager/api/v1/conversations?session_id=session-uuid&include_messages=true"
 ```
 
 Get CLI conversations only (without full messages for faster listing):
 ```bash
-curl -X GET "https://your-request-manager/api/v1/conversations?integration_type=CLI&limit=50&include_messages=false" \
-  -H "Authorization: Bearer your-token"
+curl -X GET "https://your-request-manager/api/v1/conversations?integration_type=CLI&limit=50&include_messages=false"
 ```
 
 Get conversations filtered by agent:
 ```bash
-curl -X GET "https://your-request-manager/api/v1/conversations?agent_id=laptop-refresh&start_date=2026-01-01T00:00:00Z" \
-  -H "Authorization: Bearer your-token"
+curl -X GET "https://your-request-manager/api/v1/conversations?agent_id=laptop-refresh&start_date=2026-01-01T00:00:00Z"
 ```
 
 **Error Responses**:
-
-401 Unauthorized (no or invalid auth):
-```json
-{
-  "detail": "Authentication required"
-}
-```
 
 400 Bad Request (invalid date format):
 ```json

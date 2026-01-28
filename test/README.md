@@ -26,23 +26,21 @@ python test/chat-responses-request-mgr.py --user-id your-user-id --request-manag
 
 ## get-conversations-request-mgr.py
 
-Retrieves conversations from Request Manager (same auth and URL as the chat script). Output is JSON to stdout.
+Retrieves conversations from Request Manager. No auth required (matches generic). Output is JSON to stdout.
 
-- **Auth**: `--user-id` or env `USER_ID` / `AUTHORITATIVE_USER_ID` (who is calling the API).
-- **Filters** (all optional; `--filter-*` for API query params): `--filter-user-id`, `--filter-user-email`, `--filter-session-id`, `--filter-start-date`, `--filter-end-date`, `--filter-integration-type`, `--filter-agent-id`. Use one of `--filter-user-id` or `--filter-user-email` to restrict by user; omit to get all conversations the caller can see.
+- **Filters** (optional; same names as API): `--user-id`, `--user-email`, `--session-id`, `--start-date`, `--end-date`, `--integration-type`, `--agent-id`. Omit to get all conversations.
 - **Pagination/options**: `--limit`, `--offset`, `--no-messages`, `--random`.
 
 ```bash
-# Auth via env; no filter (all conversations)
-REQUEST_MANAGER_URL=http://localhost:8080 USER_ID=your-user-id \
+# No filter (all conversations)
 python test/get-conversations-request-mgr.py
 
 # Filter by email
-python test/get-conversations-request-mgr.py --user-id your-user-id --filter-user-email user@example.com
+python test/get-conversations-request-mgr.py --user-email user@example.com
 
 # Pod exec
 oc exec -it deploy/self-service-agent-request-manager -n NAMESPACE -- \
-  python /app/test/get-conversations-request-mgr.py --filter-user-email user@example.com
+  python /app/test/get-conversations-request-mgr.py --user-email user@example.com
 
-# More: --filter-user-id, --filter-session-id, --filter-start-date, --filter-end-date, --filter-integration-type, --filter-agent-id, --limit, --offset, --no-messages, --random
+# More: --user-id, --session-id, --start-date, --end-date, --integration-type, --agent-id, --limit, --offset, --no-messages, --random
 ```

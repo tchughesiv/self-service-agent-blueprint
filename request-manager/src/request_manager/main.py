@@ -1188,7 +1188,7 @@ async def get_conversations(
     current_user: Optional[Dict[str, Any]] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session_dependency),
 ) -> Dict[str, Any]:
-    """Get conversations with flexible filtering. Requires authentication.
+    """Get conversations with flexible filtering. No auth required (matches generic).
 
     Query Parameters:
         session_id: Get specific session's conversation
@@ -1203,10 +1203,6 @@ async def get_conversations(
         random: Random sampling instead of ordered (default: false)
         include_messages: Include full conversation messages (default: true)
     """
-    if not current_user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required"
-        )
     from shared_models.models import IntegrationType, RequestLog, RequestSession
     from shared_models.user_utils import (
         get_or_create_canonical_user,
@@ -1405,7 +1401,7 @@ async def get_conversations(
 
     logger.info(
         "Conversations retrieved",
-        admin_user=current_user.get("user_id"),
+        admin_user=(current_user or {}).get("user_id"),
         session_count=len(session_results),
         total=total,
         filters={
