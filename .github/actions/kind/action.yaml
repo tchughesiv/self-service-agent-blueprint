@@ -19,6 +19,10 @@ inputs:
     description: Number of replicas for scalable services
     required: false
     default: "1"
+  use_pip_install:
+    description: "Use pip install from requirements.txt instead of uv sync (default: false)"
+    required: false
+    default: "false"
 
 runs:
   using: composite
@@ -37,7 +41,7 @@ runs:
       shell: bash
 
     - name: Build local images
-      run: make build-all-images REGISTRY=localhost:5001
+      run: make build-all-images REGISTRY=localhost:5001 USE_PIP_INSTALL=${{inputs.use_pip_install}}
       shell: bash
 
     - name: Push local images to the local registry

@@ -2,12 +2,16 @@
 # Build args must be defined before first FROM
 ARG SERVICE_NAME
 ARG MODULE_NAME
+ARG USE_PIP_INSTALL=false
+ARG UV_VERSION=0.8.9
 
 # Builder stage
 FROM registry.access.redhat.com/ubi9/python-312:latest as builder
 
 USER root
-RUN pip3 install --no-cache-dir uv
+# Install uv version (defaults to 0.8.9 to match CI, can be overridden via --build-arg UV_VERSION=<version>)
+ARG UV_VERSION
+RUN pip3 install --no-cache-dir uv==${UV_VERSION}
 
 WORKDIR /app
 
@@ -15,10 +19,27 @@ COPY shared-models ./shared-models/
 COPY tracing-config/ ./tracing-config
 
 ARG SERVICE_NAME
+ARG USE_PIP_INSTALL
 WORKDIR /app/${SERVICE_NAME}
 
 COPY ${SERVICE_NAME}/ .
-RUN uv sync --frozen --no-cache
+
+# Conditional dependency installation: USE_PIP_INSTALL=true uses pip (workaround for QEMU on Mac M1)
+# Default: uv sync (faster). When USE_PIP_INSTALL=true: pip install from requirements.txt with hash verification
+RUN if [ "$USE_PIP_INSTALL" = "true" ]; then \
+        # Install editable packages first (without --require-hashes), then external packages with hash verification
+        python3 -m venv .venv && \
+        grep -E "^(-e |\.\./)" requirements.txt | grep -v "^#" > /tmp/editable-requirements.txt 2>/dev/null || true && \
+        grep -vE "^(-e |\.\./)" requirements.txt | grep -v "^#" > /tmp/non-editable-requirements.txt && \
+        if [ -s /tmp/editable-requirements.txt ]; then \
+            .venv/bin/pip install --no-cache-dir --no-deps -r /tmp/editable-requirements.txt; \
+        fi && \
+        .venv/bin/pip install --no-cache-dir --require-hashes -r /tmp/non-editable-requirements.txt && \
+        rm -f /tmp/editable-requirements.txt /tmp/non-editable-requirements.txt; \
+    else \
+        # Default: Use uv sync (faster and more reliable)
+        uv sync --frozen --no-cache; \
+    fi
 
 # Production stage
 FROM registry.access.redhat.com/ubi9/python-312-minimal:latest

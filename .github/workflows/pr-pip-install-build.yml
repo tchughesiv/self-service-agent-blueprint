@@ -1,0 +1,51 @@
+name: Pull Request - Build Test (pip install method)
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+# Cancel any previous runs of this workflow for the same PR.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  # uv version must match Makefile UV_VERSION (currently 0.8.9)
+  # Update this when UV_VERSION in Makefile changes
+  UV_VERSION: "0.8.9"
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  build-test-pip-install:
+    name: Build and deploy (pip install method)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Prepare Runner
+        uses: ./.github/actions/prepare-runner
+        with:
+          swap-storage: 'false'
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Local Dependencies
+        shell: bash
+        run: |
+          make oc
+          echo "$GITHUB_WORKSPACE/bin" >> $GITHUB_PATH
+
+      - name: Initialize cluster and deploy application
+        uses: ./.github/actions/kind
+        with:
+          llm: ${{ vars.LLM_INFERENCE }}
+          llm_id: ${{ vars.LLM_ID_INFERENCE }}
+          llm_url: ${{ vars.LLM_URL_INFERENCE }}
+          use_pip_install: "true"
+        env:
+          LLM_API_TOKEN: ${{ secrets.LLM_API_TOKEN_INFERENCE }}
