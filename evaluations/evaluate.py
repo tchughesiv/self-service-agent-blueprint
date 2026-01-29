@@ -112,23 +112,24 @@ def run_script(
 
 def _cleanup_generated_files() -> None:
     """
-    Remove all files starting with 'generated_flow' from results/conversation_results/
-    and all token usage files from results/token_usage/.
+    Remove all files starting with 'generated_flow' and 'from_api_' from
+    results/conversation_results/ and all token usage files from results/token_usage/.
 
     This ensures a clean slate for each evaluation run by removing files from
-    previous executions.
+    previous executions. Step 2 (export) and step 3 (generator) then write fresh files.
     """
-    # Clean up generated conversation files
+    # Clean up generated and exported conversation files
     conversation_results_dir = Path("results/conversation_results")
     if conversation_results_dir.exists():
-        # Find all files starting with 'generated_flow'
         generated_files = list(conversation_results_dir.glob("generated_flow*"))
-
-        if generated_files:
+        from_api_files = list(conversation_results_dir.glob("from_api_*"))
+        to_remove = generated_files + from_api_files
+        if to_remove:
             logger.info(
-                f"Removing {len(generated_files)} generated conversation files from previous runs"
+                f"Removing {len(to_remove)} conversation files from previous runs "
+                f"({len(generated_files)} generated_flow*, {len(from_api_files)} from_api_*)"
             )
-            for file_path in generated_files:
+            for file_path in to_remove:
                 try:
                     file_path.unlink()
                 except Exception as e:
