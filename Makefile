@@ -468,7 +468,9 @@ define pull_image
 endef
 
 # Retag: $(call retag_image,IMAGE_STEM,DESCRIPTION) — tags REGISTRY/STEM:VERSION -> NEW_REGISTRY/STEM:NEW_VERSION
+# Requires NEW_REGISTRY and NEW_VERSION to be set.
 define retag_image
+	@[ -n "$(NEW_REGISTRY)" ] && [ -n "$(NEW_VERSION)" ] || (echo "Error: NEW_REGISTRY and NEW_VERSION must be set for retag targets" && exit 1)
 	@echo "Retagging $(2): $(REGISTRY)/$(1):$(VERSION) -> $(NEW_REGISTRY)/$(1):$(NEW_VERSION)"
 	$(CONTAINER_TOOL) tag $(REGISTRY)/$(1):$(VERSION) $(NEW_REGISTRY)/$(1):$(NEW_VERSION)
 	@echo "Successfully retagged $(2)"
@@ -646,37 +648,30 @@ retag-all-images: retag-request-mgr-image retag-agent-service-image retag-integr
 
 .PHONY: retag-request-mgr-image
 retag-request-mgr-image: pull-request-mgr-image
-	@[ -n "$(NEW_REGISTRY)" ] && [ -n "$(NEW_VERSION)" ] || (echo "Error: NEW_REGISTRY and NEW_VERSION must be set for retag targets" && exit 1)
 	$(call retag_image,self-service-agent-request-manager,request manager image)
 
 .PHONY: retag-agent-service-image
 retag-agent-service-image: pull-agent-service-image
-	@[ -n "$(NEW_REGISTRY)" ] && [ -n "$(NEW_VERSION)" ] || (echo "Error: NEW_REGISTRY and NEW_VERSION must be set for retag targets" && exit 1)
 	$(call retag_image,self-service-agent-service,agent service image)
 
 .PHONY: retag-integration-dispatcher-image
 retag-integration-dispatcher-image: pull-integration-dispatcher-image
-	@[ -n "$(NEW_REGISTRY)" ] && [ -n "$(NEW_VERSION)" ] || (echo "Error: NEW_REGISTRY and NEW_VERSION must be set for retag targets" && exit 1)
 	$(call retag_image,self-service-agent-integration-dispatcher,integration dispatcher image)
 
 .PHONY: retag-mcp-snow-image
 retag-mcp-snow-image: pull-mcp-snow-image
-	@[ -n "$(NEW_REGISTRY)" ] && [ -n "$(NEW_VERSION)" ] || (echo "Error: NEW_REGISTRY and NEW_VERSION must be set for retag targets" && exit 1)
 	$(call retag_image,self-service-agent-snow-mcp,snow MCP image)
 
 .PHONY: retag-mock-eventing-image
 retag-mock-eventing-image: pull-mock-eventing-image
-	@[ -n "$(NEW_REGISTRY)" ] && [ -n "$(NEW_VERSION)" ] || (echo "Error: NEW_REGISTRY and NEW_VERSION must be set for retag targets" && exit 1)
 	$(call retag_image,self-service-agent-mock-eventing,mock eventing service image)
 
 .PHONY: retag-mock-servicenow-image
 retag-mock-servicenow-image: pull-mock-servicenow-image
-	@[ -n "$(NEW_REGISTRY)" ] && [ -n "$(NEW_VERSION)" ] || (echo "Error: NEW_REGISTRY and NEW_VERSION must be set for retag targets" && exit 1)
 	$(call retag_image,self-service-agent-mock-servicenow,mock ServiceNow server image)
 
 .PHONY: retag-promptguard-image
 retag-promptguard-image: pull-promptguard-image
-	@[ -n "$(NEW_REGISTRY)" ] && [ -n "$(NEW_VERSION)" ] || (echo "Error: NEW_REGISTRY and NEW_VERSION must be set for retag targets" && exit 1)
 	$(call retag_image,self-service-agent-promptguard,PromptGuard service image)
 
 # Code quality
