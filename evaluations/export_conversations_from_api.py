@@ -12,9 +12,13 @@ in the same format as generator.py and run_conversations.py:
 Saved files go to results/conversation_results/ and can be evaluated with:
   uv run deep_eval.py --results-dir results/conversation_results
 
+This script is invoked automatically by evaluate.py (step 2) with the same -n/--num-conversations
+as generator.py, so params stay in sync when running the full pipeline.
+
 Usage:
-  REQUEST_MANAGER_URL=http://localhost:8080 uv run export_conversations_from_api.py
-  uv run export_conversations_from_api.py --limit 10 --user-email user@example.com
+  uv run export_conversations_from_api.py -n 20
+  REQUEST_MANAGER_URL=http://localhost:8080 uv run export_conversations_from_api.py -n 10
+  uv run export_conversations_from_api.py -n 5 --user-email user@example.com
 """
 
 import argparse
@@ -38,7 +42,17 @@ def _parse_args() -> argparse.Namespace:
         help="Request Manager base URL",
     )
     parser.add_argument(
-        "--limit", type=int, default=20, help="Max sessions (default 20)"
+        "-n",
+        "--num-conversations",
+        type=int,
+        default=None,
+        help="Number of sessions to export (same as generator.py -n; default 20)",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Max sessions (overridden by -n/--num-conversations; default 20)",
     )
     parser.add_argument("--offset", type=int, default=0, help="Pagination offset")
     parser.add_argument("--user-email", help="Filter by user email")
@@ -89,13 +103,15 @@ def _save_eval_file(payload: dict[str, Any], base_name: str, output_dir: str) ->
 
 
 async def _run(args: argparse.Namespace) -> int:
+    # Same -n/--num-conversations as generator.py; --limit overrides if both set
+    limit = args.limit if args.limit is not None else (args.num_conversations or 20)
     client = RequestManagerClient(request_manager_url=args.request_manager_url)
     try:
         data = await client.get_conversations(
             user_id=args.user_id,
             user_email=args.user_email,
             session_id=args.session_id,
-            limit=args.limit,
+            limit=limit,
             offset=args.offset,
             include_messages=not args.no_messages,
         )

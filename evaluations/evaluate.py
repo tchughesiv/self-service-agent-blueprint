@@ -568,6 +568,19 @@ def _parse_arguments() -> argparse.Namespace:
         help="Enable structured output mode for evaluations using Pydantic schema validation with retries. "
         "Recommended for models like Gemini that benefit from explicit schema validation.",
     )
+    parser.add_argument(
+        "--export-from-api",
+        action="store_true",
+        default=True,
+        help="Export real conversations from Request Manager API before generator (default: True). "
+        "Uses REQUEST_MANAGER_URL or http://localhost:8080. Same -n as generator.",
+    )
+    parser.add_argument(
+        "--no-export-from-api",
+        action="store_false",
+        dest="export_from_api",
+        help="Skip exporting conversations from Request Manager API.",
+    )
     return parser.parse_args()
 
 
@@ -883,6 +896,7 @@ def run_evaluation_pipeline(
     message_timeout: int = 60,
     validate_full_laptop_details: bool = True,
     use_structured_output: bool = False,
+    export_from_api: bool = True,
 ) -> int:
     """
     Run the complete evaluation pipeline.
@@ -890,8 +904,9 @@ def run_evaluation_pipeline(
     Executes the evaluation steps in sequence:
     0. Clean up generated files from previous runs
     1. run_conversations.py - Run predefined conversation flows
-    2. generator.py - Generate additional test conversations
-    3. deep_eval.py - Evaluate all conversations with deepeval metrics
+    2. export_conversations_from_api.py - Export real conversations from Request Manager (if --export-from-api)
+    3. generator.py - Generate additional test conversations
+    4. deep_eval.py - Evaluate all conversations with deepeval metrics
 
     Args:
         num_conversations: Number of conversations to generate with generator.py
@@ -918,7 +933,7 @@ def run_evaluation_pipeline(
     failed_steps = []
 
     # Step 1: Run conversation flows
-    logger.info("📋 Step 1/3: Running predefined conversation flows...")
+    logger.info("📋 Step 1/4: Running predefined conversation flows...")
     run_conversations_args = ["--test-script", test_script]
     if reset_conversation:
         run_conversations_args.append("--reset-conversation")
@@ -932,15 +947,32 @@ def run_evaluation_pipeline(
 
     logger.info("-" * 60)
 
-    # Step 2: Generate additional conversations
+    # Step 2: Export real conversations from Request Manager API (optional; same -n as generator)
+    if export_from_api:
+        logger.info(
+            f"📥 Step 2/4: Exporting up to {num_conversations} conversations from Request Manager API..."
+        )
+        export_args = ["-n", str(num_conversations)]
+        if not run_script(
+            "export_conversations_from_api.py", args=export_args, timeout=120
+        ):
+            logger.warning(
+                "⚠️ Export from API failed (optional) - continuing with remaining steps"
+            )
+        else:
+            logger.info("✅ Step 2 completed successfully")
+        logger.info("-" * 60)
+
+    # Step 3: Generate additional conversations
     total_conversations = num_conversations * concurrency
+    step_num = "3/4" if export_from_api else "2/4"
     if concurrency > 1:
         logger.info(
-            f"🤖 Step 2/3: Generating {total_conversations} total test conversations ({num_conversations} per worker × {concurrency} workers)..."
+            f"🤖 Step {step_num}: Generating {total_conversations} total test conversations ({num_conversations} per worker × {concurrency} workers)..."
         )
     else:
         logger.info(
-            f"🤖 Step 2/3: Generating {num_conversations} additional test conversations..."
+            f"🤖 Step {step_num}: Generating {num_conversations} additional test conversations..."
         )
     generator_args = [
         str(num_conversations),
@@ -959,14 +991,15 @@ def run_evaluation_pipeline(
         generator_args.append("--use-structured-output")
     if not run_script("generator.py", args=generator_args, timeout=timeout):
         failed_steps.append("generator.py")
-        logger.error("❌ Step 2 failed - continuing with remaining steps")
+        logger.error(f"❌ Step {step_num} failed - continuing with remaining steps")
     else:
-        logger.info("✅ Step 2 completed successfully")
+        logger.info(f"✅ Step {step_num} completed successfully")
 
     logger.info("-" * 60)
 
-    # Step 3: Run deepeval evaluation
-    logger.info("📊 Step 3/3: Running deepeval evaluation...")
+    # Step 4: Run deepeval evaluation
+    eval_step = "4/4" if export_from_api else "3/4"
+    logger.info(f"📊 Step {eval_step}: Running deepeval evaluation...")
     deep_eval_args: list[str] = []
     if validate_full_laptop_details:
         deep_eval_args.append("--validate-full-laptop-details")
@@ -976,7 +1009,7 @@ def run_evaluation_pipeline(
         deep_eval_args.append("--use-structured-output")
     if not run_script("deep_eval.py", args=deep_eval_args, timeout=timeout):
         failed_steps.append("deep_eval.py")
-        logger.error("❌ Step 3 failed")
+        logger.error("❌ Step 4 failed")
     else:
         logger.info("✅ Step 3 completed successfully")
 
@@ -1052,6 +1085,7 @@ def main() -> int:
                 message_timeout=args.message_timeout,
                 validate_full_laptop_details=args.validate_full_laptop_details,
                 use_structured_output=args.use_structured_output,
+                export_from_api=args.export_from_api,
             )
     except KeyboardInterrupt:
         logger.warning("⚠️  Pipeline interrupted by user")
