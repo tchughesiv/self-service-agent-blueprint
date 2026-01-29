@@ -1,6 +1,6 @@
 # Makefile for RAG Deployment
 ifeq ($(NAMESPACE),)
-ifneq (,$(filter namespace helm-install-test helm-install-prod helm-uninstall helm-status helm-cleanup-eventing helm-cleanup-jobs export-conversations-from-api,$(MAKECMDGOALS)))
+ifneq (,$(filter namespace helm-install-test helm-install-prod helm-uninstall helm-status helm-cleanup-eventing helm-cleanup-jobs,$(MAKECMDGOALS)))
 $(error NAMESPACE is not set)
 endif
 endif
@@ -1316,18 +1316,6 @@ sync-evaluations:
 	@echo "Syncing evaluations libraries"
 	uv --directory evaluations sync
 	@echo "Syncing evaluations libraries completed successfully!"
-
-# Export real conversations from Request Manager into eval format (results/conversation_results/from_api_*.json).
-# Uses same -n/num_conversations as generator.py and evaluate.py. Override with: make export-conversations-from-api NUM_CONVERSATIONS=10
-# Exports via kubectl exec into request-manager pod (use --namespace / NAMESPACE). For OpenShift use: make export-conversations-from-api EXEC_CLI=oc
-# If you run this before the test-*-integration-request-mgr targets below, those exported files are included in the evaluation (cleanup only removes generated_flow*, not from_api_*).
-NUM_CONVERSATIONS ?= 20
-EXEC_CLI ?= kubectl
-.PHONY: export-conversations-from-api
-export-conversations-from-api:
-	@echo "Exporting conversations from Request Manager (kubectl exec, -n $(NUM_CONVERSATIONS), namespace $(NAMESPACE))..."
-	uv --directory evaluations run export_conversations_from_api.py -n $(NUM_CONVERSATIONS) --namespace $(NAMESPACE) --exec-cli $(EXEC_CLI)
-	@echo "Export completed. Run a test-*-integration-request-mgr target to evaluate (includes from_api_* files)."
 
 .PHONY: test-short-resp-integration-request-mgr
 test-short-resp-integration-request-mgr:
