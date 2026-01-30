@@ -88,8 +88,12 @@ COPY ${SERVICE_NAME}/src/ ./src/
 COPY ${SERVICE_NAME}/pyproject.toml ./
 
 # Set environment variables
-ENV PATH="/app/.venv/bin:$PATH"
-ENV PYTHONPATH="/app/agent-service/src:/app/shared-models/src:/app/shared-clients/src:/app/src:/app/tracing-config/src:$PYTHONPATH"
+# Use system python3 with venv site-packages on PYTHONPATH so uvicorn etc. are found regardless of
+# which interpreter path is used (e.g. /opt/app-root/bin/python3 in ubi9/python-312-minimal).
+# Required when USE_PIP_INSTALL=true (venv's bin/python points at builder path that does not exist here).
+ENV VIRTUAL_ENV=/app/.venv
+ENV PATH="/usr/bin:${VIRTUAL_ENV}/bin:$PATH"
+ENV PYTHONPATH="/usr/lib64/python3.12:${VIRTUAL_ENV}/lib/python3.12/site-packages:/app/agent-service/src:/app/shared-models/src:/app/shared-clients/src:/app/src:/app/tracing-config/src:$PYTHONPATH"
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
@@ -110,12 +114,10 @@ ENV TRANSFORMERS_CACHE="/app/.cache/huggingface/transformers"
 # Expose port
 EXPOSE 8080
 
-# Run the application using absolute path to ensure virtualenv Python is used
-# While it seems to work with the minimal container without the full path, it
-# does not when using the non-minimal container for debugging
+# Run the application (python3 uses system interpreter; VIRTUAL_ENV ensures venv site-packages are loaded)
 # Support optional UVICORN_WORKERS environment variable for multi-process concurrency
 CMD if [ -n "$UVICORN_WORKERS" ]; then \
-      /app/.venv/bin/python -m uvicorn $MODULE_NAME:app --host 0.0.0.0 --port 8080 --workers $UVICORN_WORKERS; \
+      python3 -m uvicorn $MODULE_NAME:app --host 0.0.0.0 --port 8080 --workers $UVICORN_WORKERS; \
     else \
-      /app/.venv/bin/python -m uvicorn $MODULE_NAME:app --host 0.0.0.0 --port 8080; \
+      python3 -m uvicorn $MODULE_NAME:app --host 0.0.0.0 --port 8080; \
     fi

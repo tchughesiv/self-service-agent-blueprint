@@ -59,8 +59,11 @@ COPY ${SERVICE_NAME}/src/ ./src/
 COPY ${SERVICE_NAME}/pyproject.toml ./
 
 # Set environment variables
-ENV PATH="/app/.venv/bin:$PATH"
-ENV PYTHONPATH="/app/src:/app/shared-models/src:/app/tracing-config/src:$PYTHONPATH"
+# Use system python3 with venv site-packages on PYTHONPATH so uvicorn etc. are found regardless of
+# which interpreter path is used (e.g. /opt/app-root/bin/python3 in ubi9/python-312-minimal).
+ENV VIRTUAL_ENV=/app/.venv
+ENV PATH="/usr/bin:${VIRTUAL_ENV}/bin:$PATH"
+ENV PYTHONPATH="/usr/lib64/python3.12:${VIRTUAL_ENV}/lib/python3.12/site-packages:/app/src:/app/shared-models/src:/app/tracing-config/src:$PYTHONPATH"
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV OTEL_SERVICE_NAME=${SERVICE_NAME}
@@ -75,11 +78,10 @@ USER 1001
 # Expose port (MCP servers typically use different ports)
 EXPOSE 8000
 
-# Run the MCP server
+# Run the MCP server (python3 uses system interpreter; VIRTUAL_ENV ensures venv site-packages are loaded)
 # Support optional UVICORN_WORKERS environment variable for multi-process concurrency
-# Use 'python -m uvicorn' instead of 'uvicorn' to avoid shebang path issues
 CMD if [ -n "$UVICORN_WORKERS" ]; then \
-      python -m uvicorn $MODULE_NAME:app --host 0.0.0.0 --port 8000 --workers $UVICORN_WORKERS; \
+      python3 -m uvicorn $MODULE_NAME:app --host 0.0.0.0 --port 8000 --workers $UVICORN_WORKERS; \
     else \
-      python -m uvicorn $MODULE_NAME:app --host 0.0.0.0 --port 8000; \
+      python3 -m uvicorn $MODULE_NAME:app --host 0.0.0.0 --port 8000; \
     fi

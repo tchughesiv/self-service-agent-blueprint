@@ -83,9 +83,9 @@ spec:
               # Change to the agent service directory and run the registration script
               cd /app/agent-service
 
-              # Activate virtual environment and run the asset registration script
+              # Run the asset registration script
               echo "Running asset registration script..."
-              /app/.venv/bin/python -m agent_service.scripts.register_assets
+              python3 -m agent_service.scripts.register_assets
               
               # If we get here, the script succeeded (set -e will exit on failure)
               echo "Initialization job completed successfully"
