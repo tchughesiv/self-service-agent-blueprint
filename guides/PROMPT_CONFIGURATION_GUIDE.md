@@ -112,6 +112,10 @@ states:
 | `empty_response_retry_count` | Number of retries for empty LLM responses. Agents occasionally return empty responses, retrying can improve success rates. | `3` |
 | `initial_user_message` | Auto-inject first user message to help the agent start correctly. When present, this replaces any message passed from agent handover. | None |
 
+### Context length and max output tokens
+
+Max output tokens are **not** configured in agent YAML. The Llama Stack Responses API uses server-side limits: each model’s `maxTokens` is set in Helm (see `helm/values.yaml` and the Llama Stack subchart). When you deploy with the Makefile and set `LLM=<model>`, the quickstart sets that model’s `maxTokens` from `LLM_MAX_TOKENS` (default 2048) so that input + output stay within the model’s context window (e.g. 14k). To use a different limit, set `LLM_MAX_TOKENS` when running `make helm-install-test` or `make helm-install-prod`. For details and upstream support, see [Llama Stack issue #3562](https://github.com/llamastack/llama-stack/issues/3562) and [PR #4592](https://github.com/llamastack/llama-stack/pull/4592).
+
 ## State Schema
 
 Define workflow-specific fields that store data throughout the conversation. Fields are set by one state and can be referenced in prompts and transitions of subsequent states. As an example: 

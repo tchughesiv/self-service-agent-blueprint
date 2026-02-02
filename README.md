@@ -419,6 +419,7 @@ export LLM=llama-3-3-70b-instruct-w8a8
 export LLM_ID=llama-3-3-70b-instruct-w8a8
 export LLM_API_TOKEN=your-api-token
 export LLM_URL=https://your-llm-endpoint
+# Optional: export LLM_MAX_TOKENS=2048   # max output tokens (default when using Makefile); see Prompt Configuration Guide
 
 # Set hugging face token, set to 1234 as not needed unless
 # you want to use locally hosted LLM

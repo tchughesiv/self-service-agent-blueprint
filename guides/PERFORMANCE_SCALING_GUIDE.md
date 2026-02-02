@@ -27,6 +27,8 @@ Analysis of 437 requests during an evaluation with a shared hosted llama 3 70b m
 
 **Key Finding:** 99.7% of request time is spent in agent processing (Llama Stack inference). The request-manager, event delivery, and response handling add negligible overhead (~12ms total). The key point is that efforts to scale implementations based on the quickstart should likely start by focussing on the LLM inference serving performance. While in production you should plan for a model with better performance, it is still likely that the largest component of the response time and CPU usage will be the LLM inference.
 
+**Context length:** Max output tokens are configured server-side (Llama Stack/Helm), not in agent YAML. When deploying with the Makefile and `LLM=<model>`, use `LLM_MAX_TOKENS` (default 2048) so that input + output stay within the model’s context window. See the [Prompt Configuration Guide](PROMPT_CONFIGURATION_GUIDE.md) and `helm/values.yaml` for details.
+
 ### Concurrency Model
 
 All services handle requests concurrently using Python's asyncio event loop, even with a single uvicorn worker. This is a very efficient pattern and allows each component to handle many concurrent requests even with a single worker. If you want to learn more about asyncio check out [Python's asyncio: A Hands-On Walkthrough](https://realpython.com/async-io-python/)

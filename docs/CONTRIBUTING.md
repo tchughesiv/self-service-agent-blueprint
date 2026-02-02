@@ -282,6 +282,7 @@ make helm-status                # Check deployment status
    export LLM_API_TOKEN=your-api-token
    export LLM_URL=https://your-llm-endpoint
    export HF_TOKEN=1234
+   # Optional: export LLM_MAX_TOKENS=2048  # default when using Makefile; keeps output within context
    ```
 
    Deploy with Helm:

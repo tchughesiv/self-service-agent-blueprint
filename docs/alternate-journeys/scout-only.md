@@ -69,6 +69,7 @@ export LLM=llama-4-scout-17b-16e-w4a16
 export LLM_ID=llama-4-scout-17b-16e-w4a16
 export LLM_API_TOKEN=your-api-token
 export LLM_URL=https://your-llm-endpoint/v1
+# Optional: export LLM_MAX_TOKENS=2048   # max output tokens (default); keeps input+output within context
 export LG_PROMPT_LAPTOP_REFRESH=/app/agent-service/config/lg-prompts/lg-prompt-small-scout.yaml
 
 # Set hugging face token, set to 1234 as not needed unless
