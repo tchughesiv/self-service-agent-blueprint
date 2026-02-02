@@ -748,6 +748,7 @@ async def handle_cloudevent(
         )
 
         # Create delivery request - session_id is guaranteed to be present after validation above
+        # Include email thread fields when present so reply stays in same thread (RFC 5322)
         delivery_request = DeliveryRequest(
             request_id=request_id,
             session_id=session_id,
@@ -756,6 +757,9 @@ async def handle_cloudevent(
             content=response_data.get("content"),
             template_variables=response_data.get("template_variables", {}),
             agent_id=response_data.get("agent_id"),
+            email_message_id=response_data.get("email_message_id"),
+            email_in_reply_to=response_data.get("email_in_reply_to"),
+            email_references=response_data.get("email_references"),
         )
 
         logger.info(
@@ -912,6 +916,7 @@ async def handle_direct_delivery(
 
         # Create delivery request from the payload using shared model
         # session_id is guaranteed to be present after validation above
+        # Include email thread fields when present for reply threading (RFC 5322)
         delivery_request = DeliveryRequest(
             request_id=request_id,
             session_id=session_id,
@@ -920,6 +925,9 @@ async def handle_direct_delivery(
             subject=delivery_data.get("subject"),
             content=delivery_data.get("content"),
             template_variables=delivery_data.get("template_variables", {}),
+            email_message_id=delivery_data.get("email_message_id"),
+            email_in_reply_to=delivery_data.get("email_in_reply_to"),
+            email_references=delivery_data.get("email_references"),
         )
 
         # Dispatch to integrations

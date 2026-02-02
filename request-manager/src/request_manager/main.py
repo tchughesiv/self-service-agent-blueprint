@@ -1024,9 +1024,12 @@ async def _forward_response_to_integration_dispatcher(
         broker_url = os.getenv("BROKER_URL", "http://knative-broker:8080")
         event_sender = CloudEventSender(broker_url, "request-manager")
 
-        # Get original request context from database to include slack_user_id
+        # Get original request context from database to include slack_user_id and email threading
         template_variables = event_data.get("template_variables", {})
         request_id = event_data.get("request_id")
+        email_message_id = None
+        email_in_reply_to = None
+        email_references = None
 
         if request_id:
             # Retrieve original request context from RequestLog
@@ -1123,6 +1126,19 @@ async def _forward_response_to_integration_dispatcher(
                             email_from=email_from,
                         )
 
+                    # Preserve email threading (RFC 5322) so reply stays in same thread
+                    email_message_id = integration_context.get("email_message_id")
+                    email_in_reply_to = integration_context.get("email_in_reply_to")
+                    email_references = integration_context.get("email_references")
+                    if email_message_id or email_in_reply_to or email_references:
+                        logger.info(
+                            "Including email thread headers for reply",
+                            request_id=request_id,
+                            has_message_id=bool(email_message_id),
+                            has_in_reply_to=bool(email_in_reply_to),
+                            has_references=bool(email_references),
+                        )
+
         # Create delivery event data for Integration Dispatcher
         # This matches the structure expected by DeliveryRequest in Integration Dispatcher
         delivery_event_data = {
@@ -1136,6 +1152,13 @@ async def _forward_response_to_integration_dispatcher(
             "template_variables": template_variables,
             "agent_id": event_data.get("agent_id"),
         }
+        # Add email thread fields when present (non-empty) so integration-dispatcher can set In-Reply-To/References
+        if email_message_id:
+            delivery_event_data["email_message_id"] = email_message_id
+        if email_in_reply_to:
+            delivery_event_data["email_in_reply_to"] = email_in_reply_to
+        if email_references:
+            delivery_event_data["email_references"] = email_references
 
         # Send response event using shared utilities
         success = await event_sender.send_response_event(

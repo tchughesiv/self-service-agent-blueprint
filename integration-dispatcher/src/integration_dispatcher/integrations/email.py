@@ -168,6 +168,21 @@ class EmailIntegrationHandler(BaseIntegrationHandler):
             if reply_to:
                 msg["Reply-To"] = reply_to
 
+            # Set RFC 5322 threading headers so replies stay in the same thread
+            # (Gmail, Outlook, Apple Mail, etc. all use In-Reply-To and References)
+            # In-Reply-To = Message-ID of the email we're replying to (user's current message)
+            # References = full thread chain (existing References + user's Message-ID)
+            in_reply_to = request.email_message_id or request.email_in_reply_to
+            if in_reply_to:
+                msg["In-Reply-To"] = in_reply_to
+            refs = (request.email_references or "").strip()
+            if request.email_message_id:
+                mid = request.email_message_id
+                if mid not in refs:
+                    refs = (refs + " " + mid).strip() if refs else mid
+            if refs:
+                msg["References"] = refs
+
             # Add custom headers
             msg["X-Request-ID"] = request.request_id
             msg["X-Session-ID"] = request.session_id
