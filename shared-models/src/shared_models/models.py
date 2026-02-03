@@ -506,6 +506,12 @@ class DeliveryRequest(BaseModel):
     template_variables: Dict[str, Any] = Field(default_factory=dict)
     agent_id: Optional[str] = None
     priority_override: Optional[int] = None
+    # Email threading (RFC 5322): set on outgoing reply so clients keep the thread
+    email_message_id: Optional[str] = None  # Message-ID of the email we're replying to
+    email_in_reply_to: Optional[str] = None  # In-Reply-To from user's email
+    email_references: Optional[str] = (
+        None  # References from user's email (thread chain)
+    )
 
 
 class ErrorResponse(BaseModel):
