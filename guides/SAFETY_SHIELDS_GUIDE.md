@@ -135,12 +135,9 @@ Set the safety environment variables in your Helm deployment:
 make helm-install-test \
   NAMESPACE=your-namespace \
   LLM=llama-3-2-1b-instruct \
-  LLM_MAX_TOKENS=2048 \
   SAFETY=meta-llama/Llama-Guard-3-8B \
   SAFETY_URL=https://api.example.com/v1
 ```
-
-`LLM_MAX_TOKENS` (default 2048) sets the max output tokens for the LLM when using the Makefile; see [Prompt Configuration Guide](PROMPT_CONFIGURATION_GUIDE.md) and `helm/values.yaml` for context.
 
 **Note**: Replace `https://api.example.com/v1` with your actual moderation API endpoint. For in-cluster deployments, you can use a vLLM instance (e.g., `http://vllm-service:8000/v1`).
 
