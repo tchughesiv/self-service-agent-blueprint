@@ -19,6 +19,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import TIMESTAMP, UUID
 from sqlalchemy.orm import relationship
@@ -31,6 +32,8 @@ __all__ = [
     "IntegrationType",
     "SessionStatus",
     "DeliveryStatus",
+    "RequestStatus",
+    "PodHeartbeat",
     "User",
     "RequestSession",
     "RequestLog",
@@ -80,6 +83,15 @@ class DeliveryStatus(str, Enum):
     FAILED = "FAILED"
     RETRYING = "RETRYING"
     EXPIRED = "EXPIRED"
+
+
+class RequestStatus(str, Enum):
+    """Request processing status for session serialization."""
+
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
 
 
 # User Models
@@ -162,6 +174,13 @@ class RequestSession(Base, TimestampMixin):  # type: ignore[misc]
     # Optimistic locking
     version = Column(Integer, default=0, nullable=False, server_default="0")
 
+    # Override created_at: DB server_default for multi-pod ordering (avoids clock skew)
+    created_at = Column(
+        TIMESTAMP(timezone=True),
+        server_default=text("CURRENT_TIMESTAMP"),
+        nullable=False,
+    )
+
     # Relationships
     user = relationship("User", back_populates="sessions")
     request_logs = relationship(
@@ -203,11 +222,50 @@ class RequestLog(Base, TimestampMixin):  # type: ignore[misc]
     # Timing
     completed_at = Column(TIMESTAMP(timezone=True))
 
-    # Pod tracking (for scaled deployments)
-    pod_name = Column(String(255), index=True)  # Pod that initiated the request
+    # Session serialization: status + processing metadata
+    status = Column(
+        String(50), nullable=False, default=RequestStatus.COMPLETED.value
+    )  # pending | processing | completed | failed
+    processing_started_at = Column(TIMESTAMP(timezone=True))  # When status → processing
+
+    # Pod tracking: pod that is *processing* the request (set at dequeue, not accept)
+    pod_name = Column(String(255), index=True)
+
+    # Override created_at/updated_at: use DB server_default + trigger for deterministic
+    # ordering across replicas (Python datetime.now varies by pod; DB uses single clock)
+    created_at = Column(
+        TIMESTAMP(timezone=True),
+        server_default=text("CURRENT_TIMESTAMP"),
+        nullable=False,
+    )
+    updated_at = Column(
+        TIMESTAMP(timezone=True),
+        server_default=text("CURRENT_TIMESTAMP"),
+        nullable=False,
+    )
 
     # Relationships
     session = relationship("RequestSession", back_populates="request_logs")
+
+    __table_args__ = (
+        Index(
+            "ix_request_logs_session_status_created",
+            "session_id",
+            "status",
+            "created_at",
+        ),
+    )
+
+
+class PodHeartbeat(Base):  # type: ignore[misc]
+    """Pod liveness for request-manager reclaim (detect crashed pods)."""
+
+    __tablename__ = "pod_heartbeats"
+
+    pod_name = Column(String(255), primary_key=True)
+    last_check_in_at = Column(
+        TIMESTAMP(timezone=True), nullable=False
+    )  # Updated periodically by each pod
 
 
 # Integration Dispatcher Models
@@ -346,6 +404,13 @@ class ProcessedEvent(Base, TimestampMixin):  # type: ignore[misc]
     processing_result = Column(String(50), nullable=False)  # success/error/skipped
     error_message = Column(Text, nullable=True)
 
+    # Override created_at: DB server_default for multi-pod ordering (avoids clock skew)
+    created_at = Column(
+        TIMESTAMP(timezone=True),
+        server_default=text("CURRENT_TIMESTAMP"),
+        nullable=False,
+    )
+
     # Index for fast lookups
     __table_args__ = (
         Index("ix_processed_events_event_id", "event_id"),
@@ -457,6 +522,10 @@ class AgentResponse(BaseModel):
     requires_followup: bool = Field(default=False)
     followup_actions: List[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    agent_received_at: Optional[datetime] = Field(
+        default=None,
+        description="When the agent started processing (for FIFO ordering verification)",
+    )
 
 
 # Shared Pydantic models for inter-service communication
@@ -505,6 +574,9 @@ class DeliveryRequest(BaseModel):
     content: str
     template_variables: Dict[str, Any] = Field(default_factory=dict)
     agent_id: Optional[str] = None
+    created_at: Optional[str] = (
+        None  # ISO timestamp of receive time, for delivery ordering
+    )
     priority_override: Optional[int] = None
     # Email threading (RFC 5322): set on outgoing reply so clients keep the thread
     email_message_id: Optional[str] = None  # Message-ID of the email we're replying to

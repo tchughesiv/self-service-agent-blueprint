@@ -1,6 +1,6 @@
 # Makefile for RAG Deployment
 ifeq ($(NAMESPACE),)
-ifneq (,$(filter namespace helm-install-test helm-install-prod helm-uninstall helm-status helm-cleanup-eventing helm-cleanup-jobs,$(MAKECMDGOALS)))
+ifneq (,$(filter namespace helm-install-test helm-install-prod helm-uninstall helm-status helm-cleanup-eventing helm-cleanup-jobs test-session-serialization-integration test-session-reclaim-integration test-session-background-reclaim-integration jaeger-deploy jaeger-undeploy deploy-email-server undeploy-email-server print-urls verify-triggers,$(MAKECMDGOALS)))
 $(error NAMESPACE is not set)
 endif
 endif
@@ -218,7 +218,6 @@ helm_replica_count_args = \
 	$(if $(REPLICA_COUNT),--set llamastack.postInitScaling.enabled=true,) \
 	$(if $(REPLICA_COUNT),--set llamastack.postInitScaling.targetReplicas=$(REPLICA_COUNT),) \
 	$(if $(REPLICA_COUNT),--set mcp-servers.mcp-servers.self-service-agent-snow.replicas=$(REPLICA_COUNT),) \
-	$(if $(REPLICA_COUNT),--set requestManagement.knative.mockEventing.replicas=$(REPLICA_COUNT),) \
 	$(if $(REPLICA_COUNT),--set requestManagement.kafka.replicas=$(REPLICA_COUNT),) \
 	$(if $(REPLICA_COUNT),--set requestManagement.requestManager.replicas=$(REPLICA_COUNT),) \
 	$(if $(REPLICA_COUNT),--set requestManagement.integrationDispatcher.replicas=$(REPLICA_COUNT),) \
@@ -358,6 +357,9 @@ help:
 	@echo "  test-short-resp-integration-request-mgr - Run short responses integration tests with Request Manager"
 	@echo "  test-long-resp-integration-request-mgr - Run long responses integration tests with Request Manager"
 	@echo "  test-long-concurrent-integration-request-mgr - Run long concurrent responses integration tests with Request Manager (concurrency=4)"
+	@echo "  test-session-serialization-integration - Run session serialization integration test (requires cluster, NAMESPACE=test)"
+	@echo "  test-session-reclaim-integration - Run session reclaim integration test (on-demand reclaim of stuck processing)"
+	@echo "  test-session-background-reclaim-integration - Run background reclaim integration test (~60s, requires cluster)"
 	@echo "  generate-two-sessions                   - Generate two sessions: one for alice.johnson@company.com and one for ahmed.hassan@company.com"
 	@echo ""
 	@echo "Utility Commands:"
@@ -387,7 +389,7 @@ help:
 	@echo "    REPLICA_COUNT                     - Number of replicas for scalable services (optional)"
 	@echo "                                        If set, overrides defaults from helm/values.yaml"
 	@echo "                                        If not set, uses defaults from helm/values.yaml"
-	@echo "                                        Applies to: llama-stack, snow MCP, mock-eventing, kafka,"
+	@echo "                                        Applies to: llama-stack, snow MCP, kafka,"
 	@echo "                                        request-manager, integration-dispatcher, and agent-service"
 	@echo ""
 	@echo "  Image Configuration:"
@@ -1316,6 +1318,47 @@ test-long-concurrent-integration-request-mgr:
 	@echo "Running long concurrent responses integration test with Request Manager..."
 	uv --directory evaluations run evaluate.py -n 10 --test-script chat-responses-request-mgr.py --reset-conversation --timeout=1800 --concurrency 4 --message-timeout 120 $(VALIDATE_LAPTOP_DETAILS_FLAG) $(STRUCTURED_OUTPUT_FLAG)
 	@echo "long concurrent responses integrations tests with Request Manager completed successfully!"
+
+# Session tests hit load-balanced service so cross-pod scenarios are exercised (2+ replicas).
+# Override with REQUEST_MANAGER_URL=http://localhost:8080 for same-pod only.
+REQUEST_MANAGER_URL ?= http://$(MAIN_CHART_NAME)-request-manager:80
+
+.PHONY: test-session-serialization-integration
+test-session-serialization-integration:
+	@echo "Running session serialization integration test (requires cluster with NAMESPACE set)..."
+	kubectl exec deploy/$(MAIN_CHART_NAME)-request-manager -n $(NAMESPACE) -- \
+		env REQUEST_MANAGER_URL=$(REQUEST_MANAGER_URL) \
+		MESSAGE_TIMEOUT=250 \
+		/app/.venv/bin/python /app/test/session_serialization_integration.py $(if $(STAGGER_MS),--stagger-ms $(STAGGER_MS),)
+	@echo "Session serialization integration test completed successfully!"
+
+.PHONY: test-session-reclaim-integration
+test-session-reclaim-integration:
+	@echo "Running session reclaim integration test (requires cluster with NAMESPACE set)..."
+	kubectl exec deploy/$(MAIN_CHART_NAME)-request-manager -n $(NAMESPACE) -- \
+		env REQUEST_MANAGER_URL=$(REQUEST_MANAGER_URL) \
+		MESSAGE_TIMEOUT=250 \
+		/app/.venv/bin/python /app/test/session_reclaim_integration.py
+	@echo "Session reclaim integration test completed successfully!"
+
+.PHONY: test-session-background-reclaim-integration
+test-session-background-reclaim-integration:
+	@echo "Running background reclaim integration test (requires cluster with NAMESPACE set, ~60s for reclaim)..."
+	@# timeout 180: background reclaim runs every 45s; worst case ~60s. 180s allows for CI variance.
+	@TIMEOUT_CMD=$$(command -v timeout 2>/dev/null || command -v gtimeout 2>/dev/null || true) && \
+	if [ -n "$$TIMEOUT_CMD" ]; then \
+		$$TIMEOUT_CMD 180 kubectl exec deploy/$(MAIN_CHART_NAME)-request-manager -n $(NAMESPACE) -- \
+			env REQUEST_MANAGER_URL=$(REQUEST_MANAGER_URL) \
+			MESSAGE_TIMEOUT=250 \
+			/app/.venv/bin/python /app/test/session_background_reclaim_integration.py; \
+	else \
+		echo "Note: timeout not found (macOS: brew install coreutils for gtimeout); running without timeout"; \
+		kubectl exec deploy/$(MAIN_CHART_NAME)-request-manager -n $(NAMESPACE) -- \
+			env REQUEST_MANAGER_URL=$(REQUEST_MANAGER_URL) \
+			MESSAGE_TIMEOUT=250 \
+			/app/.venv/bin/python /app/test/session_background_reclaim_integration.py; \
+	fi
+	@echo "Background reclaim integration test completed successfully!"
 
 .PHONY: generate-two-sessions
 generate-two-sessions:

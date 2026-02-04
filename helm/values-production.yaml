@@ -1,6 +1,6 @@
 # Production environment overrides
 # Use this file for production deployments
-# Usage: helm install my-release ./helm -f values-production.yaml
+# Usage: helm install my-release ./helm -f values.yaml -f values-production.yaml
 
 environment:
   type: "production"
@@ -89,19 +89,3 @@ requestManagement:
 
 # # Production logging
 # logLevel: "INFO"  # Use INFO level for production (not DEBUG)
-
-  # Database Performance Configuration for Production
-  database:
-    # Async connection pool (for SQLAlchemy) - optimized for production workloads
-    poolSize: 20              # Larger pool for production concurrency
-    maxOverflow: 30           # More overflow connections for peak loads
-    poolTimeout: 30           # Standard timeout
-    poolRecycle: 3600         # 1 hour connection recycling
-    # Statement timeout (60 seconds for production)
-    statementTimeout: 60000
-    # Idle transaction timeout (10 minutes for production)
-    idleTransactionTimeout: 600000
-    # Sync connection pool (for PostgresSaver/LangGraph) - optimized for production
-    syncPoolMinSize: 5        # Higher minimum for production stability
-    syncPoolMaxSize: 15       # Larger pool for production concurrency
-    syncPoolTimeout: 60       # Longer timeout for production workloads

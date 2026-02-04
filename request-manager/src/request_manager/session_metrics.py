@@ -1,0 +1,107 @@
+"""Session serialization metrics for observability.
+
+Uses OpenTelemetry metrics API. When a MeterProvider is configured (e.g. OTLP
+exporter), these metrics are exported. Otherwise no-ops via default NoOpMeterProvider.
+"""
+
+import functools
+from typing import Callable, TypeVar
+
+T = TypeVar("T")
+
+
+def _suppress_metrics_errors(func: Callable[..., T]) -> Callable[..., T]:
+    """Suppress exceptions in metrics recording (no-op if MeterProvider not configured)."""
+
+    @functools.wraps(func)
+    def wrapper(*args: object, **kwargs: object) -> T | None:
+        try:
+            return func(*args, **kwargs)
+        except Exception:  # noqa: BLE001
+            return None
+
+    return wrapper  # type: ignore[return-value]
+
+
+try:
+    from opentelemetry import metrics
+    from opentelemetry.metrics import Counter, Histogram
+
+    _meter = metrics.get_meter(
+        "request-manager.session-serialization",
+        version="0.1.0",
+    )
+    _lock_acquire_duration: Histogram = _meter.create_histogram(
+        name="request_manager_session_lock_acquire_duration_seconds",
+        description="Time spent waiting to acquire session lock",
+        unit="s",
+    )
+    _lock_timeout_total: Counter = _meter.create_counter(
+        name="request_manager_session_lock_timeout_total",
+        description="Total session lock timeouts (503)",
+    )
+    _request_log_creation_failure_total: Counter = _meter.create_counter(
+        name="request_manager_request_log_creation_failure_total",
+        description="Total RequestLog creation failures (503)",
+    )
+    _reclaim_total: Counter = _meter.create_counter(
+        name="request_manager_reclaim_total",
+        description="Total stuck processing requests reclaimed",
+        unit="1",
+    )
+    _reclaim_on_demand_total: Counter = _meter.create_counter(
+        name="request_manager_reclaim_on_demand_total",
+        description="Stuck requests reclaimed on-demand (before dequeue)",
+        unit="1",
+    )
+    _reclaim_background_total: Counter = _meter.create_counter(
+        name="request_manager_reclaim_background_total",
+        description="Stuck requests reclaimed by background task",
+        unit="1",
+    )
+except Exception:  # noqa: BLE001
+    _lock_acquire_duration = None
+    _lock_timeout_total = None
+    _request_log_creation_failure_total = None
+    _reclaim_total = None
+    _reclaim_on_demand_total = None
+    _reclaim_background_total = None
+
+
+@_suppress_metrics_errors
+def record_lock_acquire_duration(seconds: float) -> None:
+    """Record lock acquisition duration."""
+    if _lock_acquire_duration is not None:
+        _lock_acquire_duration.record(seconds)
+
+
+@_suppress_metrics_errors
+def record_lock_timeout() -> None:
+    """Record session lock timeout (503)."""
+    if _lock_timeout_total is not None:
+        _lock_timeout_total.add(1)
+
+
+@_suppress_metrics_errors
+def record_request_log_creation_failure() -> None:
+    """Record RequestLog creation failure (503)."""
+    if _request_log_creation_failure_total is not None:
+        _request_log_creation_failure_total.add(1)
+
+
+@_suppress_metrics_errors
+def record_reclaim_on_demand(count: int) -> None:
+    """Record on-demand reclaim (before dequeue)."""
+    if _reclaim_on_demand_total is not None and count > 0:
+        _reclaim_on_demand_total.add(count)
+        if _reclaim_total is not None:
+            _reclaim_total.add(count)
+
+
+@_suppress_metrics_errors
+def record_reclaim_background(count: int) -> None:
+    """Record background reclaim."""
+    if _reclaim_background_total is not None and count > 0:
+        _reclaim_background_total.add(count)
+        if _reclaim_total is not None:
+            _reclaim_total.add(count)

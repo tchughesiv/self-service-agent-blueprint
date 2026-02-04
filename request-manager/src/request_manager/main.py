@@ -1,5 +1,6 @@
 """Main FastAPI application for Request Manager."""
 
+import asyncio
 import json
 
 # Configure structured logging
@@ -143,6 +144,17 @@ async def _request_manager_startup() -> None:
         logger.warning(
             "Pod name not found in environment (HOSTNAME or POD_NAME) - single pod polling not started"
         )
+
+    if pod_name:
+        # Start pod heartbeat (for reclaim liveness)
+        from .pod_heartbeat import run_pod_heartbeat_loop
+
+        asyncio.create_task(run_pod_heartbeat_loop())
+
+        # Start background reclaim (stuck processing across sessions)
+        from .background_reclaim import run_background_reclaim_loop
+
+        asyncio.create_task(run_background_reclaim_loop())
 
     # Start session cleanup background task
     asyncio.create_task(_session_cleanup_task())
@@ -600,18 +612,13 @@ async def _process_request_adaptive(
     ],
     db: AsyncSession,
     timeout: int = int(os.getenv("AGENT_TIMEOUT", "120")),
-    is_cloudevent_request: bool = False,
 ) -> Dict[str, Any]:
     """Process a request synchronously and return the actual AI response.
 
     All user-facing and system-facing endpoints (web, CLI, Slack, tool, generic)
-    should return immediate responses. All service-to-service communication uses
-    CloudEvents/eventing.
-
-    Args:
-        is_cloudevent_request: If True, this is a CloudEvent request from integration-dispatcher
-                             (doesn't need pod_name since integration-dispatcher handles responses separately).
-                             If False, this is a regular request-manager endpoint (needs pod_name for polling).
+    should return immediate responses. All use the same flow: accept → wait for turn
+    → process one → return. CloudEvent requests from integration-dispatcher follow
+    the same path; responses are delivered via DB polling (any pod can process).
     """
     if not unified_processor:
         raise HTTPException(
@@ -621,15 +628,88 @@ async def _process_request_adaptive(
 
     try:
         # Use unified processor for all requests (eventing-based communication)
-        return await unified_processor.process_request_sync(
-            request, db, timeout, set_pod_name=not is_cloudevent_request
-        )
+        return await unified_processor.process_request_sync(request, db, timeout)
     except Exception as e:
-        logger.error("Failed to process request", error=str(e))
+        from .exceptions import RequestLogCreationError, SessionLockTimeoutError
+
+        if isinstance(e, (RequestLogCreationError, SessionLockTimeoutError)):
+            try:
+                from .session_metrics import (
+                    record_lock_timeout,
+                    record_request_log_creation_failure,
+                )
+
+                if isinstance(e, RequestLogCreationError):
+                    record_request_log_creation_failure()
+                else:
+                    record_lock_timeout()
+            except Exception:  # noqa: BLE001
+                pass
+            logger.warning(
+                "Request failed - service unavailable",
+                error=str(e),
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Service temporarily unavailable. Please try again.",
+            ) from e
+
+        # Agent response timeout → 503 for retry (asyncio.TimeoutError from wait_for)
+        def _is_timeout(exc: BaseException) -> bool:
+            check: BaseException | None = exc
+            while check:
+                if isinstance(check, (TimeoutError, asyncio.TimeoutError)):
+                    return True
+                check = getattr(check, "__cause__", None) or getattr(
+                    check, "__context__", None
+                )
+            return False
+
+        if _is_timeout(e):
+            logger.warning(
+                "Request failed - agent response timeout",
+                error=str(e),
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Service temporarily unavailable. Please try again.",
+            ) from e
+
+        # Transient DB errors (connection closed, invalid transaction) → 503 for retry
+        def _is_transient_db_error(exc: BaseException) -> bool:
+            s = str(exc).lower()
+            if "connection" in s and ("closed" in s or "does not exist" in s):
+                return True
+            if "invalid transaction" in s and "rollback" in s:
+                return True
+            return False
+
+        exc_check: BaseException | None = e
+        while exc_check:
+            if _is_transient_db_error(exc_check):
+                break
+            exc_check = getattr(exc_check, "__cause__", None)
+        else:
+            exc_check = None
+        if exc_check is not None:
+            logger.warning(
+                "Request failed - transient DB error (retry)",
+                error=str(exc_check),
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Service temporarily unavailable. Please try again.",
+            ) from e
+        err_msg = str(e) or f"{type(e).__name__}: {repr(e)}"
+        logger.error(
+            "Failed to process request",
+            error=err_msg,
+            exc_type=type(e).__name__,
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to process request",
-        )
+        ) from e
 
 
 async def _handle_request_created_event_from_data(
@@ -754,9 +834,7 @@ async def _handle_request_created_event_from_data(
             event_id=event_id,
         )
 
-        result = await _process_request_adaptive(
-            request, db, is_cloudevent_request=True
-        )
+        result = await _process_request_adaptive(request, db)
 
         # Record successful event processing to prevent duplicate processing
         # This is critical for preventing race conditions when multiple pods receive the same event
@@ -837,6 +915,11 @@ async def _handle_agent_response_event_from_data(
             response_data_keys=list(response_data.keys()),
         )
 
+        # Merge agent_received_at into metadata so it gets stored in response_metadata
+        metadata = dict(response_data.get("metadata") or {})
+        if response_data.get("agent_received_at"):
+            metadata["agent_received_at"] = response_data.get("agent_received_at")
+
         # Use unified response handler (payload is in response_data = event_data["data"])
         response_handler = UnifiedResponseHandler(db)
         result = await response_handler.process_agent_response(
@@ -845,11 +928,22 @@ async def _handle_agent_response_event_from_data(
             user_id=user_id,
             agent_id=agent_id,
             content=content,
-            metadata=response_data.get("metadata", {}),
+            metadata=metadata,
             processing_time_ms=response_data.get("processing_time_ms"),
             requires_followup=response_data.get("requires_followup", False),
             followup_actions=response_data.get("followup_actions", []),
         )
+
+        # Fetch RequestLog for created_at (response ordering, API and forward payload)
+        created_at_iso: Optional[str] = None
+        from shared_models.models import RequestLog
+        from sqlalchemy import select
+
+        req_log_stmt = select(RequestLog).where(RequestLog.request_id == request_id)
+        req_log_result = await db.execute(req_log_stmt)
+        req_log = req_log_result.scalar_one_or_none()
+        if req_log and req_log.created_at:
+            created_at_iso = req_log.created_at.isoformat()
 
         # Resolve any waiting response futures for this request (fast path)
         # Note: If pod_name is NULL, ANY pod that receives the response event can immediately
@@ -858,18 +952,13 @@ async def _handle_agent_response_event_from_data(
         # and will be picked up by database polling in wait_for_response
         try:
             from request_manager.communication_strategy import resolve_response_future
+            from request_manager.response_builder import (
+                build_response_data_from_event_data,
+            )
 
-            # Construct complete response_data dict with all required fields (payload is in response_data)
-            complete_response_data = {
-                "request_id": request_id,
-                "session_id": session_id,
-                "agent_id": agent_id,
-                "content": content,
-                "metadata": response_data.get("metadata", {}),
-                "processing_time_ms": response_data.get("processing_time_ms"),
-                "requires_followup": response_data.get("requires_followup", False),
-                "followup_actions": response_data.get("followup_actions", []),
-            }
+            complete_response_data = build_response_data_from_event_data(
+                response_data, created_at_iso=created_at_iso
+            )
 
             future_resolved = resolve_response_future(
                 request_id, complete_response_data
@@ -895,7 +984,7 @@ async def _handle_agent_response_event_from_data(
 
         # Only forward response to Integration Dispatcher if it was actually processed
         if result.get("status") == "processed":
-            # Ensure response_data has session_id before forwarding
+            # Ensure response_data has session_id and created_at before forwarding
             if "session_id" not in response_data:
                 response_data["session_id"] = session_id
                 logger.warning(
@@ -903,6 +992,12 @@ async def _handle_agent_response_event_from_data(
                     request_id=request_id,
                     session_id=session_id,
                 )
+            if created_at_iso is not None:
+                response_data["created_at"] = created_at_iso
+            if response_data.get("agent_received_at") is None and metadata.get(
+                "agent_received_at"
+            ):
+                response_data["agent_received_at"] = metadata["agent_received_at"]
             logger.info(
                 "Forwarding response to Integration Dispatcher",
                 request_id=request_id,
@@ -1151,6 +1246,7 @@ async def _forward_response_to_integration_dispatcher(
             "content": event_data.get("content"),
             "template_variables": template_variables,
             "agent_id": event_data.get("agent_id"),
+            "created_at": event_data.get("created_at"),
         }
         # Add email thread fields when present (non-empty) so integration-dispatcher can set In-Reply-To/References
         if email_message_id:

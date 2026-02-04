@@ -29,7 +29,7 @@ testIntegrationEnabled: false
 # Database Configuration
 database:
   # Expected migration version that services should wait for
-  expectedMigrationVersion: "003"
+  expectedMigrationVersion: "004"
   
   # Database connection URL - leave empty to use default pgvector service
   # Format: postgresql://username:password@host:port/database
@@ -151,7 +151,11 @@ promptGuard:
       successThreshold: 1
 
 # PostgreSQL configuration for llama-stack agent persistence
+# max_connections=200 for all envs; unified pool sizes (test/prod same).
 pgvector:
+  args:
+    - "-c"
+    - "max_connections=200"
   extraDatabases:
     - name: llama_agents
       vectordb: false
@@ -307,14 +311,14 @@ requestManagement:
       url: "http://kafka-broker-ingress.knative-eventing.svc.cluster.local"
       config:
         # Kafka Broker configuration
-        numPartitions: 3
+        numPartitions: 6  # Balance parallelism (less cross-session blocking) vs overhead; safe with 1–2 broker pods
         replicationFactor: 1
         retentionDuration: P7D
     
     # Mock Eventing Service (default eventing mode for development and testing)
     mockEventing:
       enabled: true  # Default to mock eventing service (disable for full Knative eventing)
-      replicas: 1
+      replicas: 1  # Must stay 1: partition-key ordering requires single pod (REPLICA_COUNT excludes mock-eventing)
       logLevel: "INFO"
       uvicornWorkers: 4  # Number of uvicorn worker processes for handling concurrent requests
       resources: {}
@@ -370,8 +374,23 @@ requestManagement:
   # Request Manager Service
   requestManager:
     replicas: 1
+    # Pool sized for max_connections=200 (unified test/prod)
+    database:
+      poolSize: 8
+      maxOverflow: 8
     uvicornWorkers: 4
     resources: {}
+    # Session serialization (one request in-flight per session, FIFO, stuck reclaim)
+    # See docs/SESSION_SERIALIZATION_RUNBOOK.md
+    sessionSerialization:
+      # Must be >= agent.timeout so queued requests can wait for current one to finish
+      lockWaitTimeoutSeconds: 180   # Match agent.timeout (180); reduce if agent.timeout < 180
+      lockPollIntervalSeconds: 0.05 # Poll interval for lock acquisition (seconds); longer reduces DB load under contention
+      stuckBufferSeconds: 30        # Added to AGENT_TIMEOUT for time-based reclaim
+      heartbeatIntervalSeconds: 15  # How often each pod updates pod_heartbeats
+      heartbeatGraceSeconds: 30     # No check-in for this long → pod considered dead
+      backgroundReclaimIntervalSeconds: 45  # Scan for stuck processing
+      reclaimAction: "requeue"      # requeue | fail (stuck requests)
     # Session Management Configuration
     sessions:
       # Set to "true" to maintain separate sessions per integration type (legacy behavior)
@@ -516,6 +535,18 @@ requestManagement:
       targetCPUUtilization: 70
       targetMemoryUtilization: 80
   
+  # Database pool configuration (unified test/prod, max_connections=200)
+  database:
+    poolSize: 8
+    maxOverflow: 8
+    poolTimeout: 30
+    poolRecycle: 3600
+    statementTimeout: 30000
+    idleTransactionTimeout: 300000
+    syncPoolMinSize: 1
+    syncPoolMaxSize: 5
+    syncPoolTimeout: 30
+
   # Init Job
   initJob:
     resources: {}

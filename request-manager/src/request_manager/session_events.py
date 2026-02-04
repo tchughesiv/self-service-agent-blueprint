@@ -75,9 +75,10 @@ async def _handle_session_create_or_get_event(
                 user_id=canonical_user_id,
                 event_id=event_id,
             )
-            # Publish SESSION_READY event
+            # Publish SESSION_READY event (convert ORM to SessionResponse for model_dump)
+            session_response = SessionResponse.model_validate(existing_session)
             await _publish_session_ready_event(
-                existing_session, correlation_id, event_id
+                session_response, correlation_id, event_id
             )
             return await create_cloudevent_response(
                 status="success",
@@ -137,8 +138,9 @@ async def _handle_session_create_or_get_event(
                     user_id=canonical_user_id,
                     event_id=event_id,
                 )
+                session_response = SessionResponse.model_validate(existing_session)
                 await _publish_session_ready_event(
-                    existing_session, correlation_id, event_id
+                    session_response, correlation_id, event_id
                 )
                 return await create_cloudevent_response(
                     status="success",

@@ -17,6 +17,7 @@ from .database import (
     get_db_config,
     get_db_session,
     get_db_session_dependency,
+    get_db_utc_now,
 )
 
 # Export CloudEvent utilities
@@ -51,8 +52,21 @@ from .logging import (
     log_response,
 )
 
+# Export request log ordering utilities
+from .request_log import (
+    get_request_created_at,
+    has_earlier_pending_or_processing,
+)
+
 # Export security utilities
 from .security import verify_slack_signature
+
+# Export session lock (agent cross-pod serialization)
+from .session_lock import (
+    acquire_agent_session_lock,
+    release_agent_session_lock,
+    session_id_to_lock_key,
+)
 
 # Export session management
 from .session_manager import BaseSessionManager
@@ -90,6 +104,12 @@ __all__ = [
     "get_db_config",
     "get_db_session",
     "get_db_session_dependency",
+    "get_db_utc_now",
+    "acquire_agent_session_lock",
+    "release_agent_session_lock",
+    "session_id_to_lock_key",
+    "get_request_created_at",
+    "has_earlier_pending_or_processing",
     "HealthChecker",
     "HealthCheckResult",
     "simple_health_check",

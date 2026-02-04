@@ -2,7 +2,8 @@
 
 import os
 from contextlib import asynccontextmanager
-from typing import Any, AsyncGenerator, Dict, List, Optional, Type, TypeVar
+from datetime import datetime, timedelta, timezone
+from typing import Any, AsyncGenerator, Dict, List, Optional, Type, TypeVar, cast
 
 import psycopg
 import psycopg_pool
@@ -37,6 +38,13 @@ class DatabaseConfig:
         self.sync_pool_min_size = int(os.getenv("DB_SYNC_POOL_MIN_SIZE", "1"))
         self.sync_pool_max_size = int(os.getenv("DB_SYNC_POOL_MAX_SIZE", "5"))
         self.sync_pool_timeout = int(os.getenv("DB_SYNC_POOL_TIMEOUT", "30"))
+
+        # PostgreSQL session timeouts (ms). statement_timeout must exceed SESSION_LOCK_WAIT_TIMEOUT
+        # so lock operations are not cancelled (request-manager override sets this for lock polling).
+        self.statement_timeout_ms = int(os.getenv("DB_STATEMENT_TIMEOUT", "30000"))
+        self.idle_transaction_timeout_ms = int(
+            os.getenv("DB_IDLE_TRANSACTION_TIMEOUT", "300000")
+        )
 
         # Debug settings
         self.echo_sql = os.getenv("SQL_DEBUG", "false").lower() == "true"
@@ -98,11 +106,14 @@ class DatabaseManager:
             max_overflow=self.config.max_overflow,
             pool_timeout=self.config.pool_timeout,
             connect_args={
-                "command_timeout": 30,  # Connection timeout
+                # Per-query timeout; align with statement_timeout (request-manager overrides for lock wait).
+                "command_timeout": self.config.statement_timeout_ms // 1000,
                 "server_settings": {
                     "application_name": "self-service-agent",
-                    "statement_timeout": "30000",  # 30 second statement timeout
-                    "idle_in_transaction_session_timeout": "300000",  # 5 minute idle timeout
+                    "statement_timeout": str(self.config.statement_timeout_ms),
+                    "idle_in_transaction_session_timeout": str(
+                        self.config.idle_transaction_timeout_ms
+                    ),
                 },
             },
         )
@@ -302,7 +313,7 @@ class DatabaseManager:
 
         # Determine expected version from parameter, environment, or default
         if expected_version is None:
-            expected_version = os.getenv("EXPECTED_MIGRATION_VERSION", "003")
+            expected_version = os.getenv("EXPECTED_MIGRATION_VERSION", "004")
 
         start_time = time()
         logger.info(
@@ -520,8 +531,6 @@ class DatabaseUtils:
             True if this pod successfully claimed the event (can process it)
             False if another pod already claimed it (must skip processing)
         """
-        from datetime import datetime, timedelta, timezone
-
         from sqlalchemy import select, update
 
         from .models import ProcessedEvent
@@ -558,9 +567,7 @@ class DatabaseUtils:
                             .values(
                                 processed_by=processed_by,
                                 processing_result="processing",
-                                created_at=datetime.now(
-                                    timezone.utc
-                                ),  # Reset timestamp
+                                created_at=func.now(),  # DB clock for multi-pod consistency
                             )
                         )
                         await db.execute(stmt)
@@ -782,6 +789,24 @@ def get_database_manager() -> DatabaseManager:
     if _db_manager is None:
         _db_manager = DatabaseManager()
     return _db_manager
+
+
+async def get_db_utc_now() -> datetime:
+    """Get current UTC timestamp from database (avoids pod clock skew for ordering).
+
+    Use this instead of datetime.now(timezone.utc) when timestamps must be comparable
+    across pods (e.g. agent_received_at for FIFO ordering).
+    """
+    db_manager = get_database_manager()
+    async with db_manager.get_session() as db:
+        result = await db.execute(text("SELECT now()"))
+        ts = result.scalar()
+        if ts is None:
+            raise RuntimeError("SELECT now() returned None")
+        # Ensure timezone-aware (PostgreSQL now() returns timestamptz)
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        return cast(datetime, ts)
 
 
 def get_db_config() -> DatabaseConfig:
