@@ -64,6 +64,14 @@ class CloudEventBuilder:
         if session_id:
             attributes["sessionid"] = session_id
 
+        # Partition key for Kafka ordering (session_id preferred; user_id for first request)
+        # Use both partitionkey and partitionKey for Knative Kafka broker compatibility
+        partition_key = session_id or user_id
+        if partition_key:
+            pk = str(partition_key)
+            attributes["partitionkey"] = pk
+            attributes["partitionKey"] = pk  # camelCase for some brokers
+
         return CloudEvent(attributes, request_data)
 
     def create_response_event(
@@ -87,6 +95,12 @@ class CloudEventBuilder:
             attributes["agentid"] = agent_id
         if session_id:
             attributes["sessionid"] = session_id
+
+        # Partition key for Kafka ordering (required for agent responses)
+        if session_id:
+            pk = str(session_id)
+            attributes["partitionkey"] = pk
+            attributes["partitionKey"] = pk  # camelCase for some brokers
 
         return CloudEvent(attributes, response_data)
 
@@ -229,6 +243,11 @@ class CloudEventSender:
 
             # Convert to structured format
             headers, data = to_structured(event)
+            headers = dict(headers)
+            # Ensure Ce-partitionkey header for Knative Kafka broker (parses headers reliably)
+            partition_key = event.get("partitionkey") or event.get("partitionKey")
+            if partition_key:
+                headers["ce-partitionkey"] = str(partition_key)
 
             async with httpx.AsyncClient() as client:
                 logger.debug(

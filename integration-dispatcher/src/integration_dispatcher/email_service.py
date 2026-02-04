@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import imaplib
 import os
 import re
 import socket
@@ -414,6 +415,66 @@ class EmailService:
                 return self.pod_id
         return None
 
+    async def _sort_email_ids_by_received_time(
+        self, imap_client: Any, email_ids: list[str]
+    ) -> list[str]:
+        """Sort email IDs by INTERNALDATE (server receive time) for FIFO processing.
+
+        Falls back to numeric sort if INTERNALDATE fetch fails.
+        """
+        if len(email_ids) <= 1:
+            return email_ids
+        try:
+            message_set = ",".join(email_ids)
+            typ, data = await imap_client.fetch(message_set, "(INTERNALDATE)")
+            if typ != "OK" or not data:
+                logger.debug(
+                    "INTERNALDATE fetch failed, falling back to numeric sort",
+                    typ=typ,
+                    mailbox=self.imap_mailbox,
+                )
+                return sorted(email_ids, key=int)
+            # Parse FETCH response: "* N FETCH (INTERNALDATE \"DD-Mon-YYYY HH:MM:SS +HHMM\")"
+            id_to_date: Dict[str, tuple[Any, ...]] = {}
+            internaldate_re = re.compile(
+                rb"(\d+)\s+FETCH\s+\(INTERNALDATE\s+\"([^\"]+)\""
+            )
+            for item in data:
+                if isinstance(item, bytes):
+                    match = internaldate_re.search(item)
+                    if match:
+                        msg_id = match.group(1).decode("utf-8")
+                        date_str = match.group(2).decode("utf-8")
+                        try:
+                            parsed = imaplib.Internaldate2tuple(
+                                date_str.encode("utf-8")
+                            )
+                            if parsed is not None:
+                                id_to_date[msg_id] = parsed
+                        except (ValueError, TypeError):
+                            pass
+            if len(id_to_date) < len(email_ids):
+                logger.debug(
+                    "Could not parse INTERNALDATE for all messages, falling back to numeric sort",
+                    parsed=len(id_to_date),
+                    total=len(email_ids),
+                )
+                return sorted(email_ids, key=int)
+            # Use (9999,...) for missing so unparsed IDs sort to end
+            return sorted(
+                email_ids,
+                key=lambda eid: id_to_date.get(
+                    eid, (9999, 12, 31, 23, 59, 59, 0, 0, 0)
+                ),
+            )
+        except Exception as e:
+            logger.warning(
+                "Error sorting by INTERNALDATE, falling back to numeric sort",
+                error=str(e),
+                mailbox=self.imap_mailbox,
+            )
+            return sorted(email_ids, key=int)
+
     async def _poll_mailbox(self) -> None:
         """Poll IMAP mailbox for new emails.
 
@@ -496,9 +557,10 @@ class EmailService:
                         count=len(email_ids),
                         mailbox=self.imap_mailbox,
                     )
-                    # With leader election, only this pod polls, so no need to mark as read immediately
-                    # We'll mark as read after successful processing to allow retries on failure
-                    email_ids_to_process = email_ids
+                    # Sort by received time (INTERNALDATE) for FIFO processing
+                    email_ids_to_process = await self._sort_email_ids_by_received_time(
+                        imap_client, email_ids
+                    )
                 else:
                     logger.debug("No unread emails found", mailbox=self.imap_mailbox)
             else:
@@ -683,29 +745,6 @@ class EmailService:
                     message_id, from_addr, date
                 )
 
-                # ✅ ATOMIC EVENT CLAIMING: Use check-and-set pattern to prevent duplicate processing
-                # This provides 100% guarantee - only one pod can claim and process an event
-                event_claimed = await DatabaseUtils.try_claim_event_for_processing(
-                    db,
-                    email_message_id,
-                    "email_message",
-                    "imap",
-                    "integration-dispatcher",
-                )
-
-                if not event_claimed:
-                    logger.debug(
-                        "Email already claimed by another pod - skipping duplicate",
-                        email_message_id=email_message_id,
-                        from_addr=from_addr,
-                    )
-                    # Mark as read since it's already been processed
-                    try:
-                        await imap_client.store(email_id, "+FLAGS", "\\Seen")
-                    except Exception:
-                        pass  # Ignore errors when marking as read
-                    return False
-
                 # Get body content
                 body = self._extract_body(email_message)
 
@@ -720,21 +759,23 @@ class EmailService:
                 # Resolve user_id
                 user_id = await self._resolve_user_id(from_addr, db)
 
-                # Simple rate limiting to prevent rapid-fire requests
+                # Rate limiting: wait (not skip) to preserve 2s cooldown while processing all emails in order
                 import time
 
                 current_time = time.time()
                 last_request_time = self._last_request_time.get(user_id, 0)
+                elapsed = current_time - last_request_time
 
-                if current_time - last_request_time < 2.0:  # 2 second cooldown
+                if elapsed < 2.0:  # 2 second cooldown per user
+                    sleep_time = 2.0 - elapsed
                     logger.debug(
-                        "Rate limiting: ignoring rapid email request",
+                        "Rate limiting: waiting before processing same-user email",
                         user_id=user_id,
-                        time_since_last=current_time - last_request_time,
+                        sleep_seconds=round(sleep_time, 1),
                     )
-                    return False
+                    await asyncio.sleep(sleep_time)
 
-                self._last_request_time[user_id] = current_time
+                self._last_request_time[user_id] = time.time()
 
                 logger.info(
                     "Processing incoming email",
@@ -743,6 +784,26 @@ class EmailService:
                     subject=subject[:50],
                     message_id=message_id,
                 )
+
+                # Claim immediately before forward to minimize crash window (claim + forward = ~100-500ms)
+                event_claimed = await DatabaseUtils.try_claim_event_for_processing(
+                    db,
+                    email_message_id,
+                    "email_message",
+                    "imap",
+                    "integration-dispatcher",
+                )
+                if not event_claimed:
+                    logger.debug(
+                        "Email already claimed - skipping duplicate",
+                        email_message_id=email_message_id,
+                        from_addr=from_addr,
+                    )
+                    try:
+                        await imap_client.store(email_id, "+FLAGS", "\\Seen")
+                    except Exception:
+                        pass
+                    return False
 
                 # Forward to Request Manager
                 success = await self._forward_to_request_manager(

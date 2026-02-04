@@ -757,6 +757,7 @@ async def handle_cloudevent(
             content=response_data.get("content"),
             template_variables=response_data.get("template_variables", {}),
             agent_id=response_data.get("agent_id"),
+            created_at=response_data.get("created_at"),
             email_message_id=response_data.get("email_message_id"),
             email_in_reply_to=response_data.get("email_in_reply_to"),
             email_references=response_data.get("email_references"),
@@ -774,20 +775,8 @@ async def handle_cloudevent(
             ),
         )
 
-        # Dispatch to integrations
+        # Dispatch to integrations (Kafka partition ordering delivers in order)
         results = await dispatcher.dispatch(delivery_request, db)
-
-        logger.info(
-            "CloudEvent processed successfully",
-            request_id=delivery_request.request_id,
-            session_id=delivery_request.session_id,
-            user_id=delivery_request.user_id,
-            agent_id=delivery_request.agent_id,
-            integrations_dispatched=len(results),
-            integration_results=[
-                r.get("integration_type") for r in results if isinstance(r, dict)
-            ],
-        )
 
         # ✅ UPDATE EVENT PROCESSING STATUS (event was already claimed)
         if event_id:
@@ -815,6 +804,18 @@ async def handle_cloudevent(
                 request_id=delivery_request.request_id,
                 session_id=delivery_request.session_id,
             )
+
+        logger.info(
+            "CloudEvent processed successfully",
+            request_id=delivery_request.request_id,
+            session_id=delivery_request.session_id,
+            user_id=delivery_request.user_id,
+            agent_id=delivery_request.agent_id,
+            integrations_dispatched=len(results),
+            integration_results=[
+                r.get("integration_type") for r in results if isinstance(r, dict)
+            ],
+        )
 
         return await create_cloudevent_response(
             status="processed",

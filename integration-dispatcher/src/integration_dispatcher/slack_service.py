@@ -1018,6 +1018,10 @@ class SlackService:
                 "metadata": metadata or {},
             }
 
+            # Session ID for partition key (Kafka ordering); user_id used when None (first request)
+            if metadata and metadata.get("session_id"):
+                event_data["session_id"] = metadata["session_id"]
+
             # Include email_from if available (similar to email service)
             if user_email:
                 event_data["email_from"] = user_email

@@ -9,7 +9,7 @@ metadata:
     {{- include "self-service-agent.labels" . | nindent 4 }}
 data:
   bootstrap.servers: "{{ .Values.requestManagement.kafka.name }}-kafka-bootstrap.{{ .Release.Namespace }}.svc:9092"
-  default.topic.partitions: "{{ .Values.requestManagement.knative.broker.config.numPartitions | default 3 }}"
+  default.topic.partitions: "{{ .Values.requestManagement.knative.broker.config.numPartitions | default 6 }}"
   default.topic.replication.factor: "{{ .Values.requestManagement.knative.broker.config.replicationFactor | default 1 }}"
 ---
 apiVersion: eventing.knative.dev/v1

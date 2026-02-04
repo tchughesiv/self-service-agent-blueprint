@@ -42,7 +42,7 @@ Asyncio is a great fit for this quickstart as we've seen that most of the time a
 
 ### Quickstart components
 
-Use standard kubernetes scaling techniques. For agent-service, integration-dispatcher, request-manager, mock-eventing, you can scale the number of uvicorn workers as well as the number of replicas. For MCP servers (such as snow) the same is true, but special considerations which are covered in a later section. Both the number of workers and number of replicas can be configured in helm/values.yaml. As an example this snippet which is part of the configuration for the agent service sets 4 workers and 2 replicas:
+Use standard kubernetes scaling techniques. For agent-service, integration-dispatcher, request-manager, you can scale the number of uvicorn workers as well as the number of replicas. **Mock-eventing must stay at 1 replica** when using partition-key ordering—multiple replicas would break per-session FIFO (events for the same partition_key can hit different pods). For MCP servers (such as snow) the same is true, but special considerations which are covered in a later section. Both the number of workers and number of replicas can be configured in helm/values.yaml. As an example this snippet which is part of the configuration for the agent service sets 4 workers and 2 replicas:
 
 ```
  agentService:

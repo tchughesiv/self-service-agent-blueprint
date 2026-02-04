@@ -17,6 +17,8 @@ env:
   # Update this when UV_VERSION in Makefile changes
   UV_VERSION: "0.8.9"
   PYTHON_VERSION: "3.12"
+  # Namespace for e2e tests (used by kind action, kubectl, and make targets)
+  E2E_NAMESPACE: "test"
 
 jobs:
   e2e-tests:
@@ -57,6 +59,7 @@ jobs:
       - name: Initialize cluster and deploy application
         uses: ./.github/actions/kind
         with:
+          namespace: ${{ env.E2E_NAMESPACE }}
           replica_count: "2"
           llm: ${{ vars.LLM_INFERENCE }}
           llm_id: ${{ vars.LLM_ID_INFERENCE }}
@@ -64,10 +67,19 @@ jobs:
         env:
           LLM_API_TOKEN: ${{ secrets.LLM_API_TOKEN_INFERENCE }}
 
-      - name: Set `test` as default namespace on Kind
+      - name: Set default namespace on Kind
         shell: bash
         run: |
-          kubectl config set-context --current --namespace=test
+          kubectl config set-context --current --namespace=${{ env.E2E_NAMESPACE }}
+
+      - name: Run session serialization integration test
+        run: make test-session-serialization-integration NAMESPACE=${{ env.E2E_NAMESPACE }}
+
+      - name: Run session reclaim integration test
+        run: make test-session-reclaim-integration NAMESPACE=${{ env.E2E_NAMESPACE }}
+
+      - name: Run background reclaim integration test
+        run: make test-session-background-reclaim-integration NAMESPACE=${{ env.E2E_NAMESPACE }}
 
       - name: Install evaluations dependencies
         shell: bash
