@@ -123,6 +123,10 @@ SERVICENOW_DEV_PORTAL_PASSWORD ?=
 PROMPTGUARD_MODEL ?= llama-prompt-guard-2-86m
 PROMPTGUARD_MODEL_ID ?= meta-llama/Llama-Prompt-Guard-2-86M
 
+# LLM max output tokens (server-side; Responses API does not support per-request max_tokens yet).
+# Set when enabling an LLM via LLM= so input + output stay within model context (e.g. 14k).
+LLM_MAX_TOKENS ?= 2048
+
 # Evaluation Configuration
 # Enable full laptop details validation by default unless explicitly disabled
 # Set VALIDATE_FULL_LAPTOP_DETAILS=false to disable validation
@@ -175,6 +179,7 @@ helm_llama_stack_args = \
     $(if $(SAFETY),--set global.models.$(SAFETY).registerShield=true,) \
     $(if $(LLM_URL),--set global.models.$(LLM).url='$(LLM_URL)',) \
     $(if $(LLM_ID),--set global.models.$(LLM).id='$(LLM_ID)',) \
+    $(if $(LLM),--set global.models.$(LLM).maxTokens=$(LLM_MAX_TOKENS),) \
     $(if $(SAFETY_URL),--set global.models.$(SAFETY).url='$(SAFETY_URL)',) \
     $(if $(SAFETY_ID),--set global.models.$(SAFETY).id='$(SAFETY_ID)',) \
     $(if $(LLM_API_TOKEN),--set global.models.$(LLM).apiToken='$(LLM_API_TOKEN)',) \

@@ -18,12 +18,13 @@ ignored_input_shield_categories:
 # Output shield ignores: categories to allow in agent responses
 ignored_output_shield_categories: []
 lg_state_machine_config: "config/lg-prompts/lg-prompt-big.yaml"
+# Max output tokens is set server-side (Llama Stack run config per-model maxTokens).
+# See https://github.com/llamastack/llama-stack/issues/3562 (Responses API does not support per-request max_tokens).
 sampling_params:
   strategy:
     type: "top_p"
     temperature: 0.7
     top_p: 0.95
-  max_tokens: 2000
 mcp_servers:
   - name: "snow"
     uri: "http://mcp-self-service-agent-snow:8000/mcp"

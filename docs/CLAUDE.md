@@ -132,6 +132,7 @@ The system uses an **Integration Defaults** approach with **User Overrides** to 
 - `SNOW_API_KEY`, `HR_API_KEY`: External service API keys
 - `SAFETY`: Safety model for content moderation (e.g., meta-llama/Llama-Guard-3-8B)
 - `SAFETY_URL`: LlamaStack API endpoint for moderation (if shields enabled)
+- `LLM_MAX_TOKENS`: Max output tokens for the LLM when deploying with Makefile and `LLM=` (default 2048). Set in Helm as `global.models.<LLM>.maxTokens`; see `helm/values.yaml` and [Prompt Configuration Guide](guides/PROMPT_CONFIGURATION_GUIDE.md).
 
 ## Code Standards
 
