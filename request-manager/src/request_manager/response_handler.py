@@ -54,6 +54,7 @@ class UnifiedResponseHandler:
                     agent_id=agent_id,
                     processing_time_ms=processing_time_ms,
                     completed_at=datetime.now(timezone.utc),
+                    status="completed",
                 )
             )
             await self.db.execute(stmt)

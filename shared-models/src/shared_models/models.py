@@ -5,9 +5,10 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     Column,
 )
@@ -19,8 +20,9 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
-from sqlalchemy.dialects.postgresql import TIMESTAMP, UUID
+from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP, UUID
 from sqlalchemy.orm import relationship
 
 from .base import Base, TimestampMixin
@@ -31,6 +33,8 @@ __all__ = [
     "IntegrationType",
     "SessionStatus",
     "DeliveryStatus",
+    "RequestStatus",
+    "PodHeartbeat",
     "User",
     "RequestSession",
     "RequestLog",
@@ -44,6 +48,7 @@ __all__ = [
     "NormalizedRequest",
     "DeliveryRequest",
     "ErrorResponse",
+    "EventOutbox",
 ]
 
 
@@ -80,6 +85,15 @@ class DeliveryStatus(str, Enum):
     FAILED = "FAILED"
     RETRYING = "RETRYING"
     EXPIRED = "EXPIRED"
+
+
+class RequestStatus(str, Enum):
+    """Request processing status for session serialization."""
+
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
 
 
 # User Models
@@ -146,7 +160,7 @@ class RequestSession(Base, TimestampMixin):  # type: ignore[misc]
 
     # Session statistics
     total_requests = Column(Integer, default=0, nullable=False)
-    last_request_id = Column(String(36))  # Most recent request ID
+    last_request_id = Column(String(255))  # Most recent request ID
     last_request_at = Column(TIMESTAMP(timezone=True))
     expires_at = Column(TIMESTAMP(timezone=True))
 
@@ -162,6 +176,13 @@ class RequestSession(Base, TimestampMixin):  # type: ignore[misc]
     # Optimistic locking
     version = Column(Integer, default=0, nullable=False, server_default="0")
 
+    # Override created_at: DB server_default for multi-pod ordering (avoids clock skew)
+    created_at = Column(
+        TIMESTAMP(timezone=True),
+        server_default=text("CURRENT_TIMESTAMP"),
+        nullable=False,
+    )
+
     # Relationships
     user = relationship("User", back_populates="sessions")
     request_logs = relationship(
@@ -175,7 +196,7 @@ class RequestLog(Base, TimestampMixin):  # type: ignore[misc]
     __tablename__ = "request_logs"
 
     id = Column(Integer, primary_key=True)
-    request_id = Column(String(36), unique=True, nullable=False, index=True)
+    request_id = Column(String(255), unique=True, nullable=False, index=True)
     session_id = Column(
         String(36),
         ForeignKey("request_sessions.session_id"),
@@ -197,17 +218,56 @@ class RequestLog(Base, TimestampMixin):  # type: ignore[misc]
     response_metadata = Column(JSON, default=dict)
 
     # CloudEvent tracking
-    cloudevent_id = Column(String(36))
+    cloudevent_id = Column(String(255))
     cloudevent_type = Column(String(100))
 
     # Timing
     completed_at = Column(TIMESTAMP(timezone=True))
 
-    # Pod tracking (for scaled deployments)
-    pod_name = Column(String(255), index=True)  # Pod that initiated the request
+    # Session serialization: status + processing metadata
+    status = Column(
+        String(50), nullable=False, default=RequestStatus.COMPLETED.value
+    )  # pending | processing | completed | failed
+    processing_started_at = Column(TIMESTAMP(timezone=True))  # When status → processing
+
+    # Pod tracking: pod that is *processing* the request (set at dequeue, not accept)
+    pod_name = Column(String(255), index=True)
+
+    # Override created_at/updated_at: use DB server_default + trigger for deterministic
+    # ordering across replicas (Python datetime.now varies by pod; DB uses single clock)
+    created_at = Column(
+        TIMESTAMP(timezone=True),
+        server_default=text("CURRENT_TIMESTAMP"),
+        nullable=False,
+    )
+    updated_at = Column(
+        TIMESTAMP(timezone=True),
+        server_default=text("CURRENT_TIMESTAMP"),
+        nullable=False,
+    )
 
     # Relationships
     session = relationship("RequestSession", back_populates="request_logs")
+
+    __table_args__ = (
+        Index(
+            "ix_request_logs_session_status_created",
+            "session_id",
+            "status",
+            "created_at",
+        ),
+    )
+
+
+class PodHeartbeat(Base):  # type: ignore[misc]
+    """Pod liveness for request-manager reclaim (detect crashed pods)."""
+
+    __tablename__ = "pod_heartbeats"
+
+    pod_name = Column(String(255), primary_key=True)
+    last_check_in_at = Column(
+        TIMESTAMP(timezone=True), nullable=False
+    )  # Updated periodically by each pod
 
 
 # Integration Dispatcher Models
@@ -282,7 +342,7 @@ class DeliveryLog(Base, TimestampMixin):  # type: ignore[misc]
     id = Column(Integer, primary_key=True)
 
     # Request/session context
-    request_id = Column(String(36), nullable=False, index=True)
+    request_id = Column(String(255), nullable=False, index=True)
     session_id = Column(String(36), nullable=False, index=True)
     user_id = Column(
         UUID(as_uuid=False),
@@ -331,13 +391,47 @@ class DeliveryLog(Base, TimestampMixin):  # type: ignore[misc]
     )
 
 
+class EventOutbox(Base):  # type: ignore[misc]
+    """Transactional outbox for durable event publishing (Step 0.25)."""
+
+    __tablename__ = "event_outbox"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    source_service = Column(String(255), nullable=False)
+    event_type = Column(String(255), nullable=False)
+    idempotency_key = Column(String(512), nullable=False)
+    thread_order_key = Column(String(512), nullable=True)
+    payload = Column(JSONB, nullable=False)
+    status = Column(String(50), nullable=False, server_default=text("'pending'"))
+    last_error = Column(Text, nullable=True)
+    retry_count = Column(Integer, nullable=False, server_default=text("0"))
+    created_at = Column(
+        TIMESTAMP(timezone=True),
+        server_default=text("CURRENT_TIMESTAMP"),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "source_service",
+            "event_type",
+            "idempotency_key",
+            name="uq_event_outbox_source_type_idempotency",
+        ),
+    )
+
+
 class ProcessedEvent(Base, TimestampMixin):  # type: ignore[misc]
-    """Track processed CloudEvents to prevent duplicate processing."""
+    """Track processed CloudEvents to prevent duplicate processing.
+
+    Composite unique (event_id, processed_by) allows multiple services to claim
+    the same event independently (request-manager, agent-service, integration-dispatcher).
+    """
 
     __tablename__ = "processed_events"
 
     id = Column(Integer, primary_key=True)
-    event_id = Column(String(255), nullable=False, unique=True)  # ce-id
+    event_id = Column(String(255), nullable=False)  # ce-id
     event_type = Column(String(255), nullable=False)  # ce-type
     event_source = Column(String(255), nullable=False)  # ce-source
     request_id = Column(String(255), nullable=True)  # For correlation
@@ -346,8 +440,20 @@ class ProcessedEvent(Base, TimestampMixin):  # type: ignore[misc]
     processing_result = Column(String(50), nullable=False)  # success/error/skipped
     error_message = Column(Text, nullable=True)
 
-    # Index for fast lookups
+    # Override created_at: DB server_default for multi-pod ordering (avoids clock skew)
+    created_at = Column(
+        TIMESTAMP(timezone=True),
+        server_default=text("CURRENT_TIMESTAMP"),
+        nullable=False,
+    )
+
+    # Composite unique: each processor has its own claim per event
     __table_args__ = (
+        UniqueConstraint(
+            "event_id",
+            "processed_by",
+            name="uq_processed_events_event_id_processed_by",
+        ),
         Index("ix_processed_events_event_id", "event_id"),
         Index("ix_processed_events_request_id", "request_id"),
         Index("ix_processed_events_created_at", "created_at"),
@@ -457,6 +563,10 @@ class AgentResponse(BaseModel):
     requires_followup: bool = Field(default=False)
     followup_actions: List[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    agent_received_at: Optional[datetime] = Field(
+        default=None,
+        description="When the agent started processing (for FIFO ordering verification)",
+    )
 
 
 # Shared Pydantic models for inter-service communication
@@ -481,6 +591,8 @@ class NormalizedRequest(BaseModel):
     # Timestamps
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
+    model_config = ConfigDict(use_enum_values=True)
+
     @field_validator("integration_type", mode="before")
     @classmethod
     def normalize_integration_type(cls, v: Any) -> Any:
@@ -488,11 +600,6 @@ class NormalizedRequest(BaseModel):
         if isinstance(v, str):
             return IntegrationType(v.upper())
         return v
-
-    class Config:
-        """Pydantic config."""
-
-        use_enum_values = True
 
 
 class DeliveryRequest(BaseModel):
@@ -505,6 +612,9 @@ class DeliveryRequest(BaseModel):
     content: str
     template_variables: Dict[str, Any] = Field(default_factory=dict)
     agent_id: Optional[str] = None
+    created_at: Optional[str] = (
+        None  # ISO timestamp of receive time, for delivery ordering
+    )
     priority_override: Optional[int] = None
     # Email threading (RFC 5322): set on outgoing reply so clients keep the thread
     email_message_id: Optional[str] = None  # Message-ID of the email we're replying to

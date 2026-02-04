@@ -170,6 +170,7 @@ async def get_or_create_canonical_user(email_address: str, db: AsyncSession) -> 
                 email_address=email_address,
                 error=str(e),
             )
+            await db.rollback()
             # Retry lookup - another request likely created it
             stmt = select(User).where(User.primary_email == email_address)
             result = await db.execute(stmt)
@@ -259,7 +260,7 @@ async def resolve_canonical_user_id(
                     )
                     return user_id
                 except Exception as e:
-                    # If creation fails (e.g., concurrent creation), try to fetch again
+                    # If creation fails (e.g., concurrent creation), rollback and retry lookup
                     error_str = str(e).lower()
                     if (
                         "unique" in error_str
@@ -271,6 +272,7 @@ async def resolve_canonical_user_id(
                             user_id=user_id,
                             error=str(e),
                         )
+                        await db.rollback()
                         stmt = select(User).where(User.user_id == user_id)
                         result = await db.execute(stmt)
                         existing_user = result.scalar_one_or_none()

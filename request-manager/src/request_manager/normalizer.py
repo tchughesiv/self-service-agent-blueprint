@@ -29,7 +29,10 @@ class RequestNormalizer:
         current_agent_id: Optional[str] = None,
     ) -> NormalizedRequest:
         """Normalize a request to the internal format."""
-        request_id = str(uuid.uuid4())
+        # Use request_id from metadata when present (integration-dispatcher: Slack/Email)
+        # for deterministic event_id and broker dedup on retry
+        metadata = getattr(request, "metadata", None) or {}
+        request_id = metadata.get("request_id") or str(uuid.uuid4())
 
         # Always start with target_agent_id as None to allow routing detection to work
         # The routing logic will determine the correct agent based on the conversation

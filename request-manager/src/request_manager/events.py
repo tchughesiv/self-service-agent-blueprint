@@ -6,7 +6,8 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 import httpx
-from cloudevents.http import CloudEvent, to_structured
+from cloudevents.conversion import to_structured
+from cloudevents.http import CloudEvent
 from cloudevents.http.event import CloudEvent as CloudEventType
 from shared_models import EventTypes, configure_logging
 
@@ -66,15 +67,20 @@ class CloudEventPublisher:
         self.client = httpx.AsyncClient(timeout=config.timeout)
 
     async def publish_database_update_event(self, update_data: Dict[str, Any]) -> bool:
-        """Publish database update event to Agent Service."""
+        """Publish database update event to Agent Service.
+
+        Uses request_id as event id for deterministic dedup at agent try_claim.
+        """
+        request_id = update_data.get("request_id", "")
+        event_id = f"db-update-{request_id}" if request_id else str(uuid.uuid4())
         event = CloudEvent(
             {
                 "specversion": "1.0",
                 "type": EventTypes.DATABASE_UPDATE_REQUESTED,
                 "source": self.config.source,
-                "id": str(uuid.uuid4()),
+                "id": event_id,
                 "time": datetime.now(timezone.utc).isoformat(),
-                "subject": f"request/{update_data.get('request_id')}",
+                "subject": f"request/{request_id}",
                 "datacontenttype": "application/json",
             },
             update_data,

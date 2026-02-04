@@ -16,7 +16,7 @@ inputs:
     description: The LLM URL
     required: true
   replica_count:
-    description: Number of replicas for scalable services
+    description: Number of replicas for scalable services (request-manager, agent, etc.). Mock eventing stays at 1 for FIFO; production uses Kafka.
     required: false
     default: "1"
   use_pip_install:

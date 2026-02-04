@@ -3,24 +3,31 @@
 import os
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 import httpx
-from cloudevents.http import CloudEvent, to_structured
+from cloudevents.conversion import to_structured
+from cloudevents.http import CloudEvent
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from shared_models import (
     BaseSessionManager,
     CloudEventBuilder,
     CloudEventHandler,
+    DatabaseUtils,
     EventTypes,
+    acquire_agent_session_lock,
     configure_logging,
     create_cloudevent_response,
     create_shared_lifespan,
     generate_fallback_user_id,
     get_database_manager,
     get_db_session_dependency,
+    get_db_utc_now,
+    get_request_created_at,
+    has_earlier_pending_or_processing,
     parse_cloudevent_from_request,
+    release_agent_session_lock,
     simple_health_check,
 )
 from shared_models.models import (
@@ -41,6 +48,75 @@ from .session_manager import ResponsesSessionManager
 SERVICE_NAME = "agent-service"
 logger = configure_logging(SERVICE_NAME)
 auto_tracing_run(SERVICE_NAME, logger)
+
+# Agent session lock timeout: must be >= AGENT_TIMEOUT so queued requests can wait
+_AGENT_LOCK_TIMEOUT = int(os.getenv("SESSION_LOCK_WAIT_TIMEOUT", "180"))
+
+
+async def _handle_event_with_try_claim(
+    db: AsyncSession,
+    event_id: Optional[str],
+    event_type: str,
+    event_source: str,
+    event_data: Dict[str, Any],
+    handler: Callable[[], Awaitable[Dict[str, Any]]],
+    extract_ids: Callable[
+        [Dict[str, Any], Dict[str, Any]], tuple[Optional[str], Optional[str]]
+    ],
+) -> Dict[str, Any]:
+    """Try-claim event; run handler; update processed status. Skips if already claimed."""
+    if event_id:
+        claimed = await DatabaseUtils.try_claim_event_for_processing(
+            db,
+            event_id,
+            event_type,
+            event_source,
+            "agent-service",
+        )
+        if not claimed:
+            logger.info(
+                "Event already claimed - skipping duplicate",
+                event_id=event_id,
+                event_type=event_type,
+            )
+            return {
+                "status": "skipped",
+                "reason": "duplicate event (already claimed)",
+                "event_id": event_id,
+            }
+
+    try:
+        result = await handler()
+        if event_id:
+            request_id, session_id = extract_ids(result, event_data)
+            await DatabaseUtils.update_processed_event(
+                db,
+                event_id,
+                "agent-service",
+                request_id=request_id,
+                session_id=session_id,
+                processing_result="success",
+            )
+        return result
+    except Exception as e:
+        if event_id:
+            # For retriable errors (503, 502, 504), release the claim so broker retry
+            # can re-claim and process. Marking as "error" would cause try_claim to
+            # skip forever—requests would never complete.
+            is_retriable = False
+            if isinstance(e, HTTPException):
+                is_retriable = e.status_code in (502, 503, 504)
+            if is_retriable:
+                await DatabaseUtils.release_event_claim(db, event_id, "agent-service")
+            else:
+                await DatabaseUtils.update_processed_event(
+                    db,
+                    event_id,
+                    "agent-service",
+                    processing_result="error",
+                    error_message="Processing failed",
+                )
+        raise
 
 
 class AgentConfig:
@@ -205,7 +281,8 @@ class AgentService:
 
     async def _process_request_core(self, request: NormalizedRequest) -> AgentResponse:
         """Core request processing logic."""
-        start_time = datetime.now(timezone.utc)
+        # Use DB time for agent_received_at (avoids pod clock skew across replicas)
+        start_time = await get_db_utc_now()
 
         try:
             # Check for reset command first
@@ -231,6 +308,7 @@ class AgentService:
                 request=request,
                 content=f"I apologize, but I encountered an error processing your request: {str(e)}",
                 agent_id="unknown",
+                start_time=start_time,
             )
 
     async def publish_response(self, response: AgentResponse) -> bool:
@@ -269,6 +347,11 @@ class AgentService:
                 "requires_followup": response.requires_followup,
                 "followup_actions": response.followup_actions,
                 "created_at": response.created_at.isoformat(),
+                "agent_received_at": (
+                    response.agent_received_at.isoformat()
+                    if response.agent_received_at
+                    else None
+                ),
             }
 
             # Debug log the event_data to see what values are being sent
@@ -300,6 +383,11 @@ class AgentService:
             )
 
             headers, body = to_structured(event)
+            headers = dict(headers)
+            # Ce-partitionkey header for Knative Kafka broker
+            partition_key = event.get("partitionkey") or event.get("partitionKey")
+            if partition_key:
+                headers["ce-partitionkey"] = str(partition_key)
 
             if self.config.broker_url is None:
                 logger.error("Broker URL not configured")
@@ -364,6 +452,7 @@ class AgentService:
             requires_followup=requires_followup,
             followup_actions=followup_actions or [],
             created_at=datetime.now(timezone.utc),
+            agent_received_at=start_time,
         )
         return response
 
@@ -409,12 +498,21 @@ class AgentService:
             )
             return
 
+        # status = completed for message/tokens, failed for error
+        status = "completed" if response.response_type != "error" else "failed"
+
+        response_metadata = dict(response.metadata) if response.metadata else {}
+        if response.agent_received_at:
+            response_metadata["agent_received_at"] = (
+                response.agent_received_at.isoformat()
+            )
         await _update_request_log_unified(
             request_id=response.request_id,
             response_content=response.content,
             agent_id=response.agent_id,
-            response_metadata=response.metadata,
+            response_metadata=response_metadata,
             processing_time_ms=response.processing_time_ms,
+            status=status,
             db=None,  # Will create its own database session
         )
 
@@ -662,7 +760,10 @@ async def detailed_health_check(
 
 
 @app.post("/api/v1/events/cloudevents")
-async def handle_cloudevent(request: Request) -> Dict[str, Any]:
+async def handle_cloudevent(
+    request: Request,
+    db: AsyncSession = Depends(get_db_session_dependency),
+) -> Dict[str, Any]:
     """Handle incoming CloudEvents."""
     if not _agent_service:
         raise HTTPException(
@@ -675,15 +776,36 @@ async def handle_cloudevent(request: Request) -> Dict[str, Any]:
         event_data = await parse_cloudevent_from_request(request)
 
         event_type = event_data.get("type")
+        event_id = event_data.get("id")
+        event_source = event_data.get("source", "unknown")
 
         # Handle request events
         if event_type == EventTypes.REQUEST_CREATED:
-            return await _handle_request_event_from_data(event_data, _agent_service)
+            return await _handle_event_with_try_claim(
+                db,
+                event_id,
+                event_type,
+                event_source,
+                event_data,
+                lambda: _handle_request_event_from_data(event_data, _agent_service),
+                lambda result, _: (result.get("request_id"), result.get("session_id")),
+            )
 
         # Handle database update events
         if event_type == EventTypes.DATABASE_UPDATE_REQUESTED:
-            return await _handle_database_update_event_from_data(
-                event_data, _agent_service
+            return await _handle_event_with_try_claim(
+                db,
+                event_id,
+                event_type,
+                event_source,
+                event_data,
+                lambda: _handle_database_update_event_from_data(
+                    event_data, _agent_service
+                ),
+                lambda _, ev: (
+                    ev.get("data", {}).get("request_id"),
+                    ev.get("data", {}).get("session_id"),
+                ),
             )
 
         logger.warning("Unhandled CloudEvent type", event_type=event_type)
@@ -695,6 +817,9 @@ async def handle_cloudevent(request: Request) -> Dict[str, Any]:
             )
         )
 
+    except HTTPException:
+        # Re-raise so 503 (ordering check, lock timeout) propagates for broker retry
+        raise
     except Exception as e:
         logger.error("Failed to handle CloudEvent", exc_info=e)
         raise HTTPException(
@@ -768,9 +893,44 @@ async def _handle_request_event_from_data(
                 detail=f"Invalid request data: {str(e)}",
             )
 
-        # Process the request
-        logger.debug("Calling agent_service.process_request")
-        response = await agent_service.process_request(request)
+        # Resolve created_at: use event payload if present, else fetch from RequestLog
+        # (request-manager inserts before sending; DB time is source of truth for ordering)
+        created_at = request.created_at
+        if "created_at" not in request_data:
+            db_manager = get_database_manager()
+            async with db_manager.get_session() as resolve_db:
+                db_created = await get_request_created_at(
+                    request.request_id, resolve_db
+                )
+                if db_created is not None:
+                    created_at = db_created
+                    request = request.model_copy(update={"created_at": created_at})
+
+        # Ordering check: yield (503) if earlier request still pending/processing
+        # Defense in depth alongside partition key; broker retries later
+        db_manager = get_database_manager()
+        async with db_manager.get_session() as lock_db:
+            if await has_earlier_pending_or_processing(
+                request.session_id, created_at, lock_db
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Earlier request still processing - retry later",
+                )
+
+            acquired = await acquire_agent_session_lock(
+                request.session_id, lock_db, timeout_seconds=_AGENT_LOCK_TIMEOUT
+            )
+            if not acquired:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Session lock timeout - another request for this session is processing",
+                )
+            try:
+                logger.debug("Calling agent_service.process_request")
+                response = await agent_service.process_request(request)
+            finally:
+                await release_agent_session_lock(request.session_id, lock_db)
 
         logger.debug(
             "Agent response created",
@@ -862,14 +1022,15 @@ async def _update_request_log_unified(
     agent_id: str,
     response_metadata: dict[str, Any] | None = None,
     processing_time_ms: int | None = None,
+    status: str = "completed",
     db: AsyncSession | None = None,
 ) -> None:
-    """Update RequestLog for any API type."""
+    """Update RequestLog for any API type. Sets status (completed/failed) per response_type."""
     try:
         from shared_models.models import RequestLog
         from sqlalchemy import update
 
-        # Update the RequestLog with response content
+        # Update the RequestLog with response content and status
         stmt = (
             update(RequestLog)
             .where(RequestLog.request_id == request_id)
@@ -879,6 +1040,7 @@ async def _update_request_log_unified(
                 agent_id=agent_id,
                 processing_time_ms=processing_time_ms,
                 completed_at=datetime.now(timezone.utc),
+                status=status,
             )
         )
 

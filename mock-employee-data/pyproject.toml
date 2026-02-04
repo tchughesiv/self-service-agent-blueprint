@@ -9,17 +9,6 @@ authors = [
 requires-python = ">=3.12"
 dependencies = []
 
-[project.optional-dependencies]
-dev = [
-    "pytest>=8.4.1",
-    "pytest-asyncio>=1.2.0",
-    "pytest-cov>=6.2.1",
-    "black>=25.1.0",
-    "flake8>=7.3.0",
-    "isort>=5.13.0",
-    "mypy>=1.17.1",
-]
-
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
@@ -45,3 +34,14 @@ python_version = "3.12"
 [[tool.mypy.overrides]]
 module = "mock_employee_data.*"
 disable_error_code = ["attr-defined"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.1",
+    "pytest-asyncio>=1.2.0",
+    "pytest-cov>=6.2.1",
+    "black>=25.1.0",
+    "flake8>=7.3.0",
+    "isort>=5.13.0",
+    "mypy>=1.17.1",
+]
