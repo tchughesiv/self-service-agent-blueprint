@@ -87,17 +87,24 @@ This document describes the implementation plan for **single in-flight request p
 
 ### 3.3 Reclaim stuck “processing” (before dequeue)
 
-Mark as `failed` any request in `processing` for this session that is considered stuck. A request is stuck if **either**:
+When a request in `processing` is considered stuck (pod dead or past time cutoff), **reset it to `pending`** so another pod will pick it up and process it—do **not** mark it `failed` by default. A request is stuck if **either**:
 
 1. **Time-based**: `processing_started_at` (or `updated_at` if null) is older than cutoff = now − (AGENT_TIMEOUT + buffer), e.g. 150s.
-2. **Pod check-in**: The pod that owns the request (`request_logs.pod_name`) has not updated `pod_heartbeats.last_check_in_at` within the heartbeat grace period (e.g. last_check_in_at < now() − 30s), or has no row (pod never checked in or table was cleared). So: JOIN request_logs to pod_heartbeats on pod_name; if the row is missing or last_check_in_at is stale, treat that request as stuck.
+2. **Pod check-in**: The pod that owns the request (`request_logs.pod_name`) has not updated `pod_heartbeats.last_check_in_at` within the heartbeat grace period, or has no row.
 
-**Reclaim query (conceptually):** Update request_logs SET status = 'failed', ... WHERE session_id = :session_id AND status = 'processing' AND (processing_started_at < :time_cutoff OR processing_started_at IS NULL AND updated_at < :time_cutoff OR pod_name NOT IN (SELECT pod_name FROM pod_heartbeats WHERE last_check_in_at >= :heartbeat_cutoff) OR pod_name IS NULL AND (processing_started_at < :time_cutoff OR ...)). Then proceed to dequeue.
+**Reclaim query (conceptually):** Update request_logs SET status = 'pending', processing_started_at = NULL WHERE session_id = :session_id AND status = 'processing' AND (stuck by time OR stuck by heartbeat). Then proceed to dequeue. The next handler (or the same one) will dequeue this request and process it.
 
-- **Fallback**: If `pod_name` is NULL (e.g. legacy or CloudEvent path), use only time-based reclaim.
-- **Config**: `POD_HEARTBEAT_INTERVAL_SECONDS` (how often this pod updates its row, e.g. 15), `POD_HEARTBEAT_GRACE_SECONDS` (how long without check-in before considering pod dead, e.g. 30).
+**Why requeue (reset to pending) instead of fail?**
 
-*Note: Stuck/failed UX (retries, user-facing messaging, etc.) is deferred; see “Out of scope” above.*
+- **Slack / email (async)**: The request was sent via CloudEvent; the user is waiting for a reply in the channel. If we mark the request `failed`, no one processes it and the user never gets a response. If we **requeue**, another pod processes it, the agent responds, and the response event is delivered to Slack/email. So for async, requeue is clearly better.
+- **CLI / sync REST**: The caller is blocked on the pod that accepted the request. If that pod crashed, the HTTP connection is gone—the client will see a timeout or connection error either way. Requeue doesn’t fix that. But requeue still helps: the work gets done (state consistent), and any delivery path that listens for the response event (e.g. webhooks, integrations) still gets the result. So prefer **requeue** for consistency and better UX on async; sync callers whose pod died still see failure/timeout, but we don’t leave the request permanently failed when another pod could complete it.
+
+**Optional policy**: Config or env could allow “reclaim action: requeue | fail”. Default: requeue. If set to fail, reclaim marks stuck requests `failed` (session unblocks but request is not retried); use only if requeue is undesirable (e.g. strict no-retry policy).
+
+- **Fallback**: If `pod_name` is NULL, use only time-based reclaim; same requeue vs fail choice.
+- **Config**: `POD_HEARTBEAT_INTERVAL_SECONDS`, `POD_HEARTBEAT_GRACE_SECONDS`; optional `RECLAIM_ACTION` = `requeue` | `fail` (default `requeue`).
+
+*Note: Idempotency—if the original pod completes after we requeue, two pods might both complete the same request_id; the second completion overwrites RequestLog. That’s acceptable; we only reclaim when we believe the pod is dead (heartbeat or timeout).*
 
 ### 3.4 Dequeue one and process
 
@@ -148,8 +155,18 @@ Mark as `failed` any request in `processing` for this session that is considered
 - `SESSION_LOCK_WAIT_TIMEOUT`: seconds to wait for session lock before failing (default e.g. 120).
 - `AGENT_TIMEOUT`: already exists; use for time-based reclaim cutoff.
 - `SESSION_LOCK_STUCK_BUFFER_SECONDS`: added to AGENT_TIMEOUT for time-based reclaim (default e.g. 30).
-- `POD_HEARTBEAT_INTERVAL_SECONDS`: how often this pod updates `pod_heartbeats` (default e.g. 15).
-- `POD_HEARTBEAT_GRACE_SECONDS`: no check-in for this long → consider pod dead for reclaim (default e.g. 30).
+- `POD_HEARTBEAT_INTERVAL_SECONDS`: how often this pod updates `pod_heartbeats` (default: **15**).
+- `POD_HEARTBEAT_GRACE_SECONDS`: no check-in for this long → consider pod dead for reclaim (default: **30**).
+
+**Recommended intervals and tradeoffs**
+
+- **Heartbeat interval** (how often each pod writes to `pod_heartbeats`): **15 seconds** default.
+  - Smaller (e.g. 10s): faster detection of a crashed pod, more DB writes (N pods × 6/min at 10s, or 4/min at 15s). 15s is a good balance: user wait after crash is bounded by grace (see below), and write load stays low.
+  - Larger (e.g. 30s): fewer writes, but worst-case time-to-detect grows (pod could have just checked in then crashed, so we wait up to grace).
+- **Grace** (how long without a check-in before we consider the pod dead): **30 seconds** default.
+  - Should be **at least ~2× heartbeat interval** so a single missed write (GC pause, brief network blip) doesn’t mark the pod dead. With interval=15s, grace=30s we allow one missed check-in.
+  - Worst-case time until a stuck request is considered dead = **grace** (e.g. 30s). After that, reclaim runs the next time a handler acquires the session lock (e.g. when another request for that session arrives, or a background reclaim pass if added). So the user-visible delay after a pod crash is on the order of **grace + one lock/reclaim cycle**, not “agent timeout + buffer.”
+- **Reclaim is on-demand** today (when a handler acquires the session lock). So for a session with no new request, a stuck request is only reclaimed when the next request for that session arrives. If you need faster recovery when no one sends another message, a **background reclaim task** (e.g. every 30–60s scan for stuck `processing` and requeue) can be added later; that would add a small polling interval to tune.
 
 ---
 
@@ -160,7 +177,7 @@ Mark as `failed` any request in `processing` for this session that is considered
 | 1 | **DB**: Add `status` and `processing_started_at` to RequestLog; create `pod_heartbeats` table; migration; index `(session_id, status, created_at)`. Update shared-models (RequestLog model + PodHeartbeat or equivalent). |
 | 2 | **Pod heartbeat**: Implement heartbeat background task (periodic UPSERT of `pod_heartbeats` for this pod). Start on request-manager startup; config via POD_HEARTBEAT_INTERVAL_SECONDS. |
 | 3 | **Lock**: Implement session lock helper (advisory lock, key from session_id, acquire with timeout, release in finally). |
-| 4 | **Reclaim**: Implement reclaim_stuck_processing(session_id, db): mark `failed` where (time-based: processing_started_at &lt; cutoff) OR (pod heartbeat: pod not in pod_heartbeats with recent last_check_in_at, or pod_name NULL use time-based only). |
+| 4 | **Reclaim**: Implement reclaim_stuck_processing(session_id, db): reset to `pending` (or optionally mark `failed` if RECLAIM_ACTION=fail) where stuck by time or pod heartbeat. Default: requeue so another pod processes. |
 | 5 | **Dequeue**: Implement dequeue_oldest_pending(session_id, db) returning one RequestLog row and setting status to `processing`, processing_started_at. |
 | 6 | **Accept path**: Create RequestLog at accept with `status = 'pending'` (after session + normalize). Ensure response future is registered. |
 | 7 | **Orchestration**: Implement wait_for_turn_and_process_one (acquire → reclaim → dequeue → process one → release → return or await own future). Integrate into process_request_sync and CloudEvent handler. |
@@ -172,15 +189,15 @@ Mark as `failed` any request in `processing` for this session that is considered
 
 ## 8. Stuck/failed (follow-up)
 
-- Reclaim (time-based + pod heartbeat) marks stuck `processing` as `failed` so the session can progress. Caller may have already timed out.
-- Follow-up work: design better UX (e.g. retry policy, user-visible message, dead-letter, or reset to `pending` with idempotency) and implement in a separate change.
+- Reclaim resets stuck `processing` to `pending` (default) so another pod processes, or marks `failed` if RECLAIM_ACTION=fail. For Slack/email, requeue means the user still gets a response; for CLI sync, if the pod died the client sees timeout either way.
+- Follow-up work: finer UX (e.g. retry policy, user-visible message, dead-letter) if needed.
 
 ---
 
 ## 9. Why table for request-manager vs in-memory for integration-dispatcher
 
 - **Integration-dispatcher (leader election)**: Advisory lock + in-memory lease is **recommended**. The leader holds the lock by keeping a DB connection open; when the leader crashes, the connection drops and the lock is released immediately. No table, no heartbeat interval delay, no extra writes. A table would not improve the election and would add latency and load.
-- **Request-manager (reclaim)**: A **table** is the right choice. We need to answer “which pod was processing this request, and is that pod still alive?” across many pods and many requests. We can’t hold a long-lived DB connection per request just to “own” it, so we need a durable “pod X last checked in at Y” store that any replica can read. Hence `pod_heartbeats`: each pod writes periodically; reclaim marks as failed any `processing` request whose pod hasn’t checked in within the grace period. Standard pattern for distributed worker liveness.
+- **Request-manager (reclaim)**: A **table** is the right choice. We need to answer “which pod was processing this request, and is that pod still alive?” across many pods and many requests. Hence `pod_heartbeats`; reclaim resets to `pending` (or marks failed) any `processing` request whose pod hasn’t checked in within the grace period so another pod can process it. Standard pattern for distributed worker liveness.
 - **Summary**: Table for request-manager reclaim; in-memory (advisory lock) for integration-dispatcher leader election. Different problems, different best tools.
 
 ---
@@ -189,7 +206,7 @@ Mark as `failed` any request in `processing` for this session that is considered
 
 - **RequestLog**: `status` (pending → processing → completed/failed), `processing_started_at`; index for dequeue and reclaim. **pod_heartbeats**: pod liveness for reclaim.
 - **Per-session advisory lock** (acquire with wait timeout, release in finally) ensures one in-flight request per session across replicas.
-- **Pod heartbeat**: Each request-manager pod updates `pod_heartbeats` periodically; reclaim marks as `failed` any `processing` request whose pod has not checked in within grace (or is past time-based cutoff). Fast recovery after pod crash (e.g. 15–30s).
+- **Pod heartbeat**: Each request-manager pod updates `pod_heartbeats` periodically; reclaim **resets to `pending`** (default) any `processing` request whose pod has not checked in within grace (or is past time-based cutoff) so another pod processes it—better for Slack/email; CLI sync still sees timeout if their pod died. Optional RECLAIM_ACTION=fail to mark failed instead.
 - **Accept**: create RequestLog with `status = 'pending'`; register future.
 - **Before dequeue**: reclaim stuck `processing` (time-based + heartbeat).
 - **One-per-turn**: dequeue oldest `pending`, set `processing`, process one request, set `completed`/`failed`, release lock; return if we processed our request, else await our future.
