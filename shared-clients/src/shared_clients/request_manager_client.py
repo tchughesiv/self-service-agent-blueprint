@@ -138,7 +138,7 @@ class RequestManagerClient:
         include_messages: bool = True,
     ) -> Dict[str, Any]:
         """
-        Get conversations with optional filters. No auth required (matches generic endpoint).
+        Get conversations with optional filters.
 
         Args:
             session_id: Get specific session's conversation
