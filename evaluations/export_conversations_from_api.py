@@ -20,8 +20,8 @@ Saved files go to results/conversation_results/ and can be evaluated with:
 Pass --agent-id laptop-refresh (or another agent name) to restrict export to
 sessions that used that agent; otherwise all sessions are eligible.
 
-This script is invoked automatically by evaluate.py (step 3) with the same
--n/--num-conversations as generator.py.
+Invoked by evaluate.py when --conversation-source export (step 2 in the pipeline).
+Uses the same -n/--num-conversations as the pipeline.
 
 Usage:
   # Default: kubectl exec into request-manager pod (set NAMESPACE or use --namespace)
