@@ -40,7 +40,7 @@ The evaluation framework consists of four main components that work together in 
    - Aggregates results and token usage statistics
    - Provides unified command-line interface
 
-2. **`run_conversations.py`** - Live Agent Testing with Predefined Inputs
+2. **`run_conversations.py`** - Live Agent Testing with Predefined Inputs (pipeline step 1 only when using generate)
    - Executes predefined conversations against deployed agent
    - Uses hand-crafted user inputs from conversations
    - Connects to deployed agents via OpenShift
@@ -71,12 +71,12 @@ The typical evaluation workflow follows this sequence:
    - Remove previous generated conversations
    - Clear old token usage files
    ↓
-3. run_conversations.py
+3. run_conversations.py (only when --conversation-source generate)
    - Execute predefined conversations
    - Save results to results/conversation_results/
    ↓
-4. generator.py
-   - Generate synthetic conversations
+4. generator.py OR export_conversations_from_api.py (by --conversation-source)
+   - Generate synthetic conversations, or export from Request Manager API
    - Add to results/conversation_results/
    ↓
 5. deep_eval.py
@@ -1035,7 +1035,7 @@ The `run_conversations.py` script executes predefined conversations against your
 
 ### 5.1 Using run_conversations.py
 
-The `run_conversations.py` script is the first step in the evaluation pipeline. It takes hand-crafted conversations and executes them against your live agent deployment in OpenShift.
+The `run_conversations.py` script is the first step in the evaluation pipeline when using `--conversation-source generate`. (When using `--conversation-source export`, the pipeline skips this step and exports conversations from the API instead.) It takes hand-crafted conversations and executes them against your live agent deployment in OpenShift.
 
 **Basic Usage**
 
@@ -2211,9 +2211,9 @@ Removing 8 token usage files from previous runs
 
 **Important**: This only removes generated files. Predefined conversation results and evaluation results are preserved unless manually deleted.
 
-#### Step 1: Run Predefined Conversations
+#### Step 1: Run Predefined Conversations (only when conversation_source is "generate")
 
-**What It Does**: Executes hand-crafted conversations against the deployed agent.
+**What It Does**: Executes hand-crafted conversations against the deployed agent. This step is skipped when using `--conversation-source export`; the pipeline goes from cleanup to exporting from the API.
 
 **Script**: `run_conversations.py`
 

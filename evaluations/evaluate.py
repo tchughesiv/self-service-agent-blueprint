@@ -3,7 +3,7 @@
 Evaluation Orchestrator Script
 
 This script orchestrates the complete evaluation pipeline by running:
-1. run_conversations.py - Executes conversation flows with the agent
+1. run_conversations.py - Executes conversation flows with the agent (only when --conversation-source generate)
 2. Either generator.py (default) or export_conversations_from_api.py - controlled by --conversation-source
 3. deep_eval.py - Evaluates all conversations using deepeval metrics
 
@@ -898,7 +898,7 @@ def run_evaluation_pipeline(
 
     Executes the evaluation steps in sequence:
     0. Clean up generated files from previous runs
-    1. run_conversations.py - Run predefined conversation flows
+    1. run_conversations.py - Run predefined conversation flows (only when conversation_source is "generate")
     2. Either generator.py (--conversation-source generate) OR export_conversations_from_api.py (--conversation-source export)
     3. deep_eval.py - Evaluate all conversations with deepeval metrics
 
@@ -927,32 +927,42 @@ def run_evaluation_pipeline(
     pipeline_start_time = time.time()
     failed_steps = []
 
-    # Step 1: Run conversation flows
-    logger.info("📋 Step 1/3: Running predefined conversation flows...")
-    run_conversations_args = ["--test-script", test_script]
-    if reset_conversation:
-        run_conversations_args.append("--reset-conversation")
-    if not run_script(
-        "run_conversations.py", args=run_conversations_args, timeout=timeout
-    ):
-        failed_steps.append("run_conversations.py")
-        logger.error("❌ Step 1 failed - continuing with remaining steps")
-    else:
-        logger.info("✅ Step 1 completed successfully")
+    # Step numbering: increment before each step we run (3 steps when generate, 2 when export)
+    step_total = 3 if conversation_source == "generate" else 2
+    step_num = 0
+
+    # Step 1: Run conversation flows (only when generating conversations)
+    if conversation_source == "generate":
+        step_num += 1
+        step_label = f"{step_num}/{step_total}"
+        logger.info(f"📋 Step {step_label}: Running predefined conversation flows...")
+        run_conversations_args = ["--test-script", test_script]
+        if reset_conversation:
+            run_conversations_args.append("--reset-conversation")
+        if not run_script(
+            "run_conversations.py", args=run_conversations_args, timeout=timeout
+        ):
+            failed_steps.append("run_conversations.py")
+            logger.error(
+                f"❌ Step {step_label} failed - continuing with remaining steps"
+            )
+        else:
+            logger.info(f"✅ Step {step_label} completed successfully")
 
     logger.info("-" * 60)
 
-    # Step 2: Either generate conversations or export from API (mutually exclusive)
-    step2_label = "2/3"
+    # Step 2 (generate) or Step 1 (export): Either generate conversations or export from API
+    step_num += 1
+    step_label = f"{step_num}/{step_total}"
     if conversation_source == "generate":
         total_conversations = num_conversations * concurrency
         if concurrency > 1:
             logger.info(
-                f"🤖 Step {step2_label}: Generating {total_conversations} total test conversations ({num_conversations} per worker × {concurrency} workers)..."
+                f"🤖 Step {step_label}: Generating {total_conversations} total test conversations ({num_conversations} per worker × {concurrency} workers)..."
             )
         else:
             logger.info(
-                f"🤖 Step {step2_label}: Generating {num_conversations} additional test conversations..."
+                f"🤖 Step {step_label}: Generating {num_conversations} additional test conversations..."
             )
         generator_args = [
             str(num_conversations),
@@ -972,13 +982,13 @@ def run_evaluation_pipeline(
         if not run_script("generator.py", args=generator_args, timeout=timeout):
             failed_steps.append("generator.py")
             logger.error(
-                f"❌ Step {step2_label} failed - continuing with remaining steps"
+                f"❌ Step {step_label} failed - continuing with remaining steps"
             )
         else:
-            logger.info(f"✅ Step {step2_label} completed successfully")
+            logger.info(f"✅ Step {step_label} completed successfully")
     else:
         logger.info(
-            f"📥 Step {step2_label}: Exporting up to {num_conversations} conversations from Request Manager API..."
+            f"📥 Step {step_label}: Exporting up to {num_conversations} conversations from Request Manager API..."
         )
         export_args = ["-n", str(num_conversations)]
         if not run_script(
@@ -986,16 +996,17 @@ def run_evaluation_pipeline(
         ):
             failed_steps.append("export_conversations_from_api.py")
             logger.error(
-                f"❌ Step {step2_label} failed - continuing with remaining steps"
+                f"❌ Step {step_label} failed - continuing with remaining steps"
             )
         else:
-            logger.info(f"✅ Step {step2_label} completed successfully")
+            logger.info(f"✅ Step {step_label} completed successfully")
 
     logger.info("-" * 60)
 
-    # Step 3: Run deepeval evaluation
-    eval_step = "3/3"
-    logger.info(f"📊 Step {eval_step}: Running deepeval evaluation...")
+    # Final step: Run deepeval evaluation
+    step_num += 1
+    step_label = f"{step_num}/{step_total}"
+    logger.info(f"📊 Step {step_label}: Running deepeval evaluation...")
     deep_eval_args: list[str] = []
     if validate_full_laptop_details:
         deep_eval_args.append("--validate-full-laptop-details")
@@ -1005,9 +1016,9 @@ def run_evaluation_pipeline(
         deep_eval_args.append("--use-structured-output")
     if not run_script("deep_eval.py", args=deep_eval_args, timeout=timeout):
         failed_steps.append("deep_eval.py")
-        logger.error(f"❌ Step {eval_step} failed")
+        logger.error(f"❌ Step {step_label} failed")
     else:
-        logger.info(f"✅ Step {eval_step} completed successfully")
+        logger.info(f"✅ Step {step_label} completed successfully")
 
     # Pipeline summary
     pipeline_duration = time.time() - pipeline_start_time
