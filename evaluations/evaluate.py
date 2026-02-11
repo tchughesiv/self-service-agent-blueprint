@@ -856,7 +856,7 @@ def run_check_known_bad_conversations(
 
     if (
         successful_evaluations == total_known_bad
-        and conversations_failing_as_expected > 0
+        and conversations_failing_as_expected == total_known_bad
     ):
         print(
             f"\n🎉 OVERALL RESULT: {conversations_failing_as_expected}/{total_known_bad} KNOWN BAD CONVERSATIONS FAILED AS EXPECTED"
