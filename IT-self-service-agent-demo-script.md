@@ -20,7 +20,7 @@ We'll show you how a conversation can start in Slack and continue in email—sam
 
 **One continuous conversation: start in Slack, continue in email. Use the same user (same email) in both so the Request Manager keeps one session.**
 
-**Speaker notes (glance as you go):** *Say* "We'll do a laptop refresh in one conversation—starting in Slack." → *Type* hi / laptop refresh → *Type* see options → *Say* "Same conversation—I'll continue in email." → *Switch to email* → *Type* option 1 → *Say* "Same conversation—I'll finish in Slack." → *Switch to Slack* → *Type* yes create ticket → *Say* "One session—started in Slack, continued in email, finished in Slack. Conversations survive channel switches." → *Say* "And here's that request in ServiceNow—conversation turned into action." → *Say* "Now let's take a look at the architecture."
+**Speaker notes (glance as you go):** *Say* "Let's start by asking for help." → *Type* hi / laptop refresh → *Type* see options → *Say* "Same conversation—I'll continue in email." → *Switch to email* → *Type* option 1 → *Say* "Same conversation—I'll finish in Slack." → *Switch to Slack* → *Type* yes create ticket → *Say* "One session—started in Slack, continued in email, finished in Slack. Conversations survive channel switches." → *Say* "And here's that request in ServiceNow—conversation turned into action." → *Say* "Now let's take a look at the architecture."
 
 **Speaker note (optional—when switching to email or at continuity callout):** The system looks up your email from Slack and uses it as your identity—so the same person in Slack and email is one session. Your data (e.g. current laptop, eligibility) comes from ServiceNow; that same email is what ServiceNow uses for the ticket when we create it.
 
