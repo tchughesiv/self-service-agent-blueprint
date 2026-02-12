@@ -87,9 +87,9 @@ We'll show you how a conversation can start in Slack and continue in email—sam
 
 ## OUTRO (2:50–3:00)
 
-"You get **evaluations** and **tracing** out of the box. Try the quickstart—link's in the description. Thanks."
+"One conversation across all channels, ready to extend. Link's in the description. Thanks."
 
-*Alternative:* End on the cross-channel takeaway—e.g. "One conversation across all channels, ready to extend. Link's in the description. Thanks."
+*Alternative:* "You get **evaluations** and **tracing** out of the box. Try the quickstart—link's in the description. Thanks."
 
 ---
 
