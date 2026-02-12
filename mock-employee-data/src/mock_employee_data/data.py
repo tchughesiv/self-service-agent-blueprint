@@ -258,6 +258,24 @@ MOCK_EMPLOYEE_DATA = {
         "install_status": "1",
         "operational_status": "1",
     },
+    "tchughesiv@gmail.com": {
+        "employee_id": "2005",
+        "sys_id": "2005",
+        "name": "Tommy Hughes",
+        "email": "tchughesiv@gmail.com",
+        "user_name": "tommy.hughes",
+        "location": "NA",
+        "active": "true",
+        "laptop_model": "MacBook Pro 14-inch",
+        "laptop_serial_number": "MBP140015",
+        "purchase_date": "2020-06-01",
+        "warranty_expiry": "2023-06-01",
+        "warranty_status": "Expired",
+        "asset_tag": "ASSET-015",
+        "model_id": "macbook_pro_14",
+        "install_status": "1",
+        "operational_status": "1",
+    },
 }
 
 
