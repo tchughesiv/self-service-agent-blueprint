@@ -10,11 +10,10 @@
 
 **[On screen: title or splash]**
 
-"In this demo we'll show you the **IT self-service agent quickstart**—an AI agent system for IT self-service, deployed to OpenShift, with a laptop refresh workflow as an example you can run out of the box.
+"In this demo we'll show you the **IT self-service agent AI quickstart**—deployed to OpenShift, with a laptop refresh workflow you can run out of the box.
 
-We'll show you one conversation that starts in Slack and continues in email—same session, across channels, without losing context—then the architecture that keeps it continuous.
+We'll show you how a conversation can start in Slack and continue in email—same session, across channels, without losing context—then the architecture that keeps it continuous. With this quickstart you get a template you can extend with your own channels, MCP servers, and agents."
 
-By the end you’ll know what this quickstart does and why it matters: self-service for laptop refresh requests—already supported—plus access management, compliance workflows, and more. You get a template you can extend with your own channels, MCP servers, and agents."
 
 ---
 
@@ -74,11 +73,11 @@ By the end you’ll know what this quickstart does and why it matters: self-serv
 **Script (one diagram, one flow; no deep dive):**
 
 - "Users reach the system through the channels we support today: **Slack**, **email**, or the **API**—including the CLI for testing. More channels are easy to add."
-- "The **Request Manager** validates and routes every request. Components talk using **CloudEvents** over **Knative**—event-driven and **scalable**: scale to zero or out to multiple pods."
+- "The **Request Manager** validates and routes every request—and ties each request to the same user session, so when you switch from Slack to email, it's still one conversation. Components talk using **CloudEvents** over **Knative**—event-driven and **scalable**."
 - "The **routing agent** figures out what the user needs and hands off to a **specialist agent**—here, the laptop refresh agent."
 - "The specialist agent uses **knowledge bases**—like laptop refresh policy and regional offerings—and **tools** such as ServiceNow via **MCP**, the Model Context Protocol."
 - "One diagram, one flow: Request Manager → agent service → MCP and integrations."
-- "The quickstart is built to be **easily extensible**. Add more channels (e.g. Discord, Teams, or SMS), MCP servers for new integrations, more IT services, or new specialist agents—without changing the core platform."
+- "The quickstart is built to be **easily extensible**. Add more channels (e.g. Discord, Teams, or SMS), MCP servers for new integrations, more IT services (e.g. access management, compliance workflows), or new specialist agents—without changing the core platform."
 
 **[If time]** Briefly point on diagram: channels → Request Manager → Router Agent → Agent(s) → Tools / IT Systems.
 
