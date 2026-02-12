@@ -23,7 +23,7 @@ We'll show you how a conversation can start in Slack and continue in email—sam
 
 **Speaker notes (glance as you go):** *Say* "We'll do a laptop refresh in one conversation—starting in Slack." → *Type* hi / laptop refresh → *Type* see options → *Say* "Same conversation—I'll continue in email." → *Switch to email* → *Type* option 1 → *Say* "Same conversation—I'll finish in Slack." → *Switch to Slack* → *Type* yes create ticket → *Say* "One session—started in Slack, continued in email, finished in Slack. Conversations survive channel switches." → *Say* "And here's that request in ServiceNow—conversation turned into action." → *Say* "Here's the architecture that keeps that conversation continuous."
 
-**Speaker note (optional—when switching to email or at continuity callout):** The system looks up your email from Slack and uses it as your identity—so the same person in Slack and email is one session, and ServiceNow gets that email for the ticket.
+**Speaker note (optional—when switching to email or at continuity callout):** The system looks up your email from Slack and uses it as your identity—so the same person in Slack and email is one session. Your data (e.g. current laptop, eligibility) comes from ServiceNow; that same email is what ServiceNow uses for the ticket when we create it.
 
 ### Part 1 — Start in Slack (~1:00)
 
@@ -76,11 +76,10 @@ We'll show you how a conversation can start in Slack and continue in email—sam
 
 **Script (one diagram, one flow; no deep dive):**
 
-- "Users reach the system through the channels we support today: **Slack**, **email**, or the **API**—including the CLI for testing. More channels are easy to add."
-- "The **Request Manager** validates and routes every request—and ties each request to the same user session, so when you switch from Slack to email, it's still one conversation. Components talk using **CloudEvents** over **Knative**—event-driven and **scalable**."
-- "The **routing agent** figures out what the user needs and hands off to a **specialist agent**—here, the laptop refresh agent."
-- "The specialist agent uses **knowledge bases**—like laptop refresh policy and regional offerings—and **tools** such as ServiceNow via **MCP**, the Model Context Protocol."
-- "One diagram, one flow: Request Manager → agent service → MCP and integrations."
+- "Users reach the system through **Slack**, **email**, or the **API**—including the CLI."
+- "The **Request Manager** receives from those channels—the Integration Dispatcher is part of that for Slack and email—validates and routes every request, ties it to the same user session so switching channels keeps one conversation, and delivers responses back to the right channel. Components talk using **CloudEvents** over **Knative** and **Kafka**—event-driven and **scalable**."
+- "The **routing agent** figures out what the user needs and hands off to a **specialist agent**—here, the laptop refresh agent. That agent uses **knowledge bases** and **tools** like ServiceNow via **MCP**, powered by an **LLM**."
+- "One flow: Request Manager → agent service → MCP and integrations."
 - "The quickstart is built to be **easily extensible**. Add more channels (e.g. Discord, Teams, or SMS), MCP servers for new integrations, more IT services (e.g. access management, compliance workflows), or new specialist agents—without changing the core platform."
 
 **[If time]** Briefly point on diagram: channels → Request Manager → Router Agent → Agent(s) → Tools / IT Systems.
@@ -95,10 +94,10 @@ We'll show you how a conversation can start in Slack and continue in email—sam
 
 ## PRODUCTION NOTES (for recording)
 
-**Timing (pre-warmed):** With everything pre-installed and pre-warmed, expect **~3:00–3:25**. Rough breakdown: Hook ~20 s | Slack (Part 1) ~50–60 s | transition + Email (Part 2) ~25 s | Slack (Part 3) ~20 s | ServiceNow ~12 s | transition ~5 s | Architecture ~50 s | Outro ~10 s. If you run over, shorten one Slack exchange (e.g. go straight to "laptop refresh" without "Hi") or trim the extensibility sentence in the architecture; keep the ticket-created and ServiceNow beats.
+**Timing (pre-warmed):** With everything pre-installed and pre-warmed, expect **~3:00–3:20**. Rough breakdown: Hook ~20 s | Slack (Part 1) ~50–60 s | transition + Email (Part 2) ~25 s | Slack (Part 3) ~20 s | ServiceNow ~12 s | transition ~5 s | Architecture ~45–50 s | Outro ~10 s. If you run over, shorten one Slack exchange (e.g. go straight to "laptop refresh" without "Hi"); keep the ticket-created and ServiceNow beats.
 
-- **UI:** Pre-warm the session or script the exchange so the path is smooth; trim pauses in post. Use the same user (same email) in Slack and in email so the Request Manager keeps one session across channels. Have ServiceNow open (or a second tab) so you can cut to the persisted request right after the agent confirms the ticket in Slack (Part 3); note the REQ number from that Slack message to look it up.
-- **Diagram:** Show `docs/images/top-level-architecture.png` full-screen for ~50 seconds; call out **Request Manager → agent service → MCP/integrations** as you say the flow.
+- **UI:** Pre-warm the session or script the exchange so the path is smooth; trim pauses in post. Use the same user (same email) in Slack and in email so the Request Manager keeps one session across channels. Have ServiceNow open (or a second tab) so you can cut to the persisted request right after the agent confirms the ticket in Slack (Part 3); note the REQ number from that Slack message to look it up. (Avoid showing the OpenShift console in the recording if you want the demo to age well—the UI changes with releases; "deployed to OpenShift" in the hook is enough.)
+- **Diagram:** Show `docs/images/top-level-architecture.png` full-screen for ~50 seconds; call out **Request Manager → agent service → MCP/integrations** as you say the flow (Integration Dispatcher is part of Request Manager arch, not a separate box on the diagram).
 - **If over 3 min:** Shorten the conversation (e.g. one fewer exchange), not the architecture or the "ticket created" beat.
 
 ---
@@ -147,8 +146,8 @@ Verified against repo/code:
 
 - **Session continuity:** User identity is canonical by email (Slack resolves user to email; email channel uses sender). Same email in Slack and email → same `canonical_user_id` → same session (create_or_get_session_shared in request-manager; session in DB). Wording "Request Manager keeps one session" is consistent with README ("Request Manager retains conversation state").
 - **Channels:** Script lists Slack, email, API (CLI uses API). Matches supported entry points; IntegrationType also includes WEB, WEBHOOK, TEST, TEAMS, etc. for extensibility.
-- **Architecture:** Request Manager validates/routes; CloudEvents over Knative (production mode; testing mode uses mock eventing); routing agent → specialist agent; knowledge bases + MCP (ServiceNow). Scale-to-zero applies to Knative/production.
+- **Architecture:** Request Manager (Integration Dispatcher noted as part of it for Slack/email) receives, validates, routes, session, delivers back; CloudEvents over Knative and Kafka; routing agent → specialist agent; knowledge bases + MCP (ServiceNow), LLM-powered. Aligns with diagram (Request Manager as single box) and `docs/ARCHITECTURE_DIAGRAMS.md` (Flow 1).
 - **Laptop refresh:** 3-year policy and 4 NA options (MacBook Air M3, MacBook Pro 14 M3 Pro, ThinkPad T14 Gen 5, ThinkPad P1 Gen 7) match `agent-service/config/knowledge_bases/laptop-refresh/` and README.
 - **Ticket format:** REQ prefix for ServiceNow requests (evaluations and MCP expect REQ/INC/RITM).
 - **CLI:** `python test/chat-responses-request-mgr.py --user-id tchughesiv@gmail.com` correct; `tchughesiv@gmail.com` is in mock-employee-data; `make servicenow-wake` exists (Makefile).
-- **Diagram:** `docs/images/top-level-architecture.png` exists; README Key Request Flow matches script.
+- **Diagram:** `docs/images/top-level-architecture.png` exists; script flow (channels → Request Manager → agent service → MCP/integrations) matches diagram; Integration Dispatcher is noted in script as part of Request Manager (not a separate box on diagram).
