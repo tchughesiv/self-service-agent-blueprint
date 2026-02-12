@@ -21,7 +21,7 @@ We'll show you how a conversation can start in Slack and continue in email—sam
 
 **One continuous conversation: start in Slack, continue in email. Use the same user (same email) in both so the Request Manager keeps one session.**
 
-**Speaker notes (glance as you go):** *Say* "We'll do a laptop refresh in one conversation—starting in Slack." → *Type* hi / laptop refresh → *Type* see options → *Say* "Same conversation—I'll continue in email." → *Switch to email* → *Type* option 1 → *Say* "Same conversation—I'll finish in Slack." → *Switch to Slack* → *Type* yes create ticket → *Say* "One session—started in Slack, continued in email, finished in Slack. Conversations survive channel switches." → *Say* "And here's that request in ServiceNow—conversation turned into action." → *Say* "Here's the architecture that keeps that conversation continuous."
+**Speaker notes (glance as you go):** *Say* "We'll do a laptop refresh in one conversation—starting in Slack." → *Type* hi / laptop refresh → *Type* see options → *Say* "Same conversation—I'll continue in email." → *Switch to email* → *Type* option 1 → *Say* "Same conversation—I'll finish in Slack." → *Switch to Slack* → *Type* yes create ticket → *Say* "One session—started in Slack, continued in email, finished in Slack. Conversations survive channel switches." → *Say* "And here's that request in ServiceNow—conversation turned into action." → *Say* "Now let's take a look at the architecture."
 
 **Speaker note (optional—when switching to email or at continuity callout):** The system looks up your email from Slack and uses it as your identity—so the same person in Slack and email is one session. Your data (e.g. current laptop, eligibility) comes from ServiceNow; that same email is what ServiceNow uses for the ticket when we create it.
 
@@ -66,7 +66,7 @@ We'll show you how a conversation can start in Slack and continue in email—sam
 
 **[Transition to architecture]**
 
-- "Here’s the architecture that keeps that conversation continuous."
+- "Now let's take a look at the architecture."
 
 ---
 
@@ -77,10 +77,9 @@ We'll show you how a conversation can start in Slack and continue in email—sam
 **Script (one diagram, one flow; no deep dive):**
 
 - "Users reach the system through **Slack**, **email**, or the **API**—including the CLI."
-- "The **Request Manager** receives from those channels—the Integration Dispatcher is part of that for Slack and email—validates and routes every request, ties it to the same user session so switching channels keeps one conversation, and delivers responses back to the right channel. This is deployed to **OpenShift** using elements of **OpenShift AI**—components talk using **CloudEvents** over **Knative** with **Kafka**—which makes it event-driven and **scalable**."
+- "The **Request Manager** receives from those channels—the Integration Dispatcher is part of that for Slack and email—validates and routes every request, ties it to the same user session so switching channels keeps one conversation, and delivers responses back to the configured channels. This is deployed to **OpenShift** using elements of **OpenShift AI**—components talk using **CloudEvents** over **Knative** with **Kafka**—which makes it event-driven and **scalable**."
 - "The **routing agent** figures out what the user needs and hands off to a **specialist agent**—here, the laptop refresh agent. That agent uses **knowledge bases** and **tools** like ServiceNow via **MCP**, powered by an **LLM**."
-- "One flow: Request Manager → agent service → MCP and integrations."
-- "The quickstart is built to be **easily extensible**. Add more channels (e.g. Discord, Teams, or SMS), MCP servers for new integrations, more IT services (e.g. access management, compliance workflows), or new specialist agents—without changing the core platform."
+- "The quickstart is built to be **easily extensible**. Add more channels (e.g. Discord, Teams, or SMS), MCP servers for new integrations, more IT services (e.g. access management, compliance workflows), or new specialist agents— all without changing the core platform."
 
 **[If time]** Briefly point on diagram: channels → Request Manager → Router Agent → Agent(s) → Tools / IT Systems.
 
@@ -88,7 +87,9 @@ We'll show you how a conversation can start in Slack and continue in email—sam
 
 ## OUTRO (2:50–3:00)
 
-"You get **evaluations** and **tracing** out of the box. It's **scalable** and **easily extensible**—add channels like Teams, more IT services, or new agents. Link in the description. Thanks."
+"You get **evaluations** and **tracing** out of the box. Try the quickstart—link's in the description. Thanks."
+
+*Alternative:* End on the cross-channel takeaway—e.g. "One conversation across all channels, ready to extend. Link's in the description. Thanks."
 
 ---
 
