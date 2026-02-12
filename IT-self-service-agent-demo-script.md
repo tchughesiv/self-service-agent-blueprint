@@ -10,9 +10,9 @@
 
 **[On screen: title or splash]**
 
-"This quickstart is an AI agent system for IT self-service — deployable on OpenShift — with a laptop refresh as the example you can run.
+"In this demo we'll show you the **IT self-service agent quickstart**—an AI agent system for IT self-service, deployed to OpenShift, with a laptop refresh workflow as an example you can run out of the box.
 
-We'll show you one conversation that starts in Slack and continues in email—same session, across channels—then the architecture that keeps it continuous.
+We'll show you one conversation that starts in Slack and continues in email—same session, across channels, without losing context—then the architecture that keeps it continuous.
 
 By the end you’ll know what this quickstart does and why it matters: self-service for laptop refresh requests—already supported—plus access management, compliance workflows, and more. You get a template you can extend with your own channels, MCP servers, and agents."
 
@@ -52,13 +52,13 @@ By the end you’ll know what this quickstart does and why it matters: self-serv
 - "Same conversation—I'll finish in Slack." Switch back to Slack.
 - **You:** In the same thread: "Yes, please create the ticket."
 - **Expected:** Agent replies in Slack: "A ServiceNow ticket for a laptop refresh has been created for you. The ticket number is REQ…"
-- Call out briefly: one session—started in Slack, continued in email, finished in Slack—conversation continuity across channels.
+- Call out briefly: one session—started in Slack, continued in email, finished in Slack. Conversations survive channel switches.
 
 **Show request persisted in ServiceNow (~10–15 s)**
 
 **[Screen: ServiceNow UI — Requests / requested item]**
 
-- "And here's that request in ServiceNow." Show the ticket (e.g. All → Requests; open the REQ number from the conversation; optionally show requested item and details so user/laptop selection is visible).
+- "And here's that request in ServiceNow—conversation turned into action." Show the ticket (e.g. All → Requests; open the REQ number from the conversation; optionally show requested item and details so user/laptop selection is visible).
 - Keep it short: same ticket number, correct user and laptop—request persisted end-to-end.
 
 **[Transition to architecture]**
@@ -127,6 +127,7 @@ Use `reset` then any message to start a fresh conversation.
 ## REPO SOURCES USED
 
 - **Outline:** `IT self-service agent AI quickstart video outline.md`
+- **Blog (language alignment):** [AI meets you where you are: Slack, email & ServiceNow](https://developers.redhat.com/articles/2026/02/09/self-service-ai-agent-slack-email-servicenow) — script uses "without losing context," "conversations survive channel switches," "conversation turned into action"; optional hook phrase: "meet users where they already work."
 - **Architecture:** `README.md` (Key Request Flow, Architecture diagrams), `docs/ARCHITECTURE_DIAGRAMS.md`
 - **Diagram:** `docs/images/top-level-architecture.png`
 - **Flows:** `README.md` (Interact with the CLI, Integration with Slack, Integration with email)
