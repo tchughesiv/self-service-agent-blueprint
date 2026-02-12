@@ -12,8 +12,7 @@
 
 "In this demo we'll show you the **IT self-service agent AI quickstart**—with a laptop refresh workflow you can run out of the box.
 
-We'll show you how a conversation can start in Slack and continue in email—same session, across channels, without losing context—then the architecture that keeps it continuous. With this quickstart you get a template you can extend with your own channels, MCP servers, and agents."
-
+We'll show you how a conversation can start in Slack and continue in email—same session, across channels, without losing context—then we'll show you the architecture behind it. With this quickstart you get a template you can extend with your own channels, MCP servers, and agents."
 
 ---
 
