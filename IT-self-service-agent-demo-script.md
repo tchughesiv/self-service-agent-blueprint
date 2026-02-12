@@ -10,7 +10,7 @@
 
 **[On screen: title or splash]**
 
-"In this demo we'll show you the **IT self-service agent AI quickstart**—deployed to OpenShift, with a laptop refresh workflow you can run out of the box.
+"In this demo we'll show you the **IT self-service agent AI quickstart**—with a laptop refresh workflow you can run out of the box.
 
 We'll show you how a conversation can start in Slack and continue in email—same session, across channels, without losing context—then the architecture that keeps it continuous. With this quickstart you get a template you can extend with your own channels, MCP servers, and agents."
 
@@ -77,7 +77,7 @@ We'll show you how a conversation can start in Slack and continue in email—sam
 **Script (one diagram, one flow; no deep dive):**
 
 - "Users reach the system through **Slack**, **email**, or the **API**—including the CLI."
-- "The **Request Manager** receives from those channels—the Integration Dispatcher is part of that for Slack and email—validates and routes every request, ties it to the same user session so switching channels keeps one conversation, and delivers responses back to the right channel. Components talk using **CloudEvents** over **Knative** and **Kafka**—event-driven and **scalable**."
+- "The **Request Manager** receives from those channels—the Integration Dispatcher is part of that for Slack and email—validates and routes every request, ties it to the same user session so switching channels keeps one conversation, and delivers responses back to the right channel. This is deployed to **OpenShift** using elements of **OpenShift AI**—components talk using **CloudEvents** over **Knative** with **Kafka**—which makes it event-driven and **scalable**."
 - "The **routing agent** figures out what the user needs and hands off to a **specialist agent**—here, the laptop refresh agent. That agent uses **knowledge bases** and **tools** like ServiceNow via **MCP**, powered by an **LLM**."
 - "One flow: Request Manager → agent service → MCP and integrations."
 - "The quickstart is built to be **easily extensible**. Add more channels (e.g. Discord, Teams, or SMS), MCP servers for new integrations, more IT services (e.g. access management, compliance workflows), or new specialist agents—without changing the core platform."
