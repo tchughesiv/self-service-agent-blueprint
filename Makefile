@@ -339,8 +339,8 @@ help:
 	@echo "  check-lockfiles                     - Check if all uv.lock files are up-to-date"
 	@echo "  check-requirements                  - Check if all requirements.txt files exist and are in sync with uv.lock"
 	@echo "  check-uv-version                    - Check if local uv version matches CI requirement ($(UV_VERSION))"
-	@echo "  update-lockfiles                    - Update all uv.lock files and export requirements.txt for services with lockfiles"
-	@echo "  export-requirements                - Export requirements.txt for all services with uv.lock files"
+	@echo "  update-lockfiles                    - Update all uv.lock files; export requirements.txt for dirs in REQUIREMENTS_DIRS"
+	@echo "  export-requirements                - Export requirements.txt for containerized services (REQUIREMENTS_DIRS only)"
 	@echo "  check-lockfile-<service>            - Check lockfile for specific service"
 	@echo "  update-lockfile-<service>           - Update lockfile for specific service"
 	@echo "  test-agent-service                  - Run tests for agent service"
@@ -962,6 +962,12 @@ test-all: test-shared-models test-shared-clients test test-request-manager test-
 	@echo "All tests completed successfully!"
 
 # Lockfile management
+# Recursive make with same Makefile (for helper targets that take DIR= etc.).
+MAKE_SAME := $(MAKE) -f $(firstword $(MAKEFILE_LIST))
+# All directories that have uv.lock (for check-lockfiles and update-lockfiles).
+# Export of requirements.txt only runs for dirs also in REQUIREMENTS_DIRS (see update_lockfile).
+LOCKFILE_DIRS := shared-models shared-clients agent-service request-manager integration-dispatcher mcp-servers/snow mock-eventing-service mock-employee-data promptguard-service scripts/servicenow-bootstrap
+
 define check_lockfile
 	@echo "📦 Checking $(1)..."
 	@if [ -d "$(1)" ]; then \
@@ -981,17 +987,26 @@ define update_lockfile
 	@if [ -d "$(1)" ]; then \
 		cd "$(1)" && uv lock; \
 		echo "✅ $(1) lockfile updated"; \
-		if [ -f "$(1)/uv.lock" ]; then \
-			cd "$(1)" && uv export --format requirements-txt --no-dev -o requirements.txt && \
-			echo "✅ $(1) requirements.txt exported"; \
-		fi; \
 	else \
 		echo "⚠️  $(1) directory not found, skipping..."; \
 	fi
+	@if [ -n "$(filter $(1),$(REQUIREMENTS_DIRS))" ] && [ -d "$(1)" ] && [ -f "$(1)/uv.lock" ]; then \
+		$(MAKE_SAME) _export-one-dir DIR="$(1)"; \
+	fi
 endef
 
+# Helper target for check-lockfiles: check lockfile for one dir (DIR= set by caller).
+.PHONY: _check-one-lockfile
+_check-one-lockfile:
+	$(call check_lockfile,$(DIR))
+
+# Helper target for update-lockfiles: update lockfile (and maybe export) for one dir (DIR= set by caller).
+.PHONY: _update-one-lockfile
+_update-one-lockfile:
+	$(call update_lockfile,$(DIR))
+
 .PHONY: check-lockfiles
-check-lockfiles:
+check-lockfiles: check-uv-version
 	@echo "🔍 Checking uv.lock files across all services..."
 	@echo
 	@echo "📦 Checking root project..."
@@ -1002,58 +1017,25 @@ check-lockfiles:
 		exit 1; \
 	fi
 	@echo
-	$(call check_lockfile,shared-models)
-	@echo
-	$(call check_lockfile,shared-clients)
-	@echo
-	$(call check_lockfile,agent-service)
-	@echo
-	$(call check_lockfile,request-manager)
-	@echo
-	$(call check_lockfile,integration-dispatcher)
-	@echo
-	$(call check_lockfile,mcp-servers/snow)
-	@echo
-	$(call check_lockfile,mock-eventing-service)
-	@echo
-	$(call check_lockfile,mock-employee-data)
-	@echo
-	$(call check_lockfile,scripts/servicenow-bootstrap)
-	@echo
-	@echo
+	@for dir in $(LOCKFILE_DIRS); do \
+		$(MAKE_SAME) _check-one-lockfile DIR="$$dir"; \
+		echo; \
+	done
 	@echo "🎉 All lockfiles are up-to-date!"
 
 .PHONY: update-lockfiles
-update-lockfiles:
+update-lockfiles: check-uv-version
 	@echo "🔄 Updating all uv.lock files..."
 	@echo
 	@echo "📦 Updating root project..."
 	@uv lock
 	@echo "✅ Root project lockfile updated"
 	@echo
-	$(call update_lockfile,shared-models)
-	@echo
-	$(call update_lockfile,shared-clients)
-	@echo
-	$(call update_lockfile,agent-service)
-	@echo
-	$(call update_lockfile,request-manager)
-	@echo
-	$(call update_lockfile,integration-dispatcher)
-	@echo
-	$(call update_lockfile,mcp-servers/snow)
-	@echo
-	$(call update_lockfile,mock-eventing-service)
-	@echo
-	$(call update_lockfile,mock-employee-data)
-	@echo
-	$(call update_lockfile,promptguard-service)
-	@echo
-	$(call update_lockfile,scripts/servicenow-bootstrap)
-	@echo
-	@echo
+	@for dir in $(LOCKFILE_DIRS); do \
+		$(MAKE_SAME) _update-one-lockfile DIR="$$dir"; \
+		echo; \
+	done
 	@echo "🎉 All lockfiles updated successfully!"
-	@$(MAKE) export-requirements
 
 # Individual service lockfile targets
 .PHONY: check-lockfile-root check-lockfile-shared-models check-lockfile-shared-clients check-lockfile-agent-service check-lockfile-request-manager check-lockfile-integration-dispatcher check-lockfile-mcp-snow check-lockfile-mock-eventing check-lockfile-mock-employee-data check-lockfile-mock-servicenow check-lockfile-promptguard check-lockfile-servicenow-bootstrap
@@ -1133,18 +1115,19 @@ update-lockfile-promptguard:
 update-lockfile-servicenow-bootstrap:
 	$(call update_lockfile,scripts/servicenow-bootstrap)
 
-# Export requirements.txt for containerized services
+# Full export for one directory: check, cd, uv export, add_torch_hash, echo. Single line so Make does not echo the recipe.
+# Usage: $(call export_requirements,dir) or: $(MAKE) _export-one-dir DIR=<dir>
 define export_requirements
-	@echo "📦 Exporting requirements.txt for $(1)..."
-	@if [ -d "$(1)" ] && [ -f "$(1)/uv.lock" ]; then \
-		cd "$(1)" && uv export --format requirements-txt --no-dev -o requirements.txt; \
-		echo "✅ $(1) requirements.txt exported"; \
-	else \
-		echo "⚠️  $(1) directory or lockfile not found, skipping..."; \
-	fi
+	@echo "📦 Exporting requirements.txt for $(1)..."; if [ -d "$(1)" ] && [ -f "$(1)/uv.lock" ]; then cd "$(1)" && uv export --format requirements-txt --no-dev -o requirements.txt > /dev/null 2>&1 && $(call add_torch_hash,requirements.txt) && echo "✅ $(1) requirements.txt exported"; else echo "⚠️  $(1) directory or lockfile not found, skipping..."; fi
 endef
 
+# Helper target for update_lockfile: export requirements for one dir (DIR= set by caller).
+.PHONY: _export-one-dir
+_export-one-dir:
+	$(call export_requirements,$(DIR))
+
 # Requirements.txt management
+# REQUIREMENTS_DIRS = dirs we export requirements.txt for (subset of LOCKFILE_DIRS; see Lockfile management).
 # Only export/check requirements.txt for directories that are built into containers AND have uv.lock files:
 # - Services: agent-service, integration-dispatcher, promptguard-service, request-manager, mock-eventing-service, mock-service-now
 # - MCP servers: mcp-servers/snow
@@ -1160,19 +1143,11 @@ UV_VERSION ?= 0.8.9
 EXTRACT_TORCH_HASH_SCRIPT := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))scripts/extract_torch_hash.py)
 UPDATE_TORCH_HASH_SCRIPT := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))scripts/update_torch_hash.py)
 
-# Function to add/update torch hash in requirements.txt
-# Always replaces the hash to ensure it's correct (even if one already exists)
-# Handles both formats: with backslash continuation and without, with or without existing hash
+# Function to add/update torch hash in requirements.txt (single line so it inlines without recipe echo).
+# Uses Python 3.12 (312) for hash extraction since that's what the containers use.
 # Usage: $(call add_torch_hash,requirements_file_path)
-# Note: We use Python 3.12 (312) since that's what the containers use, not the local Python version
 define add_torch_hash
-	if [ -f "uv.lock" ] && grep -q "^torch==.*+cpu" $(1) 2>/dev/null; then \
-		TORCH_HASH=$$(python3 "$(EXTRACT_TORCH_HASH_SCRIPT)" "uv.lock" "312" 2>/dev/null) && \
-		if [ -n "$$TORCH_HASH" ]; then \
-			python3 "$(UPDATE_TORCH_HASH_SCRIPT)" "$(1)" "$$TORCH_HASH" > /dev/null 2>&1 && \
-			echo "  ✅ Updated hash for torch from lockfile"; \
-		fi; \
-	fi
+	if [ -f "uv.lock" ] && grep -q "^torch==.*+cpu" $(1) 2>/dev/null; then TORCH_HASH=$$(python3 "$(EXTRACT_TORCH_HASH_SCRIPT)" "uv.lock" "312" 2>/dev/null) && if [ -n "$$TORCH_HASH" ]; then python3 "$(UPDATE_TORCH_HASH_SCRIPT)" "$(1)" "$$TORCH_HASH" > /dev/null 2>&1 && echo "  ✅ Updated hash for torch from lockfile"; fi; fi
 endef
 
 .PHONY: check-uv-version
@@ -1198,15 +1173,7 @@ export-requirements: check-uv-version
 	@echo "📦 Exporting requirements.txt for containerized services..."
 	@echo
 	@for dir in $(REQUIREMENTS_DIRS); do \
-		echo "📦 Exporting requirements.txt for $$dir..."; \
-		if cd "$$dir" 2>/dev/null; then \
-			uv export --format requirements-txt --no-dev -o requirements.txt > /dev/null 2>&1 && \
-			$(call add_torch_hash,requirements.txt) && \
-			echo "✅ $$dir requirements.txt exported"; \
-			cd - > /dev/null; \
-		else \
-			echo "⚠️  $$dir directory not found, skipping..."; \
-		fi; \
+		$(MAKE_SAME) _export-one-dir DIR="$$dir"; \
 		echo; \
 	done
 	@echo "🎉 All requirements.txt files exported successfully!"
