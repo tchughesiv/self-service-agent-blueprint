@@ -86,7 +86,7 @@ This quickstart provides the framework, components and knowledge to accelerate y
 
 The quickstart provides implementations of the common components along with the process specific pieces needed to support the laptop refresh IT process as a concrete implementation.
 
-**Time to complete:** 60-90 minutes (depending on deployment mode)
+**Time to complete:** 60-180 minutes (depending on deployment mode)
 
 By the end of this quickstart, you will have:
 - A fully functional AI agent system deployed on OpenShift
@@ -304,9 +304,11 @@ available in [docs/alternate-journeys/scout-only.md](docs/alternate-journeys/sco
 
 ### Minimum hardware requirements
 
-* CPU: 6-8 cores
-* Memory: 16-20Gi
-* Storage: 150-200Gi
+The following are the resources you need to add on top of your existing OpenShift cluster to deploy and serve the application. For the resource requirements of a base OpenShift installation, see the [official OpenShift cluster documentation](https://docs.openshift.com/container-platform/latest/installing/installing_platform_agnostic/installing-platform-agnostic.html).
+
+* CPU: 10-12 cores
+* Memory: 8Gi
+* Storage: 50Gi
 * **Optional** GPU - Required only if you want to run safety shields with local instance of
   [meta-llama/Llama-Guard-3-8B](https://huggingface.co/meta-llama/Llama-Guard-3-8B)
 
