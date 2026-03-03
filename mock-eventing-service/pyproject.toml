@@ -6,15 +6,18 @@ authors = [
     {name = "Self-Service Agent Team", email = "team@example.com"},
 ]
 dependencies = [
-    "fastapi>=0.104.0,<0.117.0",
+    "fastapi>=0.104.0",
     "uvicorn[standard]>=0.24.0",
     "pydantic>=2.5.0",
     "structlog>=23.2.0",
     "httpx>=0.25.0",
     "cloudevents>=1.9.0",
+    "orjson>=3.11.7",
+    "langchain-core>=1.2.11",
     "self-service-agent-shared-models",
-    "opentelemetry-exporter-otlp-proto-http==1.37.0",
-    "opentelemetry-instrumentation-httpx==0.58b0",
+    "protobuf>=6.33.5",
+    "opentelemetry-exporter-otlp-proto-http>=1.37.0",
+    "opentelemetry-instrumentation-httpx>=0.58b0",
     "opentelemetry-instrumentation-fastapi>=0.58b0",
     "tracing-config",
 ]
