@@ -1,0 +1,24 @@
+# Virtual environments (can exist in any Python package dir)
+**/.venv
+**/venv
+**/.pixi
+
+# Python bytecode and caches
+**/__pycache__
+**/*.py[cod]
+**/*.so
+**/.mypy_cache
+**/.ruff_cache
+**/.pytest_cache
+
+# Build artifacts
+**/dist
+**/build
+**/*.egg-info
+**/.eggs
+
+# Git and IDE
+.git
+.gitignore
+.idea
+.vscode
