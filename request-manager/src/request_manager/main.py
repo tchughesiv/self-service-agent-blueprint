@@ -952,20 +952,13 @@ async def _handle_agent_response_event_from_data(
         # and will be picked up by database polling in wait_for_response
         try:
             from request_manager.communication_strategy import resolve_response_future
+            from request_manager.response_builder import (
+                build_response_data_from_event_data,
+            )
 
-            # Construct complete response_data dict with all required fields (payload is in response_data)
-            complete_response_data = {
-                "request_id": request_id,
-                "session_id": session_id,
-                "agent_id": agent_id,
-                "content": content,
-                "metadata": response_data.get("metadata", {}),
-                "processing_time_ms": response_data.get("processing_time_ms"),
-                "requires_followup": response_data.get("requires_followup", False),
-                "followup_actions": response_data.get("followup_actions", []),
-                "created_at": created_at_iso,
-                "agent_received_at": response_data.get("agent_received_at"),
-            }
+            complete_response_data = build_response_data_from_event_data(
+                response_data, created_at_iso=created_at_iso
+            )
 
             future_resolved = resolve_response_future(
                 request_id, complete_response_data

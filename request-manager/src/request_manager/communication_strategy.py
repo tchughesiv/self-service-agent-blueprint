@@ -4,7 +4,7 @@ import asyncio
 import os
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional, cast
+from typing import Any, Dict, Optional
 
 from fastapi import HTTPException, status
 from shared_models import CloudEventSender, SessionResponse, configure_logging
@@ -566,7 +566,6 @@ class EventingStrategy(CommunicationStrategy):
                     "processing_time_ms": response_data.get("processing_time_ms"),
                     "requires_followup": response_data.get("requires_followup", False),
                     "followup_actions": response_data.get("followup_actions", []),
-                    "agent_received_at": response_data.get("agent_received_at"),
                 },
             }
 
@@ -621,8 +620,8 @@ async def _pod_response_poller(pod_name: str) -> None:
 
     while True:
         try:
-            # Get all waiting request_ids from registry
-            waiting_request_ids = list(_response_futures_registry.keys())
+            # Get all waiting request_ids from registry (cap to limit IN clause size)
+            waiting_request_ids = list(_response_futures_registry.keys())[:100]
 
             if not waiting_request_ids:
                 # No requests waiting, sleep and continue
@@ -635,6 +634,8 @@ async def _pod_response_poller(pod_name: str) -> None:
             from shared_models import get_database_manager
             from shared_models.models import RequestLog
             from sqlalchemy import select
+
+            from .response_builder import build_response_data_from_request_log
 
             db_manager = get_database_manager()
             async with db_manager.get_session() as db:
@@ -655,29 +656,9 @@ async def _pod_response_poller(pod_name: str) -> None:
                     if request_id in _response_futures_registry:
                         future = _response_futures_registry[request_id]
                         if not future.done():
-                            response_metadata = cast(
-                                Dict[str, Any],
-                                request_log.response_metadata or {},
+                            response_data = build_response_data_from_request_log(
+                                request_log, from_event=False
                             )
-                            response_data: Dict[str, Any] = {
-                                "request_id": request_id,
-                                "session_id": request_log.session_id,
-                                "agent_id": request_log.agent_id,
-                                "content": request_log.response_content,
-                                "metadata": response_metadata,
-                                "processing_time_ms": request_log.processing_time_ms,
-                                "requires_followup": False,
-                                "followup_actions": [],
-                                "created_at": (
-                                    request_log.created_at.isoformat()
-                                    if request_log.created_at
-                                    else None
-                                ),
-                                "agent_received_at": response_metadata.get(
-                                    "agent_received_at"
-                                ),
-                                "_from_event": False,  # Flag to indicate source
-                            }
                             future.set_result(response_data)
                             logger.info(
                                 "Response found in database via single pod polling",

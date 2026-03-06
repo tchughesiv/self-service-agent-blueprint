@@ -1,24 +1,36 @@
 """Unit tests for session request serialization.
 
 Covers: session lock key derivation, reconstruct_normalized_request,
-acquire/release session lock with mocked DB, SessionLockTimeoutError → 503.
+acquire/release session lock with mocked DB, SessionLockTimeoutError → 503,
+dequeue_oldest_pending, reclaim_stuck_processing, wait_for_turn_and_process_one.
 """
 
 import uuid
 from datetime import datetime, timezone
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 from request_manager.exceptions import SessionLockTimeoutError
 from request_manager.main import app
+from request_manager.session_config import (
+    AGENT_TIMEOUT,
+    SESSION_LOCK_STUCK_BUFFER_SECONDS,
+)
 from request_manager.session_lock import (
     _session_id_to_lock_key,
     acquire_session_lock,
     release_session_lock,
 )
-from request_manager.session_orchestrator import reconstruct_normalized_request
-from shared_models.models import IntegrationType
+from request_manager.session_orchestrator import (
+    _get_stuck_cutoff,
+    dequeue_oldest_pending,
+    reclaim_stuck_processing,
+    reconstruct_normalized_request,
+    wait_for_turn_and_process_one,
+)
+from shared_models.models import IntegrationType, NormalizedRequest, RequestStatus
 
 
 class TestSessionLockKeyDerivation:
@@ -237,3 +249,197 @@ class TestSessionLockTimeoutReturns503:
         assert "Service temporarily unavailable" in (
             body.get("detail", "") or body.get("error", "")
         )
+
+
+class TestStuckCutoff:
+    """Test _get_stuck_cutoff for reclaim time-based logic."""
+
+    def test_stuck_cutoff_is_in_past(self) -> None:
+        """Stuck cutoff should be AGENT_TIMEOUT + buffer seconds ago."""
+        cutoff = _get_stuck_cutoff()
+        now = datetime.now(timezone.utc)
+        expected_seconds = AGENT_TIMEOUT + SESSION_LOCK_STUCK_BUFFER_SECONDS
+        delta = (now - cutoff).total_seconds()
+        assert abs(delta - expected_seconds) < 2  # Allow 2s variance
+
+
+@pytest.mark.asyncio
+class TestDequeueOldestPending:
+    """Test dequeue_oldest_pending with mocked DB."""
+
+    async def test_dequeue_returns_none_when_no_pending(self) -> None:
+        """Dequeue returns None when no pending rows for session."""
+        mock_db = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db.commit = AsyncMock()
+
+        result = await dequeue_oldest_pending("sess-123", mock_db, "pod-1")
+        assert result is None
+
+    async def test_dequeue_returns_row_and_sets_status_pod_name(self) -> None:
+        """Dequeue returns oldest pending row with status=processing, pod_name set."""
+        mock_row = MagicMock()
+        mock_row.request_id = "req-1"
+        mock_row.session_id = "sess-123"
+        mock_row.request_content = "Hello"
+        mock_row.normalized_request = {"user_id": "u1", "integration_type": "WEB"}
+        mock_row.created_at = datetime.now(timezone.utc)
+
+        mock_updated_row = MagicMock()
+        mock_updated_row.request_id = "req-1"
+        mock_updated_row.session_id = "sess-123"
+        mock_updated_row.status = RequestStatus.PROCESSING.value
+        mock_updated_row.pod_name = "pod-1"
+        mock_updated_row.processing_started_at = datetime.now(timezone.utc)
+        mock_updated_row.request_content = "Hello"
+        mock_updated_row.normalized_request = {
+            "user_id": "u1",
+            "integration_type": "WEB",
+        }
+        mock_updated_row.created_at = mock_row.created_at
+
+        mock_db = AsyncMock()
+        mock_db.commit = AsyncMock()
+        execute_results = [
+            MagicMock(scalar_one_or_none=MagicMock(return_value=mock_row)),
+            MagicMock(),
+            MagicMock(scalar_one_or_none=MagicMock(return_value=mock_updated_row)),
+        ]
+        mock_db.execute = AsyncMock(side_effect=execute_results)
+
+        result = await dequeue_oldest_pending("sess-123", mock_db, "pod-1")
+        assert result is not None
+        assert result.request_id == "req-1"
+        assert result.status == RequestStatus.PROCESSING.value
+        assert result.pod_name == "pod-1"
+        assert result.processing_started_at is not None
+        mock_db.commit.assert_called_once()
+
+
+@pytest.mark.asyncio
+class TestReclaimStuckProcessing:
+    """Test reclaim_stuck_processing with mocked DB."""
+
+    async def test_reclaim_returns_zero_when_no_stuck(self) -> None:
+        """Reclaim returns 0 when no stuck processing rows (UPDATE affects 0 rows)."""
+        mock_db = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.fetchall.return_value = []
+        mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db.commit = AsyncMock()
+
+        count = await reclaim_stuck_processing("sess-123", mock_db)
+        assert count == 0
+
+    async def test_reclaim_returns_count_when_stuck_rows_exist(self) -> None:
+        """Reclaim returns count and commits when stuck processing rows exist (time-based or heartbeat)."""
+        mock_db = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.fetchall.return_value = [("req-stuck-1",)]
+        mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db.commit = AsyncMock()
+
+        count = await reclaim_stuck_processing("sess-123", mock_db)
+        assert count == 1
+        mock_db.commit.assert_called_once()
+
+
+@pytest.mark.asyncio
+class TestWaitForTurnAndProcessOne:
+    """Test wait_for_turn_and_process_one error paths."""
+
+    async def test_raises_when_strategy_send_fails_for_our_request(self) -> None:
+        """When strategy_send_request returns False for our request, raises Exception."""
+        session_id = "sess-123"
+        our_request_id = "req-ours"
+        mock_db = AsyncMock()
+        mock_lock_db = AsyncMock()
+
+        # Phase 1: check returns None (no existing row), so create_request_log_entry_unified is called
+        check_result = MagicMock()
+        check_result.scalar_one_or_none.return_value = None
+        mock_lock_db.execute = AsyncMock(return_value=check_result)
+        mock_lock_db.commit = AsyncMock()
+
+        mock_request_log = MagicMock()
+        mock_request_log.request_id = our_request_id
+        mock_request_log.session_id = session_id
+        mock_request_log.normalized_request = {
+            "user_id": "u1",
+            "integration_type": "WEB",
+        }
+        mock_request_log.request_content = "Hi"
+        mock_request_log.created_at = datetime.now(timezone.utc)
+
+        normalized = NormalizedRequest(
+            request_id=our_request_id,
+            session_id=session_id,
+            user_id="u1",
+            integration_type=IntegrationType.WEB,
+            request_type="message",
+            content="Hi",
+            integration_context={},
+            user_context={},
+            target_agent_id=None,
+            requires_routing=True,
+            created_at=datetime.now(timezone.utc),
+        )
+
+        async def fake_send(nr: NormalizedRequest) -> bool:
+            return False
+
+        async def fake_wait(req_id: str, timeout: int, db: Any) -> dict[str, Any]:
+            return {"request_id": req_id, "content": "ok"}
+
+        mock_get_session = AsyncMock()
+        mock_get_session.__aenter__ = AsyncMock(return_value=MagicMock())
+        mock_get_session.__aexit__ = AsyncMock(return_value=None)
+        mock_db_manager = MagicMock()
+        mock_db_manager.get_session.return_value = mock_get_session
+
+        async def mock_with_session_lock(
+            _sid: str, _mgr: Any, fn: Any, **kw: Any
+        ) -> Any:
+            return await fn(mock_lock_db)
+
+        with (
+            patch(
+                "request_manager.session_orchestrator.with_session_lock",
+                new_callable=AsyncMock,
+                side_effect=mock_with_session_lock,
+            ),
+            patch(
+                "request_manager.session_orchestrator.get_database_manager",
+                return_value=mock_db_manager,
+            ),
+            patch(
+                "request_manager.database_utils.create_request_log_entry_unified",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "request_manager.session_orchestrator.get_pod_name",
+                return_value="pod-1",
+            ),
+            patch(
+                "request_manager.session_orchestrator.reclaim_stuck_processing",
+                new_callable=AsyncMock,
+                return_value=0,
+            ),
+            patch(
+                "request_manager.session_orchestrator.dequeue_oldest_pending",
+                new_callable=AsyncMock,
+                return_value=mock_request_log,
+            ),
+        ):
+            with pytest.raises(Exception, match="Failed to send request to agent"):
+                await wait_for_turn_and_process_one(
+                    session_id=session_id,
+                    our_request_id=our_request_id,
+                    normalized_request=normalized,
+                    db=mock_db,
+                    strategy_send_request=fake_send,
+                    strategy_wait_for_response=fake_wait,
+                    timeout=60,
+                )

@@ -9,6 +9,12 @@ Adds:
 - server_default for request_sessions.created_at, processed_events.created_at
 - trigger to set request_logs.updated_at on UPDATE (DB clock for multi-pod ordering)
 
+Backfill: Existing request_logs rows receive status='completed' via server_default.
+They are not reclaimed or dequeued. New requests use the full status lifecycle.
+
+pod_heartbeats: Each request-manager pod updates its row periodically. Reclaim
+uses stale last_check_in_at to detect dead pods and reset stuck processing rows.
+
 Revision ID: 004
 Revises: 003
 Create Date: 2025-01-01 00:00:00.000000
@@ -57,6 +63,14 @@ def upgrade() -> None:
         "request_logs",
         ["session_id", "status", "created_at"],
         unique=False,
+    )
+
+    # Partial index for reclaim_stuck_processing_global (status='processing' only)
+    op.create_index(
+        "ix_request_logs_status_processing_started",
+        "request_logs",
+        ["status", "processing_started_at"],
+        postgresql_where=sa.text("status = 'processing'"),
     )
 
     # Create pod_heartbeats table
@@ -168,7 +182,11 @@ def downgrade() -> None:
     # Drop pod_heartbeats table
     op.drop_table("pod_heartbeats")
 
-    # Drop index
+    # Drop indexes
+    op.drop_index(
+        "ix_request_logs_status_processing_started",
+        table_name="request_logs",
+    )
     op.drop_index(
         "ix_request_logs_session_status_created",
         table_name="request_logs",

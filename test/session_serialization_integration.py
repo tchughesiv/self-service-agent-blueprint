@@ -84,7 +84,7 @@ async def run_concurrent_session_requests(
     total = num_users * requests_per_user
     tasks = []
     clients = []
-    warmup_durations_ms: list[float] = []
+    warmup_duration_ms: float = 0.0
 
     async def send_with_stagger(
         client: RequestManagerClient, user_idx: int, msg_idx: int, delay: float
@@ -95,6 +95,24 @@ async def run_concurrent_session_requests(
         duration_ms = (time.perf_counter() - req_start) * 1000
         return (*out, duration_ms)
 
+    # Warmup: 1 user, 2 requests through full agent flow (warms agent, not just /health)
+    warmup_client = RequestManagerClient(
+        request_manager_url=request_manager_url,
+        user_id=str(uuid.uuid4()),
+        timeout=MESSAGE_TIMEOUT,
+    )
+    warmup_start = time.perf_counter()
+    for msg_idx in range(2):
+        _, _, result, exc = await send_one(warmup_client, -1, msg_idx)
+        if exc is not None:
+            print(
+                f"Warmup msg{msg_idx} failed: {exc} (continuing anyway)",
+                file=sys.stderr,
+            )
+    await warmup_client.close()
+    warmup_duration_ms = (time.perf_counter() - warmup_start) * 1000
+    await asyncio.sleep(1)  # Brief pause to let agent settle
+
     for u in range(num_users):
         uid = str(uuid.uuid4())
         client = RequestManagerClient(
@@ -103,11 +121,6 @@ async def run_concurrent_session_requests(
             timeout=MESSAGE_TIMEOUT,
         )
         clients.append(client)
-        # Warmup: /health establishes connection without full agent round-trip (~ms vs 4+s)
-        warmup_start = time.perf_counter()
-        r = await client.client.get(f"{client.request_manager_url}/health")
-        r.raise_for_status()
-        warmup_durations_ms.append((time.perf_counter() - warmup_start) * 1000.0)
         for r in range(requests_per_user):
             tasks.append(send_with_stagger(client, u, r, r * stagger_ms))
 
@@ -161,23 +174,17 @@ async def run_concurrent_session_requests(
 
     # Timing: warmup, per-request, and total (always printed)
     print("\n--- Timing ---")
-    warmup_total_ms = sum(warmup_durations_ms)
-    if warmup_durations_ms:
-        warmup_str = ", ".join(
-            f"user{u}: {d:.0f}ms" for u, d in enumerate(warmup_durations_ms)
-        )
-        print(
-            f"  warmup ({num_users} users): {warmup_str} (total {warmup_total_ms:.0f}ms)"
-        )
+    if warmup_duration_ms > 0:
+        print(f"  warmup (1 user, 2 requests): {warmup_duration_ms:.0f}ms")
     for user_idx, msg_idx, result_or_err, exc, duration_ms in sorted(
         results, key=lambda r: (r[0], r[1])
     ):
         status = "ok" if exc is None else "fail"
         print(f"  user{user_idx}/msg{msg_idx}: {duration_ms:.0f}ms ({status})")
     print(f"  total (concurrent phase): {total_duration_ms:.0f}ms")
-    if warmup_durations_ms:
+    if warmup_duration_ms > 0:
         print(
-            f"  wall clock (incl. warmup): {warmup_total_ms + total_duration_ms:.0f}ms"
+            f"  wall clock (incl. warmup): {warmup_duration_ms + total_duration_ms:.0f}ms"
         )
     print()
 
@@ -251,9 +258,7 @@ async def run_concurrent_session_requests(
         # Check agent_received_at order if present (agent processing order)
         agent_order_vals = []
         for msg_idx, res in user_results:
-            agent_received_at = res.get("agent_received_at") or (
-                res.get("response") or {}
-            ).get("agent_received_at")
+            agent_received_at = res.get("agent_received_at")
             if agent_received_at is not None:
                 agent_order_vals.append((msg_idx, agent_received_at))
         if agent_order_vals:

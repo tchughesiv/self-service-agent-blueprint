@@ -32,12 +32,24 @@ Without both layers, the agent can receive msg1 before msg0 (wrong context, out-
 
 ---
 
+## Quick Reference
+
+| What | Value |
+|------|-------|
+| **503 causes** | RequestLog creation failure, session lock timeout, transient DB error, agent timeout |
+| **Key env vars** | `SESSION_LOCK_WAIT_TIMEOUT`, `RECLAIM_ACTION`, `POD_HEARTBEAT_GRACE_SECONDS` |
+| **Metrics** | `request_manager_session_lock_acquire_duration_seconds`, `request_manager_reclaim_total` |
+| **Mock eventing** | Must run with 1 replica (`mockEventing.replicas: 1`) for FIFO |
+| **Migration** | 004 — see [shared-models/MIGRATION.md](../shared-models/MIGRATION.md) |
+
+---
+
 ## Environment variables
 
 | Env var | Helm path | Default | Description |
 |---------|-----------|--------|-------------|
 | `SESSION_LOCK_WAIT_TIMEOUT` | `requestManagement.requestManager.sessionSerialization.lockWaitTimeoutSeconds` | 180 | Seconds to wait for session lock before failing (HTTP 503). Must be >= AGENT_TIMEOUT so queued requests can wait for current one. |
-| `SESSION_LOCK_POLL_INTERVAL_SECONDS` | `requestManagement.requestManager.sessionSerialization.lockPollIntervalSeconds` | 0.05 | Interval between lock attempts (seconds). Longer reduces DB load under high contention; shorter may improve latency. |
+| `SESSION_LOCK_POLL_INTERVAL_SECONDS` | `requestManagement.requestManager.sessionSerialization.lockPollIntervalSeconds` | 0.05 | Interval between lock attempts (seconds). Increase to 0.1–0.2 under high contention to reduce DB load; slightly higher latency. |
 | `DB_STATEMENT_TIMEOUT` | Override from `lockWaitTimeoutSeconds * 1000` (ms) | 180000 | Request-manager override; must exceed lock wait so lock operations are not cancelled by PostgreSQL |
 | `SESSION_LOCK_STUCK_BUFFER_SECONDS` | `requestManagement.requestManager.sessionSerialization.stuckBufferSeconds` | 30 | Added to AGENT_TIMEOUT for time-based reclaim cutoff |
 | `POD_HEARTBEAT_INTERVAL_SECONDS` | `requestManagement.requestManager.sessionSerialization.heartbeatIntervalSeconds` | 15 | How often each pod updates `pod_heartbeats` |
@@ -159,11 +171,35 @@ PostgreSQL `max_connections` is set to 200 for all envs (test/prod). Pool sizes 
 - **pod_heartbeats**: Each request-manager pod updates its row periodically; reclaim uses stale `last_check_in_at` to detect dead pods.
 - **Lock**: PostgreSQL advisory lock keyed by `session_id` (UUID → bigint). Acquire with timeout, release in `finally`. Separate key space for request-manager vs agent.
 - **Flow**: Accept (create RequestLog `pending`) → acquire lock → reclaim stuck `processing` → dequeue oldest `pending` → process one → release lock. If we processed another pod's request, loop (re-acquire, reclaim, dequeue) until we process our own.
+
+### Two-phase flow (ASCII)
+
+```
+Phase 1 (durable accept):
+  acquire lock → insert RequestLog (pending) → register future → release lock
+
+Phase 2 (process loop):
+  acquire lock → reclaim stuck → dequeue oldest pending → release lock
+  → send to agent → wait for response
+  → if dequeued our request: return
+  → else: loop (re-acquire, reclaim, dequeue...)
+```
 - **Response poller**: Matches on `request_id` only (no `pod_name` filter) so the accepting pod receives the response when a different pod processes the request.
+
+### Integration-dispatcher (email)
+
+Email processing in integration-dispatcher supports FIFO and reliability:
+
+- **INTERNALDATE sorting**: Unread emails are sorted by server receive time before processing so replies are handled in order (IMAP `SEARCH UNSEEN` returns IDs in undefined order).
+- **Rate limit**: 2-second cooldown per user; uses **wait** (not skip) so all emails in a batch are processed in order. Same-user emails in one poll are spaced by ~2s.
+- **Event claim**: Claim moved to immediately before forward to minimize crash window (~100–500ms vs ~2–3s). If the pod crashes after claiming but before forwarding, the email is lost (marked as read as "duplicate" on retry). The smaller window reduces this risk.
+- **Mark as read**: Only after successful processing; failed or skipped emails stay unread for retry on the next poll.
+- **IMAP poll interval**: Default 60s (`IMAP_POLL_INTERVAL`). Leader election ensures only one pod polls.
 
 ## Related docs
 
 - [shared-models/MIGRATION.md](../shared-models/MIGRATION.md) — database migrations (revision 004)
+- [guides/PERFORMANCE_SCALING_GUIDE.md](../guides/PERFORMANCE_SCALING_GUIDE.md) — pool sizing, connection budget
 
 ## Test strategy (session serialization)
 

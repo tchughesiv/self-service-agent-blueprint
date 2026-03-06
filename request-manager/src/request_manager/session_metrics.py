@@ -4,6 +4,25 @@ Uses OpenTelemetry metrics API. When a MeterProvider is configured (e.g. OTLP
 exporter), these metrics are exported. Otherwise no-ops via default NoOpMeterProvider.
 """
 
+import functools
+from typing import Callable, TypeVar
+
+T = TypeVar("T")
+
+
+def _suppress_metrics_errors(func: Callable[..., T]) -> Callable[..., T]:
+    """Suppress exceptions in metrics recording (no-op if MeterProvider not configured)."""
+
+    @functools.wraps(func)
+    def wrapper(*args: object, **kwargs: object) -> T | None:
+        try:
+            return func(*args, **kwargs)
+        except Exception:  # noqa: BLE001
+            return None
+
+    return wrapper  # type: ignore[return-value]
+
+
 try:
     from opentelemetry import metrics
     from opentelemetry.metrics import Counter, Histogram
@@ -49,50 +68,40 @@ except Exception:  # noqa: BLE001
     _reclaim_background_total = None
 
 
+@_suppress_metrics_errors
 def record_lock_acquire_duration(seconds: float) -> None:
     """Record lock acquisition duration."""
     if _lock_acquire_duration is not None:
-        try:
-            _lock_acquire_duration.record(seconds)
-        except Exception:  # noqa: BLE001
-            pass
+        _lock_acquire_duration.record(seconds)
 
 
+@_suppress_metrics_errors
 def record_lock_timeout() -> None:
     """Record session lock timeout (503)."""
     if _lock_timeout_total is not None:
-        try:
-            _lock_timeout_total.add(1)
-        except Exception:  # noqa: BLE001
-            pass
+        _lock_timeout_total.add(1)
 
 
+@_suppress_metrics_errors
 def record_request_log_creation_failure() -> None:
     """Record RequestLog creation failure (503)."""
     if _request_log_creation_failure_total is not None:
-        try:
-            _request_log_creation_failure_total.add(1)
-        except Exception:  # noqa: BLE001
-            pass
+        _request_log_creation_failure_total.add(1)
 
 
+@_suppress_metrics_errors
 def record_reclaim_on_demand(count: int) -> None:
     """Record on-demand reclaim (before dequeue)."""
     if _reclaim_on_demand_total is not None and count > 0:
-        try:
-            _reclaim_on_demand_total.add(count)
-            if _reclaim_total is not None:
-                _reclaim_total.add(count)
-        except Exception:  # noqa: BLE001
-            pass
+        _reclaim_on_demand_total.add(count)
+        if _reclaim_total is not None:
+            _reclaim_total.add(count)
 
 
+@_suppress_metrics_errors
 def record_reclaim_background(count: int) -> None:
     """Record background reclaim."""
     if _reclaim_background_total is not None and count > 0:
-        try:
-            _reclaim_background_total.add(count)
-            if _reclaim_total is not None:
-                _reclaim_total.add(count)
-        except Exception:  # noqa: BLE001
-            pass
+        _reclaim_background_total.add(count)
+        if _reclaim_total is not None:
+            _reclaim_total.add(count)

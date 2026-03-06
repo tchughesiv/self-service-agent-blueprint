@@ -1344,6 +1344,7 @@ test-session-reclaim-integration:
 .PHONY: test-session-background-reclaim-integration
 test-session-background-reclaim-integration:
 	@echo "Running background reclaim integration test (requires cluster with NAMESPACE set, ~60s for reclaim)..."
+	@# timeout 180: background reclaim runs every 45s; worst case ~60s. 180s allows for CI variance.
 	@TIMEOUT_CMD=$$(command -v timeout 2>/dev/null || command -v gtimeout 2>/dev/null || true) && \
 	if [ -n "$$TIMEOUT_CMD" ]; then \
 		$$TIMEOUT_CMD 180 kubectl exec deploy/$(MAIN_CHART_NAME)-request-manager -n $(NAMESPACE) -- \

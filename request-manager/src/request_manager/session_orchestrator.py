@@ -229,7 +229,13 @@ async def wait_for_turn_and_process_one(
         register_response_future(our_request_id)
 
     async def _critical_section(lock_db: AsyncSession) -> Optional[RequestLog]:
-        """Phase 2: reclaim stuck, dequeue oldest pending. Insert done in Phase 1."""
+        """Phase 2: reclaim stuck, dequeue oldest pending. Insert done in Phase 1.
+
+        Use db (request-scoped) for reclaim/dequeue: commit() on lock_db can cause
+        SQLAlchemy to affect the connection state, leading to 'Session lock release
+        returned false' and stuck locks. The advisory lock on lock_db still provides
+        mutual exclusion; db is used only for the actual DB writes.
+        """
         await reclaim_stuck_processing(session_id, db)
         return await dequeue_oldest_pending(session_id, db, pod_name)
 
@@ -331,7 +337,7 @@ async def dequeue_oldest_pending(
             RequestLog.session_id == session_id,
             RequestLog.status == RequestStatus.PENDING.value,
         )
-        .order_by(RequestLog.created_at.asc())
+        .order_by(RequestLog.created_at.asc(), RequestLog.id.asc())
         .with_for_update(skip_locked=True)
         .limit(1)
     )

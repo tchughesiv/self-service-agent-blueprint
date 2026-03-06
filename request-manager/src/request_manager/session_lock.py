@@ -65,6 +65,10 @@ async def acquire_session_lock(
     the timeout may fire even when the lock was granted, or the grant may be
     delayed past the timeout. pg_try_advisory_lock has no race; we poll until
     we get it or the deadline expires.
+
+    Prefer with_session_lock for request handling; it uses short-lived connections
+    per attempt to avoid holding connections during wait. Use acquire_session_lock
+    only when you already hold a long-lived connection and need the lock.
     """
     lock_key = _session_id_to_lock_key(session_id)
     deadline = time.monotonic() + timeout_seconds
