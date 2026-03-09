@@ -18,7 +18,7 @@ def _raise_for_zammad_response(r: httpx.Response) -> None:
             raise ValueError(
                 "Zammad returned 401 Unauthorized. "
                 "Confirm ZAMMAD_HTTP_TOKEN matches the token in your "
-                "Kubernetes Secret, then `kubectl rollout restart deployment/mcp-zammad-mcp -n <ns>`."
+                "Kubernetes Secret, then `kubectl rollout restart deployment/mcp-zammad -n <ns>`."
             ) from e
         raise
 

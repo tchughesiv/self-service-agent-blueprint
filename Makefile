@@ -248,15 +248,15 @@ ZAMMAD_ADMIN_EMAIL ?= admin@zammad.local
 ZAMMAD_ADMIN_PASSWORD ?= ZammadR0cks!
 ZAMMAD_AUTOWIZARD_TOKEN ?= ssa-zammad-autowizard-9f3a2b1c
 
-# Used only by _helm-install-ticketing-single (zammad.enabled + zammad-mcp.enabled in values-ticketing.yaml).
+# Used only by _helm-install-ticketing-single (zammad.enabled + mcp-servers.mcp-servers.zammad in values-ticketing.yaml).
 helm_ticketing_args = \
 	--set zammad.url=$(ZAMMAD_URL) \
-	--set mcp-servers.mcp-servers.zammad-mcp.image.repository=$(REGISTRY)/self-service-agent-zammad-mcp \
-	--set mcp-servers.mcp-servers.zammad-mcp.image.tag=$(VERSION) \
-	--set mcp-servers.mcp-servers.zammad-mcp.envSecrets.ZAMMAD_URL.name=$(ZAMMAD_CREDENTIALS_SECRET) \
-	--set mcp-servers.mcp-servers.zammad-mcp.envSecrets.ZAMMAD_URL.key=zammad-url \
-	--set mcp-servers.mcp-servers.zammad-mcp.envSecrets.ZAMMAD_HTTP_TOKEN.name=$(ZAMMAD_CREDENTIALS_SECRET) \
-	--set mcp-servers.mcp-servers.zammad-mcp.envSecrets.ZAMMAD_HTTP_TOKEN.key=zammad-http-token
+	--set mcp-servers.mcp-servers.zammad.image.repository=$(REGISTRY)/self-service-agent-zammad-mcp \
+	--set mcp-servers.mcp-servers.zammad.image.tag=$(VERSION) \
+	--set mcp-servers.mcp-servers.zammad.envSecrets.ZAMMAD_URL.name=$(ZAMMAD_CREDENTIALS_SECRET) \
+	--set mcp-servers.mcp-servers.zammad.envSecrets.ZAMMAD_URL.key=zammad-url \
+	--set mcp-servers.mcp-servers.zammad.envSecrets.ZAMMAD_HTTP_TOKEN.name=$(ZAMMAD_CREDENTIALS_SECRET) \
+	--set mcp-servers.mcp-servers.zammad.envSecrets.ZAMMAD_HTTP_TOKEN.key=zammad-http-token
 
 # Version target
 .PHONY: version
@@ -1693,7 +1693,7 @@ helm-install-ticketing: namespace helm-depend
 		-n $(NAMESPACE) --dry-run=client -o yaml | kubectl apply -f -; \
 	$(MAKE) _helm-install-ticketing-single ZAMMAD_URL="$$ZAMMAD_URL"
 	@echo "Step 2/4: Deploying Zammad (FQDN from Route; optional embed page: set ZAMMAD_EMBED_ENABLED=true on deploy-zammad)..."
-	@$(MAKE) deploy-zammad NAMESPACE=$(NAMESPACE)
+	@$(MAKE) deploy-zammad NAMESPACE=$(NAMESPACE) ZAMMAD_BOOTSTRAP_INTEGRATION_WEBHOOK=true
 	@echo "Waiting for Zammad railsserver to be ready (may take 10+ minutes on first deploy)..."
 	@kubectl rollout status deployment/zammad-railsserver -n $(NAMESPACE) --timeout=15m
 	@echo "Step 3/4: Creating API token..."
@@ -1711,9 +1711,9 @@ helm-install-ticketing: namespace helm-depend
 			--from-literal=zammad-http-token="$$ZAMMAD_TOKEN" \
 			-n $(NAMESPACE) --dry-run=client -o yaml | kubectl apply -f -; \
 		echo "Restarting Zammad MCP and request manager ..."; \
-		kubectl rollout restart deployment/mcp-zammad-mcp -n $(NAMESPACE) 2>/dev/null || true; \
+		kubectl rollout restart deployment/mcp-zammad -n $(NAMESPACE) 2>/dev/null || true; \
 		kubectl rollout restart deployment/$(MAIN_CHART_NAME)-request-manager -n $(NAMESPACE) 2>/dev/null || true; \
-		kubectl rollout status deployment/mcp-zammad-mcp -n $(NAMESPACE) --timeout=2m 2>/dev/null || true; \
+		kubectl rollout status deployment/mcp-zammad -n $(NAMESPACE) --timeout=2m 2>/dev/null || true; \
 		kubectl rollout status deployment/$(MAIN_CHART_NAME)-request-manager -n $(NAMESPACE) --timeout=2m 2>/dev/null || true; \
 	else \
 		echo "⚠ Token creation failed (run make zammad-bootstrap-token NAMESPACE=$(NAMESPACE) after completing autoWizard)"; \
@@ -1726,7 +1726,7 @@ _helm-install-ticketing-single:
 	@$(call helm_install_common,with ticketing config - Zammad MCP,\
 		-f helm/values-test.yaml \
 		-f helm/values-ticketing.yaml \
-		--set mcp-servers.mcp-servers.zammad-mcp.enabled=true \
+		--set mcp-servers.mcp-servers.zammad.enabled=true \
 		$(helm_ticketing_args) \
 		$(PROMPT_OVERRIDES),\
 		true)
@@ -1771,7 +1771,7 @@ _helm-install-ticketing-print-checklist:
 		echo ""; \
 		n=$$(($$n+1)); \
 	fi; \
-	echo "  $$n. (Optional) Webhook trigger for Zammad → blueprint (when that integration is merged)."
+	echo "  $$n. Webhook: helm-install-ticketing runs deploy-zammad with webhook bootstrap — Zammad Webhook + Trigger for integration-dispatcher (docs/TICKETING_CHANNEL_GAMEPLAN.md §5.2.1). Set zammad.webhookSecret for HMAC."
 	@echo ""
 	@echo "  Admin login defaults: ZAMMAD_ADMIN_EMAIL / ZAMMAD_ADMIN_PASSWORD (see Makefile; must match autoWizard in helm/values-zammad-deploy.yaml)."
 	@echo "  More: README.md, docs/HELM_EXPORT_ANSIBLE.md"
@@ -2152,6 +2152,8 @@ ZAMMAD_HELM_REPO ?= https://zammad.github.io/zammad-helm
 ZAMMAD_CHART_VERSION ?= 16.0.4
 # Optional helm/zammad-embed (ssa-zammad-embed Route + snippet page). Literal true installs; anything else skips install and runs helm uninstall so a prior embed is removed.
 ZAMMAD_EMBED_ENABLED ?= false
+# When true, deploy-zammad passes Helm values so the bootstrap Job creates the Zammad Webhook + Trigger (see docs/TICKETING_CHANNEL_GAMEPLAN.md §5.2.1). helm-install-ticketing sets this automatically.
+ZAMMAD_BOOTSTRAP_INTEGRATION_WEBHOOK ?= false
 
 # ZAMMAD_FQDN: when set (e.g. from Route host), passed as extraEnv so Zammad accepts Route requests.
 # Used by helm-install-ticketing which installs our chart first (creates Route), then deploys Zammad.
@@ -2164,6 +2166,9 @@ deploy-zammad: namespace
 	@helm dependency update helm/zammad/
 	@ZAMMAD_UID=$$(kubectl get namespace $(NAMESPACE) -o jsonpath='{.metadata.annotations.openshift\.io/sa\.scc\.uid-range}' 2>/dev/null | cut -d'/' -f1); \
 	ZAMMAD_ARGS="-f helm/values-zammad-deploy.yaml --set bootstrap.image=$(ZAMMAD_BOOTSTRAP_IMG)"; \
+	if [ "$(ZAMMAD_BOOTSTRAP_INTEGRATION_WEBHOOK)" = "true" ]; then \
+		ZAMMAD_ARGS="$$ZAMMAD_ARGS --set bootstrap.integrationWebhook.enabled=true --set-string bootstrap.integrationWebhook.url=http://$(MAIN_CHART_NAME)-integration-dispatcher.$(NAMESPACE).svc.cluster.local/zammad/webhook --set bootstrap.integrationWebhook.hmacSecretRef.name=$(MAIN_CHART_NAME)-integration-secrets --set bootstrap.integrationWebhook.hmacSecretRef.key=zammad-webhook-secret"; \
+	fi; \
 	if [ -n "$$ZAMMAD_UID" ]; then \
 		ZAMMAD_ARGS="$$ZAMMAD_ARGS --set zammad.securityContext.runAsUser=$$ZAMMAD_UID --set zammad.securityContext.runAsGroup=$$ZAMMAD_UID --set zammad.securityContext.fsGroup=$$ZAMMAD_UID"; \
 		echo "OpenShift: using namespace UID $$ZAMMAD_UID for restricted SCC"; \
@@ -2298,8 +2303,8 @@ zammad-bootstrap-token: namespace zammad-trigger-autowizard
 		--from-literal=zammad-http-token="$$ZAMMAD_TOKEN" \
 		-n $(NAMESPACE) --dry-run=client -o yaml | kubectl apply -f -; \
 	echo "Restarting Zammad MCP..."; \
-	kubectl rollout restart deployment/mcp-zammad-mcp -n $(NAMESPACE); \
-	kubectl rollout status deployment/mcp-zammad-mcp -n $(NAMESPACE) --timeout=2m; \
+	kubectl rollout restart deployment/mcp-zammad -n $(NAMESPACE); \
+	kubectl rollout status deployment/mcp-zammad -n $(NAMESPACE) --timeout=2m; \
 	echo "✅ Zammad token created and MCP restarted."
 
 .PHONY: zammad-set-token
@@ -2318,8 +2323,8 @@ zammad-set-token: namespace
 		--from-literal=zammad-http-token="$(ZAMMAD_TOKEN)" \
 		-n $(NAMESPACE) --dry-run=client -o yaml | kubectl apply -f -; \
 	echo "Restarting Zammad MCP deployment..."; \
-	kubectl rollout restart deployment/mcp-zammad-mcp -n $(NAMESPACE); \
-	kubectl rollout status deployment/mcp-zammad-mcp -n $(NAMESPACE) --timeout=2m; \
+	kubectl rollout restart deployment/mcp-zammad -n $(NAMESPACE); \
+	kubectl rollout status deployment/mcp-zammad -n $(NAMESPACE) --timeout=2m; \
 	echo "✅ Zammad token set and MCP restarted."
 
 # ServiceNow PDI wake-up

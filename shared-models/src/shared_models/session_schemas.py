@@ -19,6 +19,8 @@ class SessionCreate(BaseModel):
     channel_id: Optional[str] = Field(None, max_length=255)
     thread_id: Optional[str] = Field(None, max_length=255)
     external_session_id: Optional[str] = Field(None, max_length=255)
+    # Stable id when the integration already defines scope (e.g. Zammad per ticket).
+    explicit_session_id: Optional[str] = Field(None, max_length=255)
 
     @field_validator("integration_type", mode="before")
     @classmethod

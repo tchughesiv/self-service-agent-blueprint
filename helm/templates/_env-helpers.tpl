@@ -115,7 +115,7 @@ Generate common environment variables for all services
 - name: SQL_DEBUG
   value: "false"
 - name: EXPECTED_MIGRATION_VERSION
-  value: {{ .Values.database.expectedMigrationVersion | default "001" | quote }}
+  value: {{ .Values.database.expectedMigrationVersion | default "004" | quote }}
 {{/* Eventing Configuration - Always enabled (mock or full Knative) */}}
 - name: BROKER_URL
   value: {{ if .Values.requestManagement.knative.eventing.enabled }}{{ printf "%s/%s/%s" .Values.requestManagement.knative.broker.url .Release.Namespace .Values.requestManagement.knative.broker.name | quote }}{{ else }}{{ printf "http://%s-mock-eventing.%s.svc.cluster.local:8080/%s/%s" (include "self-service-agent.fullname" .) .Release.Namespace .Release.Namespace .Values.requestManagement.knative.broker.name | quote }}{{ end }}
@@ -336,6 +336,34 @@ Generate Integration Dispatcher specific environment variables
       name: {{ include "self-service-agent.fullname" . }}-integration-secrets
       key: slack-signing-secret
       optional: true
+{{/* Zammad trigger webhook (APPENG-4759) — optional secret; empty skips HMAC verification */}}
+- name: ZAMMAD_WEBHOOK_SECRET
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "self-service-agent.fullname" . }}-integration-secrets
+      key: zammad-webhook-secret
+      optional: true
+{{- if hasKey .Values "zammad" }}
+{{- if ne (toString (.Values.zammad.aiAgentUserId | default "")) "" }}
+- name: ZAMMAD_AI_AGENT_USER_ID
+  value: {{ .Values.zammad.aiAgentUserId | toString | quote }}
+{{- end }}
+{{- $zgroups := .Values.zammad.allowedGroups | default list }}
+{{- if $zgroups }}
+- name: ZAMMAD_ALLOWED_GROUP_IDS
+  value: {{ join "," $zgroups | quote }}
+{{- end }}
+{{- $zblocked := .Values.zammad.webhookBlockedStateNames | default list }}
+{{- if $zblocked }}
+- name: ZAMMAD_BLOCKED_STATE_NAMES
+  value: {{ join "," $zblocked | quote }}
+{{- end }}
+{{- $ztags := .Values.zammad.webhookRequireAnyTags | default list }}
+{{- if $ztags }}
+- name: ZAMMAD_REQUIRE_ANY_TAG
+  value: {{ join "," $ztags | quote }}
+{{- end }}
+{{- end }}
 {{/* SMTP Configuration */}}
 - name: SMTP_HOST
   valueFrom:

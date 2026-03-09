@@ -52,3 +52,22 @@ spec:
                 secretKeyRef:
                   name: {{ .Release.Name }}-admin-credentials
                   key: password
+{{- $iw := .Values.bootstrap.integrationWebhook | default dict }}
+{{- if $iw.enabled }}
+{{- $rel := $iw.mainChartReleaseName | default "self-service-agent" }}
+{{- $defaultUrl := printf "http://%s-integration-dispatcher.%s.svc.cluster.local/zammad/webhook" $rel .Release.Namespace }}
+{{- $url := $iw.url | default $defaultUrl }}
+            - name: ZAMMAD_INTEGRATION_WEBHOOK_URL
+              value: {{ $url | quote }}
+{{- if $iw.hmacSecret }}
+            - name: ZAMMAD_WEBHOOK_SECRET
+              value: {{ $iw.hmacSecret | quote }}
+{{- else if $iw.hmacSecretRef.name }}
+            - name: ZAMMAD_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $iw.hmacSecretRef.name | quote }}
+                  key: {{ $iw.hmacSecretRef.key | default "zammad-webhook-secret" | quote }}
+                  optional: true
+{{- end }}
+{{- end }}

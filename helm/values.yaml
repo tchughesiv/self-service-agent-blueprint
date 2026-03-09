@@ -29,7 +29,7 @@ testIntegrationEnabled: false
 # Database Configuration
 database:
   # Expected migration version that services should wait for
-  expectedMigrationVersion: "001"
+  expectedMigrationVersion: "004"
   
   # Database connection URL - leave empty to use default pgvector service
   # Format: postgresql://username:password@host:port/database
@@ -268,8 +268,7 @@ mcp-servers:
     oracle-sqlcl:
       enabled: false
 
-    # Zammad MCP server for ticketing integration
-    zammad-mcp:
+    zammad:
       enabled: false
       replicas: 1
       deploymentMode: deployment
@@ -323,6 +322,9 @@ zammad:
   enabled: false
   url: "https://zammad.example.com"
   webhookSecret: ""
+  # Webhook filters (optional). State/tag names are matched case-insensitively.
+  webhookBlockedStateNames: []
+  webhookRequireAnyTags: []
   allowedGroups: []
   aiAgentUserId: null
   mcp:

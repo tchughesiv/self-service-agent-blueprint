@@ -1,0 +1,28 @@
+Add new Zammad communication method which
+
+watches for new tickets. When a new ticket is created, extracts the user message from the initial customer article and injects into request manager with user id {user email}-{ticket-number}
+
+watches for new comments on tickets marked as ‘agent managed laptop refresh tickets’. When there is a new user message on one of these tickets, extracts the user message from the new customer article and injects into request manager with user id {user email}-{ticket-number} (may need to use the ticket owner’s id when the article author is not the customer)
+
+when the agent generates a response to a message, posts the response on the ticket from which the user message that triggered the agent request came from only if the ticket is marked as an ‘agent managed laptop refresh ticket' as opposed to ‘waiting for human review’
+
+Zammad Triggers for this?
+https://admin-docs.zammad.org/en/latest/manage/trigger/how-do-they-work.html 
+
+https://admin-docs.zammad.org/en/latest/manage/trigger.html 
+
+https://admin-docs.zammad.org/en/latest/manage/trigger/learn-by-example.html 
+
+One direction only: Zammad → your app
+
+Configure Manage → Triggers so that on relevant events Zammad POSTs to your integration-dispatcher URL (documented target: https://<integration-dispatcher>/zammad/webhook).
+
+Perform action: Webhook, method POST, with the shared secret used for X-Hub-Signature (HMAC-SHA1 per plan). Store that secret in cluster (e.g. zammad.webhookSecret / Secret) and match what the handler verifies
+
+What to fire on
+
+Ticket created and/or article created with sender = Customer (or External) so you don’t react to every internal note.
+
+Same endpoint can serve new tickets and follow-up messages. 
+
+Post ticket replies via Zammad MCP → Zammad REST API (e.g. zammad_add_article), not through a dispatcher “delivery” integration. The no-op handler exists so anything that still hits the dispatcher for ZAMMAD doesn’t error; real user-visible replies are MCP-only.

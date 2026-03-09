@@ -45,6 +45,7 @@ from .integrations.email import EmailIntegrationHandler
 from .integrations.slack import SlackIntegrationHandler
 from .integrations.test import TestIntegrationHandler
 from .integrations.webhook import WebhookIntegrationHandler
+from .integrations.zammad import ZammadIntegrationHandler
 from .outbox_publisher import run_outbox_publisher
 from .schemas import (
     DeliveryLogResponse,
@@ -56,6 +57,7 @@ from .schemas import (
 from .slack_schemas import SlackChallenge, SlackInteractionPayload, SlackSlashCommand
 from .slack_service import SlackService
 from .template_engine import TemplateEngine
+from .zammad_service import ZammadService, parse_zammad_webhook_json
 
 # Configure structured logging and auto tracing
 SERVICE_NAME = "integration-dispatcher"
@@ -72,6 +74,7 @@ class IntegrationDispatcher:
             IntegrationType.EMAIL: EmailIntegrationHandler(),
             IntegrationType.WEBHOOK: WebhookIntegrationHandler(),
             IntegrationType.TEST: TestIntegrationHandler(),
+            IntegrationType.ZAMMAD: ZammadIntegrationHandler(),
         }
         self.template_engine = TemplateEngine()
 
@@ -460,6 +463,7 @@ app = FastAPI(
 
 # Initialize services
 slack_service = SlackService()
+zammad_service = ZammadService()
 email_service = EmailService()
 integration_defaults_service = IntegrationDefaultsService()
 
@@ -1319,6 +1323,65 @@ async def handle_slack_events(
     except Exception as e:
         logger.error("Error handling Slack event", error=str(e))
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.post("/zammad/webhook")
+async def handle_zammad_webhook(
+    request: Request, db: AsyncSession = Depends(get_db_session_dependency)
+) -> Dict[str, Any]:
+    """Zammad Manage → Triggers → Webhook (APPENG-4759)."""
+    try:
+        body = await request.body()
+        sig = request.headers.get("x-hub-signature") or request.headers.get(
+            "X-Hub-Signature"
+        )
+        if not zammad_service.verify_signature(body, sig):
+            logger.warning("Invalid Zammad webhook HMAC signature")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid signature",
+            )
+
+        delivery = (
+            request.headers.get("x-zammad-delivery")
+            or request.headers.get("X-Zammad-Delivery")
+            or ""
+        ).strip()
+        if not delivery:
+            logger.warning("Zammad webhook missing X-Zammad-Delivery header")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Missing X-Zammad-Delivery header",
+            )
+        trigger = request.headers.get("x-zammad-trigger") or request.headers.get(
+            "X-Zammad-Trigger"
+        )
+
+        try:
+            payload = parse_zammad_webhook_json(body)
+        except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as e:
+            logger.error("Invalid Zammad webhook JSON", error=str(e))
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid JSON body",
+            ) from e
+
+        await zammad_service.handle_webhook(
+            payload,
+            delivery_id=delivery,
+            trigger_header=trigger,
+            db_session=db,
+        )
+        return {"status": "ok"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error handling Zammad webhook", error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error",
+        ) from e
 
 
 @app.post("/slack/interactive")

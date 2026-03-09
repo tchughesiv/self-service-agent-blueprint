@@ -25,8 +25,7 @@ requestManagement:
     promptOverrides:
       lg-prompt-ticket-laptop-refresh: /app/agent-service/config/lg-prompts/ticket-laptop-refresh-lg-prompt-big.yaml
 
-# Enable zammad-mcp MCP server
 mcp-servers:
   mcp-servers:
-    zammad-mcp:
+    zammad:
       enabled: true

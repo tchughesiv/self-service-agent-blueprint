@@ -14,3 +14,14 @@ bootstrap:
   adminEmail: "admin@zammad.local"
   adminPassword: "ZammadR0cks!"
   autowizardToken: "ssa-zammad-autowizard-9f3a2b1c"
+  # Optional: Zammad REST API Webhook + Trigger → integration-dispatcher (see docs/TICKETING_CHANNEL_GAMEPLAN.md §5.2.1)
+  integrationWebhook:
+    enabled: false
+    # Full URL; if empty when enabled, defaults to http://<mainChartReleaseName>-integration-dispatcher.<namespace>.svc.cluster.local/zammad/webhook
+    url: ""
+    mainChartReleaseName: "self-service-agent"
+    # Plain secret (dev only); prefer hmacSecretRef for prod
+    hmacSecret: ""
+    hmacSecretRef:
+      name: ""
+      key: "zammad-webhook-secret"

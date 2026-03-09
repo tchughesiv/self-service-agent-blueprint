@@ -8,6 +8,11 @@ Required env vars:
   ZAMMAD_BASE_URL       e.g. http://zammad-nginx:8080
   ZAMMAD_ADMIN_EMAIL    admin user created by autoWizard
   ZAMMAD_ADMIN_PASSWORD matching password
+
+Optional (integration webhook — same secret as integration-dispatcher ZAMMAD_WEBHOOK_SECRET):
+  ZAMMAD_INTEGRATION_WEBHOOK_URL   Full URL e.g. http://RELEASE-integration-dispatcher.NS.svc.cluster.local/zammad/webhook
+  ZAMMAD_WEBHOOK_SECRET            HMAC token stored on Zammad Webhook + verified by dispatcher (omit = unsigned webhook)
+  ZAMMAD_CUSTOMER_SENDER_ID       Defaults to 2 (standard Zammad seed); override if your DB differs
 """
 
 import json
@@ -23,6 +28,10 @@ API_URL = f"{BASE_URL}/api/v1"
 ADMIN_EMAIL = os.environ["ZAMMAD_ADMIN_EMAIL"]
 ADMIN_PASSWORD = os.environ["ZAMMAD_ADMIN_PASSWORD"]
 AUTOWIZARD_TOKEN = os.environ["ZAMMAD_AUTOWIZARD_TOKEN"]
+
+# Webhook + trigger (Manage → Webhooks + Triggers); see docs/TICKETING_CHANNEL_GAMEPLAN.md §5.2.1
+WEBHOOK_RECORD_NAME = "Self-Service Agent — Integration Webhook"
+TRIGGER_RECORD_NAME = "Self-Service Agent — Customer article → blueprint"
 
 MANAGER1_EMAIL = "manager1@example.com"
 MANAGER2_EMAIL = "manager2@example.com"
@@ -300,6 +309,105 @@ def get_or_create_user(
 
 
 # ---------------------------------------------------------------------------
+# Integration webhook + trigger (Zammad → POST /zammad/webhook)
+# ---------------------------------------------------------------------------
+
+
+def _ssl_verify_for_endpoint(endpoint: str) -> bool:
+    return endpoint.strip().lower().startswith("https://")
+
+
+def _customer_sender_id() -> int:
+    raw = os.environ.get("ZAMMAD_CUSTOMER_SENDER_ID", "").strip()
+    if raw.isdigit():
+        return int(raw)
+    return 2
+
+
+def _get_record_list(path: str):
+    """GET /api/v1/{path}; return list of records."""
+    data = api("GET", path)
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        rec = data.get("records")
+        if isinstance(rec, list):
+            return rec
+    return []
+
+
+def _find_by_name(records, name: str):
+    for r in records:
+        if r.get("name") == name:
+            return r
+    return None
+
+
+def ensure_integration_webhook_and_trigger():
+    """Create or update Webhook + Trigger per TICKETING_CHANNEL_GAMEPLAN §5.2.1."""
+    endpoint = os.environ.get("ZAMMAD_INTEGRATION_WEBHOOK_URL", "").strip()
+    if not endpoint:
+        print(
+            "\n[6/6] Skipping Zammad→blueprint webhook bootstrap "
+            "(unset ZAMMAD_INTEGRATION_WEBHOOK_URL — configure manually per docs §5.2)."
+        )
+        return
+
+    secret = os.environ.get("ZAMMAD_WEBHOOK_SECRET", "").strip()
+    sender_id = _customer_sender_id()
+
+    print(
+        "\n[6/6] Ensuring Zammad Webhook + Trigger (customer articles → integration-dispatcher)..."
+    )
+    webhooks = _get_record_list("webhooks")
+    hook = _find_by_name(webhooks, WEBHOOK_RECORD_NAME)
+
+    webhook_body = {
+        "name": WEBHOOK_RECORD_NAME,
+        "endpoint": endpoint,
+        "http_method": "post",
+        "ssl_verify": _ssl_verify_for_endpoint(endpoint),
+        "active": True,
+    }
+    if secret:
+        webhook_body["signature_token"] = secret
+
+    if hook:
+        webhook_id = hook["id"]
+        print(f"  Updating webhook '{WEBHOOK_RECORD_NAME}' (id={webhook_id})...")
+        api("PUT", f"webhooks/{webhook_id}", json=webhook_body)
+    else:
+        print(f"  Creating webhook '{WEBHOOK_RECORD_NAME}'...")
+        created = api("POST", "webhooks", json=webhook_body)
+        webhook_id = created["id"]
+
+    triggers = _get_record_list("triggers")
+    trig = _find_by_name(triggers, TRIGGER_RECORD_NAME)
+
+    trigger_body = {
+        "name": TRIGGER_RECORD_NAME,
+        "activator": "action",
+        "execution_condition_mode": "selective",
+        "condition": {
+            "article.action": {"operator": "is", "value": "create"},
+            "article.sender_id": {"operator": "is", "value": sender_id},
+        },
+        "perform": {"notification.webhook": {"webhook_id": webhook_id}},
+        "active": True,
+    }
+
+    if trig:
+        tid = trig["id"]
+        print(f"  Updating trigger '{TRIGGER_RECORD_NAME}' (id={tid})...")
+        api("PUT", f"triggers/{tid}", json=trigger_body)
+    else:
+        print(f"  Creating trigger '{TRIGGER_RECORD_NAME}'...")
+        api("POST", "triggers", json=trigger_body)
+
+    print("  Done — Zammad will POST customer articles to the configured URL.")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -309,22 +417,22 @@ def main():
     trigger_autowizard()
     acquire_token()
 
-    print("\n[1/5] Ensuring custom attributes exist...")
+    print("\n[1/6] Ensuring custom attributes exist...")
     ensure_manager_email_attribute()
     ensure_current_laptop_attribute()
 
-    print("\n[2/5] Creating groups...")
+    print("\n[2/6] Creating groups...")
     users_group_id = get_or_create_group("Users")
     group_id = get_or_create_group("human_managed_tickets")
     escalated_group_id = get_or_create_group("escalated_laptop_refresh_tickets")
 
-    print("\n[3/5] Looking up role IDs...")
+    print("\n[3/6] Looking up role IDs...")
     role_map = get_role_ids()
     agent_role_ids = [role_map["Agent"]]
     customer_role_ids = [role_map["Customer"]]
     print(f"  Agent role id={agent_role_ids}, Customer role id={customer_role_ids}")
 
-    print("\n[3b/5] Adding admin user to all groups...")
+    print("\n[3b/6] Adding admin user to all groups...")
     admin = find_user_by_email("admin@zammad.local")
     if admin:
         api(
@@ -342,7 +450,7 @@ def main():
     else:
         print("  WARNING: admin@zammad.local not found, skipping group assignment.")
 
-    print("\n[4/5] Creating ticket handlers, managers and specialists...")
+    print("\n[4/6] Creating ticket handlers, managers and specialists...")
     get_or_create_user(
         "agent.laptop-specialist",
         "Laptop",
@@ -400,7 +508,7 @@ def main():
         group_ids={str(users_group_id): ["full"]},
     )
 
-    print("\n[5/5] Creating employees from mock-employee-data...")
+    print("\n[5/6] Creating employees from mock-employee-data...")
     employees = list(MOCK_EMPLOYEE_DATA.values())
     for i, emp in enumerate(employees):
         manager_email = MANAGER1_EMAIL if i < 5 else MANAGER2_EMAIL
@@ -414,6 +522,8 @@ def main():
             manager_email=manager_email,
             current_laptop=build_current_laptop_json(emp),
         )
+
+    ensure_integration_webhook_and_trigger()
 
     print("\nZammad bootstrap complete.")
 
