@@ -24,7 +24,7 @@ All development operations use the root Makefile:
 
 ```bash
 # Install dependencies for all services
-make install-all
+make deps-all
 
 # Code formatting and linting (entire codebase)
 make format  # Run black and isort
@@ -56,7 +56,7 @@ make push-all-images
 
 ### Helm Deployment
 
-The system supports two deployment modes:
+The system supports three deployment modes:
 
 ```bash
 # 1. Testing/Development Mode (Mock Eventing - Default)
@@ -74,8 +74,20 @@ make helm-install-prod NAMESPACE=your-namespace \
 # Check deployment status
 make helm-status NAMESPACE=your-namespace
 
-# Uninstall with cleanup
+# Uninstall with cleanup (removes Helm release, test-email-server, jobs, PVCs, etc.)
 make helm-uninstall NAMESPACE=your-namespace
+# Or: make uninstall NAMESPACE=your-namespace (removes deployment + namespace)
+
+# Shorthand: make install = helm-install-test by default; override with INSTALL_MODE=demo|prod
+make install NAMESPACE=your-namespace                    # same as helm-install-test
+make install NAMESPACE=your-namespace INSTALL_MODE=demo  # same as helm-install-demo
+
+# 3. Demo Mode
+# Option A: Helm-only (Greenmail + demo values)
+make helm-install-demo NAMESPACE=your-namespace
+# Option B: Helm export + Ansible (ephemeral, conference demos)
+make ansible-apply-demo NAMESPACE=your-namespace
+# See docs/HELM_EXPORT_ANSIBLE.md for env vars and export-then-apply workflow
 ```
 
 ## Architecture
@@ -148,7 +160,7 @@ The system uses an **Integration Defaults** approach with **User Overrides** to 
 
 ```bash
 # 1. Install all dependencies
-make install-all
+make deps-all
 
 # 2. Run linting and formatting
 make lint
@@ -165,6 +177,7 @@ make helm-install-test NAMESPACE=dev
 ## Documentation
 
 ### Core Documentation
+- **`docs/HELM_EXPORT_ANSIBLE.md`**: Demo deployment (helm export + Ansible), env vars, export-then-apply
 - **`docs/API_REFERENCE.md`**: Complete API documentation and endpoints
 - **`guides/INTEGRATION_GUIDE.md`**: Complete integration and request management guide
 - **`guides/SAFETY_SHIELDS_GUIDE.md`**: Safety shields and content moderation configuration

@@ -50,7 +50,7 @@ jobs:
         run: make check-requirements
 
       - name: Install the project
-        run: make install-all
+        run: make deps-all
 
       - name: Run flake8 (warning only)
         run: |
@@ -97,6 +97,27 @@ jobs:
             exit 1
           }
 
+  helm-export-validate:
+    name: Helm export validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: "v3.17.0"
+
+      - name: Install kubeconform
+        uses: bmuschko/setup-kubeconform@v1
+
+      - name: Validate helm export (kubeconform)
+        run: make helm-export-validate-demo
+        env:
+          NAMESPACE: ci-demo
+          HF_TOKEN: mock_hf_token_for_ci
+
   pull-request-tests:
     name: Run unit-tests
     runs-on: ubuntu-latest
@@ -115,7 +136,7 @@ jobs:
           version: ${{ env.UV_VERSION }}
 
       - name: Install the project
-        run: make install-all
+        run: make deps-all
   
       - name: Run tests
         run: make test-all

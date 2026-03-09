@@ -1,6 +1,6 @@
 # Makefile for RAG Deployment
 ifeq ($(NAMESPACE),)
-ifneq (,$(filter namespace helm-install-test helm-install-prod helm-uninstall helm-status helm-cleanup-eventing helm-cleanup-jobs,$(MAKECMDGOALS)))
+ifneq (,$(filter namespace install uninstall helm-install-test helm-install-prod helm-install-demo helm-export-demo helm-export-validate-demo ansible-apply-demo ansible-teardown-demo helm-uninstall helm-status helm-cleanup-eventing helm-cleanup-jobs deploy-email-server undeploy-email-server print-urls verify-triggers jaeger-deploy jaeger-undeploy,$(MAKECMDGOALS)))
 $(error NAMESPACE is not set)
 endif
 endif
@@ -97,6 +97,7 @@ HF_TOKEN ?=
 endif
 
 MAIN_CHART_NAME := self-service-agent
+HELM_EXPORT_DIR ?= ansible/helm-export
 TOLERATIONS_TEMPLATE=[{"key":"$(1)","effect":"NoSchedule","operator":"Exists"}]
 INGRESS_PREFIX := ssa
 
@@ -234,6 +235,11 @@ COMMA := ,
 helm_test_users_args = \
 	$(if $(TEST_USERS),--set-string mockServiceNow.testUsers="$(subst $(COMMA),\$(COMMA),$(TEST_USERS))",)
 
+# Demo: namespace-dependent hostnames (values-demo.yaml has the rest)
+helm_demo_email_args = \
+	--set-string security.email.smtpHost=test-email-server-smtp.$(NAMESPACE).svc.cluster.local \
+	--set-string security.email.imapHost=test-email-server-imap.$(NAMESPACE).svc.cluster.local
+
 # Version target
 .PHONY: version
 version:
@@ -258,26 +264,37 @@ help:
 	@echo "Helm Commands:"
 	@echo "  helm-install-test                   - Install with mock eventing service (testing/development/CI - default)"
 	@echo "  helm-install-prod                   - Install with full Knative eventing (production)"
+	@echo "  helm-install-demo                  - Install demo config (mock eventing, Greenmail, resource constraints)"
+	@echo "  helm-export-demo                    - Export demo manifests to ansible/helm-export/ (from NAMESPACE, VERSION, REGISTRY, SERVICENOW_*, etc.)"
+	@echo "  helm-export-validate-demo           - Export then validate with kubeconform (no cluster; CI)"
+	@echo "  ansible-apply-demo                  - Export then apply demo via Ansible (requires ansible-playbook)"
+	@echo "  ansible-teardown-demo               - Teardown demo namespace via Ansible (requires ansible-playbook)"
+	@echo "  check-ansible                       - Verify ansible-playbook is installed"
 	@echo "  helm-cleanup-eventing               - Manually clean up leftover Knative Eventing resources (Triggers, Brokers)"
 	@echo "  helm-cleanup-jobs                   - Clean up leftover jobs from failed deployments"
 	@echo "  helm-depend                         - Update Helm dependencies"
 	@echo "  helm-list-models                    - List available models"
 	@echo "  helm-status                         - Check status of the deployment"
 	@echo "  helm-uninstall                      - Uninstall the RAG deployment and clean up resources"
+	@echo "  install                             - Deploy to cluster (alias for helm-install; set INSTALL_MODE=test|demo|prod, default: test)"
+	@echo "  uninstall                           - helm-uninstall + delete namespace"
 	@echo "  verify-triggers                     - Verify all expected Knative triggers are deployed"
 	@echo ""
-	@echo "Install Commands:"
-	@echo "  install-all                         - Install dependencies for all projects"
-	@echo "  install                             - Install dependencies for self-service agent"
-	@echo "  install-agent-service               - Install dependencies for agent service"
-	@echo "  install-integration-dispatcher      - Install dependencies for integration dispatcher"
-	@echo "  install-mcp-snow                    - Install dependencies for snow MCP server"
-	@echo "  install-request-manager             - Install dependencies for request manager"
-	@echo "  install-shared-models               - Install dependencies for shared models"
-	@echo "  install-shared-clients              - Install dependencies for shared clients"
-	@echo "  install-servicenow-bootstrap       - Install dependencies for ServiceNow automation scripts"
-	@echo "  install-mock-employee-data          - Install dependencies for mock employee data"
-	@echo "  install-mock-servicenow             - Install dependencies for mock ServiceNow"
+	@echo "Dependency Commands (local dev):"
+	@echo "  deps-all                            - Install dependencies for all projects"
+	@echo "  deps                                - Install dependencies for self-service agent (root)"
+	@echo "  deps-agent-service                   - Install dependencies for agent service"
+	@echo "  deps-integration-dispatcher          - Install dependencies for integration dispatcher"
+	@echo "  deps-mcp-snow                        - Install dependencies for snow MCP server"
+	@echo "  deps-request-manager                 - Install dependencies for request manager"
+	@echo "  deps-shared-models                   - Install dependencies for shared models"
+	@echo "  deps-shared-clients                  - Install dependencies for shared clients"
+	@echo "  deps-servicenow-bootstrap            - Install dependencies for ServiceNow automation scripts"
+	@echo "  deps-mock-employee-data              - Install dependencies for mock employee data"
+	@echo "  deps-mock-servicenow                 - Install dependencies for mock ServiceNow"
+	@echo "  deps-tracing-config                  - Install dependencies for tracing-config"
+	@echo "  deps-promptguard                     - Install dependencies for PromptGuard"
+	@echo "  deps-evaluations                     - Install dependencies for evaluations"
 	@echo ""
 	@echo "Reinstall Commands:"
 	@echo "  reinstall-all                       - Force reinstall dependencies for all projects (uv sync --reinstall)"
@@ -789,25 +806,41 @@ generate-lg-diagrams:
 	cd agent-service && uv run python ../scripts/create_langraph_graphs.py
 	@echo "LangGraph diagrams generated successfully in docs/images/"
 
-# Install dependencies
-.PHONY: install-all
-install-all: install-shared-models install-shared-clients install-tracing-config install install-request-manager install-agent-service install-integration-dispatcher install-mcp-snow install-mock-eventing install-mock-employee-data install-mock-servicenow install-promptguard install-evaluations install-servicenow-bootstrap
+# Deploy to cluster (install = helm install with configurable mode)
+INSTALL_MODE ?= test
+.PHONY: install
+install:
+	@if [ "$(INSTALL_MODE)" != "test" ] && [ "$(INSTALL_MODE)" != "demo" ] && [ "$(INSTALL_MODE)" != "prod" ]; then \
+		echo "Error: INSTALL_MODE must be test, demo, or prod (got: $(INSTALL_MODE))"; \
+		exit 1; \
+	fi
+	$(MAKE) helm-install-$(INSTALL_MODE)
+
+.PHONY: uninstall
+uninstall: helm-uninstall
+	@echo "Removing namespace $(NAMESPACE)..."
+	@kubectl delete namespace $(NAMESPACE) --ignore-not-found --timeout=120s || true
+	@echo "Uninstall complete. Namespace $(NAMESPACE) removed."
+
+# Install dependencies (local dev)
+.PHONY: deps-all
+deps-all: deps-shared-models deps-shared-clients deps-tracing-config deps deps-request-manager deps-agent-service deps-integration-dispatcher deps-mcp-snow deps-mock-eventing deps-mock-employee-data deps-mock-servicenow deps-promptguard deps-evaluations deps-servicenow-bootstrap
 	@echo "All dependencies installed successfully!"
 
-.PHONY: install-shared-models
-install-shared-models:
+.PHONY: deps-shared-models
+deps-shared-models:
 	@echo "Installing shared models dependencies..."
 	cd shared-models && uv sync
 	@echo "Shared models dependencies installed successfully!"
 
-.PHONY: install-shared-clients
-install-shared-clients:
+.PHONY: deps-shared-clients
+deps-shared-clients:
 	@echo "Installing shared clients dependencies..."
 	cd shared-clients && uv sync
 	@echo "Shared clients dependencies installed successfully!"
 
-.PHONY: install
-install:
+.PHONY: deps
+deps:
 	@echo "Installing self-service agent dependencies..."
 	uv sync
 	@echo "Self-service agent dependencies installed successfully!"
@@ -889,44 +922,44 @@ reinstall-promptguard:
 	cd promptguard-service && uv sync --reinstall
 	@echo "PromptGuard service dependencies force reinstalled successfully!"
 
-.PHONY: install-request-manager
-install-request-manager:
+.PHONY: deps-request-manager
+deps-request-manager:
 	@echo "Installing request manager dependencies..."
 	cd request-manager && uv sync
 	@echo "Request manager dependencies installed successfully!"
 
-.PHONY: install-agent-service
-install-agent-service:
+.PHONY: deps-agent-service
+deps-agent-service:
 	@echo "Installing agent service dependencies..."
 	cd agent-service && uv sync
 	@echo "Agent service dependencies installed successfully!"
 
-.PHONY: install-integration-dispatcher
-install-integration-dispatcher:
+.PHONY: deps-integration-dispatcher
+deps-integration-dispatcher:
 	@echo "Installing integration dispatcher dependencies..."
 	cd integration-dispatcher && uv sync
 	@echo "Integration dispatcher dependencies installed successfully!"
 
-.PHONY: install-mcp-snow
-install-mcp-snow:
+.PHONY: deps-mcp-snow
+deps-mcp-snow:
 	@echo "Installing snow MCP dependencies..."
 	cd mcp-servers/snow && uv sync
 	@echo "Snow MCP dependencies installed successfully!"
 
-.PHONY: install-mock-eventing
-install-mock-eventing:
+.PHONY: deps-mock-eventing
+deps-mock-eventing:
 	@echo "Installing mock eventing service dependencies..."
 	cd mock-eventing-service && uv sync
 	@echo "Mock eventing service dependencies installed successfully!"
 
-.PHONY: install-mock-employee-data
-install-mock-employee-data:
+.PHONY: deps-mock-employee-data
+deps-mock-employee-data:
 	@echo "Installing mock employee data dependencies..."
 	cd mock-employee-data && uv sync
 	@echo "Mock employee data dependencies installed successfully!"
 
-.PHONY: install-mock-servicenow
-install-mock-servicenow:
+.PHONY: deps-mock-servicenow
+deps-mock-servicenow:
 	@if echo "$(SERVICENOW_INSTANCE_URL)" | grep -q "self-service-agent-mock-servicenow"; then \
 		echo "Installing mock ServiceNow dependencies..."; \
 		cd mock-service-now && uv sync; \
@@ -936,26 +969,26 @@ install-mock-servicenow:
 		echo "Current SERVICENOW_INSTANCE_URL: $(SERVICENOW_INSTANCE_URL)"; \
 	fi
 
-.PHONY: install-promptguard
-install-promptguard:
+.PHONY: deps-promptguard
+deps-promptguard:
 	@echo "Installing PromptGuard service dependencies..."
 	cd promptguard-service && uv sync
 	@echo "PromptGuard service dependencies installed successfully!"
 
-.PHONY: install-tracing-config
-install-tracing-config:
+.PHONY: deps-tracing-config
+deps-tracing-config:
 	@echo "Installing tracing-config dependencies..."
 	cd tracing-config && uv sync
 	@echo "Tracing-config dependencies installed successfully!"
 
-.PHONY: install-evaluations
-install-evaluations:
+.PHONY: deps-evaluations
+deps-evaluations:
 	@echo "Installing evaluations dependencies..."
 	cd evaluations && uv sync
 	@echo "Evaluations dependencies installed successfully!"
 
-.PHONY: install-servicenow-bootstrap
-install-servicenow-bootstrap:
+.PHONY: deps-servicenow-bootstrap
+deps-servicenow-bootstrap:
 	@echo "Installing ServiceNow automation dependencies..."
 	cd scripts/servicenow-bootstrap && uv sync
 	@echo "ServiceNow automation dependencies installed successfully!"
@@ -1330,8 +1363,16 @@ namespace:
 
 .PHONY: helm-depend
 helm-depend:
-	@echo "Updating Helm dependencies"
-	@helm dependency update helm &> /dev/null
+	@needs_update=; \
+	for pair in $$(awk '/^- name:/{n=$$3} /^  version:/{if(n){v=$$2; gsub(/"/,"",v); print n"-"v".tgz"; n=""}}' helm/Chart.lock 2>/dev/null); do \
+		if [ ! -f "helm/charts/$$pair" ]; then needs_update=1; break; fi; \
+	done; \
+	if [ -z "$$needs_update" ] && [ -n "$$(awk '/^- name:/{n=$$3} /^  version:/{if(n){print; n=""}}' helm/Chart.lock 2>/dev/null)" ]; then \
+		echo "Helm dependencies present (Chart.lock), skipping update"; \
+	else \
+		echo "Updating Helm dependencies"; \
+		cd helm && helm dependency update; \
+	fi
 
 .PHONY: helm-list-models
 helm-list-models: helm-depend
@@ -1412,10 +1453,45 @@ define helm_install_common
 			kubectl rollout status $$res -n $(NAMESPACE) --timeout 10m; \
 		fi; \
 	done
-	$(if $(filter true,$(3)),@echo "Waiting for mock eventing deployment..." && kubectl rollout status deploy/$(MAIN_CHART_NAME)-mock-eventing -n $(NAMESPACE) --timeout 5m,)
+	@(kubectl get deploy/$(MAIN_CHART_NAME)-mock-eventing -n $(NAMESPACE) >/dev/null 2>&1 && echo "Waiting for mock eventing deployment..." && kubectl rollout status deploy/$(MAIN_CHART_NAME)-mock-eventing -n $(NAMESPACE) --timeout 5m || echo "Skipping mock eventing (not deployed)") && (kubectl get deploy/$(MAIN_CHART_NAME)-mock-servicenow -n $(NAMESPACE) >/dev/null 2>&1 && echo "Waiting for mock ServiceNow..." && kubectl rollout status deploy/$(MAIN_CHART_NAME)-mock-servicenow -n $(NAMESPACE) --timeout 5m || echo "Skipping mock ServiceNow (not deployed)")
 	$(if $(filter true,$(PROMPTGUARD_ENABLED)),@echo "Waiting for PromptGuard deployment..." && kubectl rollout status deploy/$(MAIN_CHART_NAME)-promptguard -n $(NAMESPACE) --timeout 10m,)
 	$(if $(filter true,$(ENABLE_LANGFUSE)),@echo "Waiting for Redis StatefulSet..." && kubectl rollout status statefulset/$(MAIN_CHART_NAME)-redis -n $(NAMESPACE) --timeout 10m && echo "Waiting for MinIO StatefulSet..." && kubectl rollout status statefulset/$(MAIN_CHART_NAME)-minio -n $(NAMESPACE) --timeout 10m && echo "Waiting for ClickHouse StatefulSet..." && kubectl rollout status statefulset/$(MAIN_CHART_NAME)-clickhouse -n $(NAMESPACE) --timeout 10m && echo "Waiting for LangFuse Web deployment..." && kubectl rollout status deploy/$(MAIN_CHART_NAME)-langfuse -n $(NAMESPACE) --timeout 10m && echo "Waiting for LangFuse Worker deployment (runs ClickHouse migrations)..." && kubectl rollout status deploy/$(MAIN_CHART_NAME)-langfuse-worker -n $(NAMESPACE) --timeout 10m && echo "LangFuse URL: https://$$(kubectl get route $(MAIN_CHART_NAME)-langfuse -n $(NAMESPACE) -o jsonpath='{.spec.host}' 2>/dev/null || echo 'Route not found')",)
 	@echo "$(MAIN_CHART_NAME) $(1) installed successfully"
+endef
+
+# Export helm chart to YAML (no cluster access); $(1) = extra helm args
+define helm_export
+	@rm -rf $(HELM_EXPORT_DIR)
+	@mkdir -p $(HELM_EXPORT_DIR)
+	@echo "Exporting $(MAIN_CHART_NAME) helm chart to $(HELM_EXPORT_DIR)..."
+	@helm template $(MAIN_CHART_NAME) helm -n $(NAMESPACE) --output-dir $(HELM_EXPORT_DIR) \
+		--set image.requestManager=self-service-agent-request-manager \
+		--set image.agentService=self-service-agent-service \
+		--set image.integrationDispatcher=self-service-agent-integration-dispatcher \
+		--set image.tag=$(VERSION) \
+		$(helm_pgvector_args) \
+		$(helm_llm_service_args) \
+		$(helm_llama_stack_args) \
+		--set requestManagement.integrations.slack.enabled=$(SLACK_ENABLED) \
+		$(if $(filter true,$(SLACK_ENABLED)),--set security.slack.signingSecret=$(SLACK_SIGNING_SECRET) --set security.slack.botToken=$(SLACK_BOT_TOKEN),) \
+		--set image.registry=$(REGISTRY) \
+		--set mcp-servers.mcp-servers.self-service-agent-snow.image.repository=$(REGISTRY)/self-service-agent-snow-mcp \
+		--set mcp-servers.mcp-servers.self-service-agent-snow.image.tag=$(VERSION) \
+		--set-string mcp-servers.mcp-servers.self-service-agent-snow.env.SERVICENOW_LAPTOP_REFRESH_ID="$(SERVICENOW_LAPTOP_REFRESH_ID)" \
+		--set-string mcp-servers.mcp-servers.self-service-agent-snow.env.SERVICENOW_LAPTOP_AVOID_DUPLICATES="$(SERVICENOW_LAPTOP_AVOID_DUPLICATES)" \
+		--set-string mcp-servers.mcp-servers.self-service-agent-snow.env.SERVICENOW_LAPTOP_REQUEST_LIMITS="$(SERVICENOW_LAPTOP_REQUEST_LIMITS)" \
+		--set mcp-servers.mcp-servers.self-service-agent-snow.envSecrets.SERVICENOW_INSTANCE_URL.name=$(MAIN_CHART_NAME)-servicenow-credentials \
+		--set mcp-servers.mcp-servers.self-service-agent-snow.envSecrets.SERVICENOW_INSTANCE_URL.key=servicenow-instance-url \
+		$(helm_request_management_args) \
+		$(if $(LOG_LEVEL),--set logLevel=$(LOG_LEVEL),) \
+		$(helm_generic_args) \
+		$(helm_replica_count_args) \
+		$(helm_test_users_args) \
+		$(if $(filter true,$(ENABLE_LANGFUSE)),--set langfuse.enabled=true,) \
+		$(helm_fault_injection_args) \
+		$(if $(filter-out "",$(1)),$(1),) \
+		$(EXTRA_HELM_ARGS)
+	@echo "Helm export complete."
 endef
 
 # Install with mock eventing service (testing/development/CI mode - default)
@@ -1428,6 +1504,17 @@ helm-install-test: namespace helm-depend
 		-f helm/values-test.yaml \
 		--set requestManagement.knative.mockEventing.enabled=true \
 		--set testIntegrationEnabled=true \
+		$(PROMPT_OVERRIDES),\
+		true)
+	@$(MAKE) print-urls
+
+# Install with demo config (Greenmail email, resource constraints, mock eventing)
+.PHONY: helm-install-demo
+helm-install-demo: namespace helm-depend deploy-email-server
+	$(call helm_install_common,with demo config - mock eventing and Greenmail email,\
+		-f helm/values-test.yaml \
+		-f helm/values-demo.yaml \
+		$(helm_demo_email_args) \
 		$(PROMPT_OVERRIDES),\
 		true)
 	@$(MAKE) print-urls
@@ -1553,6 +1640,51 @@ verify-triggers:
 		exit 1; \
 	fi
 
+.PHONY: helm-export-demo
+helm-export-demo: helm-depend
+	$(call helm_export,\
+		-f helm/values-test.yaml \
+		-f helm/values-demo.yaml \
+		$(helm_demo_email_args) \
+		$(PROMPT_OVERRIDES))
+	@echo "Adding ServiceNow credentials secret to export..."
+	@kubectl create secret generic $(MAIN_CHART_NAME)-servicenow-credentials \
+		--from-literal=servicenow-instance-url="$${SERVICENOW_INSTANCE_URL:-http://self-service-agent-mock-servicenow:8080}" \
+		--from-literal=servicenow-api-key="$${SERVICENOW_API_KEY:-now_mock_api_key}" \
+		-n $(NAMESPACE) --dry-run=client -o yaml > $(HELM_EXPORT_DIR)/servicenow-credentials-secret.yaml
+	@echo "Demo export complete at $(HELM_EXPORT_DIR)/"
+
+.PHONY: helm-export-validate-demo
+helm-export-validate-demo: helm-export-demo
+	@command -v kubeconform >/dev/null 2>&1 || { \
+		echo "Error: kubeconform not found. Install for offline manifest validation:"; \
+		echo "  brew install kubeconform  # macOS"; \
+		echo "  or: https://github.com/yannh/kubeconform#installation"; \
+		exit 1; \
+	}
+	@echo "Validating exported manifests (kubeconform, no cluster required)..."
+	@kubeconform -summary -ignore-missing-schemas $(HELM_EXPORT_DIR)/
+	@echo "Helm export validation passed."
+
+.PHONY: check-ansible
+check-ansible:
+	@command -v ansible-playbook >/dev/null 2>&1 || { \
+		echo "Error: ansible-playbook not found. Install ansible (core) to run ansible-apply-demo or ansible-teardown-demo."; \
+		echo "  pip install ansible-core  # or: uv pip install ansible-core"; \
+		exit 1; \
+	}
+
+.PHONY: ansible-apply-demo
+ansible-apply-demo: check-ansible helm-export-demo
+	ansible-playbook -i localhost, ansible/playbooks/apply-demo-manifests.yml \
+		-e "helm_export_dir=$(HELM_EXPORT_DIR)" \
+		-e "target_namespace=$(NAMESPACE)"
+
+.PHONY: ansible-teardown-demo
+ansible-teardown-demo: check-ansible
+	ansible-playbook -i localhost, ansible/playbooks/teardown-demo-manifests.yml \
+		-e "target_namespace=$(NAMESPACE)"
+
 # Uninstall the deployment and clean up
 .PHONY: helm-uninstall
 helm-uninstall:
@@ -1576,6 +1708,7 @@ helm-uninstall:
 
 	@echo "Step 4: Final cleanup of namespace $(NAMESPACE)..."
 	@$(MAKE) helm-cleanup-jobs
+	@$(MAKE) undeploy-email-server
 	@echo "Removing ServiceNow credentials secret from $(NAMESPACE)"
 	@kubectl delete secret $(MAIN_CHART_NAME)-servicenow-credentials -n $(NAMESPACE) --ignore-not-found || true
 	@echo "Removing pgvector, init job, and LangFuse PVCs from $(NAMESPACE)"
@@ -1739,21 +1872,9 @@ deploy-email-server: namespace
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo ""
 	@echo "make helm-install-test NAMESPACE=$(NAMESPACE) \\"
-	@echo "  EXTRA_HELM_ARGS=\"\\"
+	@echo "  EXTRA_HELM_ARGS=\"-f helm/values-demo.yaml \\"
 	@echo "    --set-string security.email.smtpHost=test-email-server-smtp.$(NAMESPACE).svc.cluster.local \\"
-	@echo "    --set-string security.email.smtpPort=3025 \\"
-	@echo "    --set-string security.email.smtpUsername=itsupport@selfservice.local \\"
-	@echo "    --set-string security.email.smtpPassword=testpass123 \\"
-	@echo "    --set-string security.email.smtpUseTls=false \\"
-	@echo "    --set-string security.email.fromEmail=itsupport@selfservice.local \\"
-	@echo "    --set-string security.email.fromName='Self-Service Agent' \\"
-	@echo "    --set-string security.email.imapHost=test-email-server-imap.$(NAMESPACE).svc.cluster.local \\"
-	@echo "    --set-string security.email.imapPort=3143 \\"
-	@echo "    --set-string security.email.imapUsername=itsupport@selfservice.local \\"
-	@echo "    --set-string security.email.imapPassword=testpass123 \\"
-	@echo "    --set-string security.email.imapUseSsl=false \\"
-	@echo "    --set-string security.email.imapMailbox=INBOX \\"
-	@echo "    --set-string security.email.imapPollInterval=5\""
+	@echo "    --set-string security.email.imapHost=test-email-server-imap.$(NAMESPACE).svc.cluster.local\""
 	@echo ""
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
@@ -1765,7 +1886,7 @@ undeploy-email-server:
 
 # ServiceNow PDI wake-up
 .PHONY: servicenow-wake-install
-servicenow-wake-install: install-servicenow-bootstrap
+servicenow-wake-install: deps-servicenow-bootstrap
 	@echo "Installing Playwright browsers..."
 	@cd scripts/servicenow-bootstrap && uv run playwright install chromium
 

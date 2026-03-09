@@ -350,12 +350,13 @@ The evaluation framework uses **uv** for dependency management, which provides f
 **Install with UV**
 
 ```bash
-# Navigate to the evaluations directory
-cd evaluations/
+# From repo root:
+make deps-evaluations
 
-# Install dependencies using uv
-# Note: uv automatically creates a .venv directory if it doesn't exist
+# Or from the evaluations directory:
+cd evaluations/
 uv sync
+# Note: uv automatically creates a .venv directory if it doesn't exist
 ```
 
 **Verify Installation**

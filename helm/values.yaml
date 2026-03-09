@@ -617,7 +617,7 @@ security:
     imapLeaseRenewalInterval: ""  # Lease renewal interval in seconds (optional, defaults to lease_duration // 2)
 
 # LangFuse Observability Platform
-# Enable with: export ENABLE_LANGFUSE=true before running make helm-install-test or helm-install-prod
+# Enable with: export ENABLE_LANGFUSE=true before running make install (or make helm-install-test / helm-install-prod)
 langfuse:
   enabled: false  # Set to true or use ENABLE_LANGFUSE=true environment variable
 

@@ -203,6 +203,9 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
+# Helm export (demo manifests; may contain mock secrets)
+ansible/helm-export/
+
 # Helm Chart deployment tgz files
 helm/charts/*.tgz
 helm/tmpcharts*
