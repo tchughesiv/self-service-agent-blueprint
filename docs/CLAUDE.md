@@ -93,6 +93,12 @@ make ansible-apply-demo NAMESPACE=your-namespace
 # make helm-install-ticketing NAMESPACE=your-namespace
 ```
 
+#### Zammad MCP naming (do not rename lightly)
+
+The MCP server entry under **`mcp-servers.mcp-servers`** must use the key **`zammad-mcp`**, not **`zammad`**. The Zammad Helm subchart already labels its pods with `app.kubernetes.io/name: zammad`. The upstream `mcp-servers` chart derives labels from the YAML key; using `zammad` made Service **`mcp-zammad`** select **all** Zammad workload pods (nginx, railsserver, etc.), so traffic to `:8000` often hit pods that are not the MCP server (`connection refused`). With **`zammad-mcp`**, the MCP Service is **`mcp-zammad-mcp`** and only targets the MCP deployment. Agent MCP URIs use **`http://mcp-zammad-mcp:8000/mcp`**. See the comment above `zammad-mcp` in `helm/values.yaml` and `mcp-servers/zammad/README.md`.
+
+**Zammad webhooks:** `POST /zammad/webhook` on integration-dispatcher **always** verifies **`X-Hub-Signature`** against **`ZAMMAD_WEBHOOK_SECRET`** (set via `ticketingZammad.webhookSecret` / Helm secrets). An empty secret yields **401** — there is no “skip verification” mode. Customer-visible replies are posted by **`ZammadIntegrationHandler`** to Zammad REST using a pooled HTTP client from **shared-clients**; optional **`ZAMMAD_AI_AGENT_USER_ID`** drops webhook feedback from the API user that posts those articles. Use **`shared_models.utils`** (`normalize_zammad_rest_api_base`, **`zammad_rest_json_headers`**, **`zammad_rest_authorization_headers`**) for any other Zammad REST calls so URL and auth headers stay consistent.
+
 ## Architecture
 
 ### Core Components

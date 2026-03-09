@@ -14,6 +14,7 @@ import sys
 
 import httpx
 from shared_clients import CLIChatClient
+from shared_models.utils import normalize_zammad_rest_api_base, zammad_rest_json_headers
 
 AGENT_MESSAGE_TERMINATOR = os.environ.get("AGENT_MESSAGE_TERMINATOR", "")
 REQUEST_MANAGER_URL = os.environ.get("REQUEST_MANAGER_URL", "http://localhost:8080")
@@ -28,25 +29,10 @@ ZAMMAD_HTTP_TOKEN = os.environ.get("ZAMMAD_HTTP_TOKEN", None)
 # ---------------------------------------------------------------------------
 
 
-def _zammad_headers(token: str) -> dict:
-    return {
-        "Authorization": f"Token token={token}",
-        "Content-Type": "application/json",
-    }
-
-
-def _zammad_api_base(base_url: str) -> str:
-    """Normalise base_url to always end with /api/v1 (without duplication)."""
-    stripped = base_url.rstrip("/")
-    if stripped.endswith("/api/v1"):
-        return stripped
-    return f"{stripped}/api/v1"
-
-
 def _zammad_get_state_map(base_url: str, token: str) -> dict[int, str]:
     """Return a mapping of state_id -> state name from Zammad."""
-    url = f"{_zammad_api_base(base_url)}/ticket_states"
-    response = httpx.get(url, headers=_zammad_headers(token), timeout=10)
+    url = f"{normalize_zammad_rest_api_base(base_url)}/ticket_states"
+    response = httpx.get(url, headers=zammad_rest_json_headers(token), timeout=10)
     response.raise_for_status()
     return {s["id"]: s["name"] for s in response.json()}
 
@@ -58,13 +44,15 @@ def _zammad_create_ticket(
     base_url: str, token: str, customer_email: str, title: str = DEFAULT_TICKET_TITLE
 ) -> tuple[int, str]:
     """Create a Zammad ticket and return (ticket_id, ticket_number)."""
-    url = f"{_zammad_api_base(base_url)}/tickets"
+    url = f"{normalize_zammad_rest_api_base(base_url)}/tickets"
     payload = {
         "title": title,
         "group": "Users",
         "customer": customer_email,
     }
-    response = httpx.post(url, json=payload, headers=_zammad_headers(token), timeout=30)
+    response = httpx.post(
+        url, json=payload, headers=zammad_rest_json_headers(token), timeout=30
+    )
     response.raise_for_status()
     data = response.json()
     return data["id"], str(data["number"])
@@ -84,9 +72,9 @@ def _zammad_get_ticket_status(
     base_url: str, token: str, ticket_id: int, state_map: dict[int, str]
 ) -> tuple[str, str, str]:
     """Return (state, owner, group) for the ticket."""
-    url = f"{_zammad_api_base(base_url)}/tickets/{ticket_id}?expand=true"
+    url = f"{normalize_zammad_rest_api_base(base_url)}/tickets/{ticket_id}?expand=true"
     try:
-        response = httpx.get(url, headers=_zammad_headers(token), timeout=10)
+        response = httpx.get(url, headers=zammad_rest_json_headers(token), timeout=10)
         response.raise_for_status()
         data = response.json()
         state_id = data.get("state_id")
@@ -109,9 +97,11 @@ def _zammad_get_ticket_status(
 
 def _zammad_get_user_id_by_email(base_url: str, token: str, email: str) -> int | None:
     """Look up a Zammad user ID by email address."""
-    url = f"{_zammad_api_base(base_url)}/users/search?query={email}&limit=1"
+    url = (
+        f"{normalize_zammad_rest_api_base(base_url)}/users/search?query={email}&limit=1"
+    )
     try:
-        response = httpx.get(url, headers=_zammad_headers(token), timeout=10)
+        response = httpx.get(url, headers=zammad_rest_json_headers(token), timeout=10)
         response.raise_for_status()
         results = response.json()
         for user in results:
@@ -127,14 +117,16 @@ def _zammad_get_ticket_owner(
 ) -> tuple[str | None, int | None]:
     """Return (owner_email, owner_id) for the ticket's current assigned owner."""
     try:
-        url = f"{_zammad_api_base(base_url)}/tickets/{ticket_id}"
-        response = httpx.get(url, headers=_zammad_headers(token), timeout=10)
+        url = f"{normalize_zammad_rest_api_base(base_url)}/tickets/{ticket_id}"
+        response = httpx.get(url, headers=zammad_rest_json_headers(token), timeout=10)
         response.raise_for_status()
         owner_id = response.json().get("owner_id")
         if not owner_id:
             return None, None
-        user_url = f"{_zammad_api_base(base_url)}/users/{owner_id}"
-        user_response = httpx.get(user_url, headers=_zammad_headers(token), timeout=10)
+        user_url = f"{normalize_zammad_rest_api_base(base_url)}/users/{owner_id}"
+        user_response = httpx.get(
+            user_url, headers=zammad_rest_json_headers(token), timeout=10
+        )
         user_response.raise_for_status()
         user_data = user_response.json()
         return user_data.get("email") or None, owner_id
@@ -159,7 +151,7 @@ def _zammad_add_article(
         origin_by_id: Zammad user ID to set as the article originator,
             overriding the authenticated token owner.
     """
-    url = f"{_zammad_api_base(base_url)}/ticket_articles"
+    url = f"{normalize_zammad_rest_api_base(base_url)}/ticket_articles"
     payload = {
         "ticket_id": ticket_id,
         "body": body,
@@ -172,7 +164,7 @@ def _zammad_add_article(
         payload["origin_by_id"] = origin_by_id
     try:
         response = httpx.post(
-            url, json=payload, headers=_zammad_headers(token), timeout=10
+            url, json=payload, headers=zammad_rest_json_headers(token), timeout=10
         )
         response.raise_for_status()
     except Exception as e:
@@ -181,8 +173,8 @@ def _zammad_add_article(
 
 def _zammad_delete_ticket(base_url: str, token: str, ticket_id: int) -> None:
     """Delete a Zammad ticket."""
-    url = f"{_zammad_api_base(base_url)}/tickets/{ticket_id}"
-    httpx.delete(url, headers=_zammad_headers(token), timeout=10)
+    url = f"{normalize_zammad_rest_api_base(base_url)}/tickets/{ticket_id}"
+    httpx.delete(url, headers=zammad_rest_json_headers(token), timeout=10)
 
 
 # ---------------------------------------------------------------------------

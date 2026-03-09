@@ -36,6 +36,20 @@ def is_uuid(user_id: str) -> bool:
     return bool(uuid_pattern.match(user_id))
 
 
+def strip_zammad_ticket_suffix_for_email_resolution(user_id: str) -> str:
+    """If ``user_id`` is Zammad MCP form ``local@domain-{ticket_id}``, return email only.
+
+    Used before canonical user lookup so ``user@example.com-42`` does not get stored as a bogus primary_email.
+    """
+    if not user_id or "@" not in user_id or "-" not in user_id:
+        return user_id
+    left, right = user_id.rsplit("-", 1)
+    right = right.strip()
+    if not right.isdigit() or "@" not in left:
+        return user_id
+    return left.strip()
+
+
 async def _ensure_email_mapping(
     canonical_user_id: str, email_address: str, db: AsyncSession
 ) -> None:
@@ -290,19 +304,27 @@ async def resolve_canonical_user_id(
             "Database session required to resolve email address to canonical user_id"
         )
 
+    lookup_email = strip_zammad_ticket_suffix_for_email_resolution(user_id)
+    if lookup_email != user_id:
+        logger.debug(
+            "Zammad ticket-scoped user_id: using email portion for canonical resolution",
+            original_user_id=user_id,
+            lookup_email=lookup_email,
+        )
+
     logger.warning(
         "Received email address as user_id, resolving to canonical user_id",
-        email_address=user_id,
+        email_address=lookup_email,
         integration_type=integration_type,
     )
 
     try:
         # get_or_create_canonical_user now ensures EMAIL mapping exists
-        canonical_user_id = await get_or_create_canonical_user(user_id, db)
+        canonical_user_id = await get_or_create_canonical_user(lookup_email, db)
 
         logger.info(
             "Resolved email to canonical user_id",
-            email_address=user_id,
+            email_address=lookup_email,
             canonical_user_id=canonical_user_id,
             integration_type=(
                 (
@@ -319,7 +341,7 @@ async def resolve_canonical_user_id(
     except Exception as e:
         logger.error(
             "Failed to resolve email to canonical user_id",
-            email_address=user_id,
+            email_address=lookup_email,
             error=str(e),
         )
         raise

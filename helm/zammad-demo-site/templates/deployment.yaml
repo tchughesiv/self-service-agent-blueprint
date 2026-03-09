@@ -45,6 +45,8 @@ spec:
           readOnly: true
         - name: tmp
           mountPath: /tmp
+        - name: nginx-cache
+          mountPath: /var/cache/nginx
         resources:
           requests:
             cpu: 10m
@@ -66,5 +68,7 @@ spec:
           - key: default.conf
             path: default.conf
       - name: tmp
+        emptyDir: {}
+      - name: nginx-cache
         emptyDir: {}
 {{- end }}

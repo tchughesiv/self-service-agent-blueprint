@@ -7,6 +7,7 @@ from unittest.mock import Mock, patch
 import pytest
 from zammad_mcp.basher_client import (
     assert_ticket_customer_matches_basher,
+    fetch_zammad_customer_user,
     get_user_id_by_email,
 )
 
@@ -66,3 +67,36 @@ def test_get_user_id_by_email_raises_when_missing(mock_basher: Mock) -> None:
     mock_basher.return_value = json.dumps({"items": [{"id": 1, "email": "a@b.com"}]})
     with pytest.raises(ValueError, match="No Zammad user"):
         get_user_id_by_email("missing@example.com")
+
+
+@patch("zammad_mcp.basher_client.call_basher_tool")
+def test_fetch_zammad_customer_user_json(mock_basher: Mock) -> None:
+    mock_basher.return_value = json.dumps(
+        {"id": 5, "email": "a@b.com", "manager_email": "mgr@b.com"}
+    )
+    out = fetch_zammad_customer_user(5)
+    assert out["manager_email"] == "mgr@b.com"
+    mock_basher.assert_called_once_with(
+        "zammad_get_user",
+        {"user_id": 5, "response_format": "json"},
+    )
+
+
+@patch("zammad_mcp.basher_client.call_basher_tool")
+def test_list_ticket_states_basher_import(mock_basher: Mock) -> None:
+    from zammad_mcp.basher_client import list_ticket_states_basher
+
+    mock_basher.return_value = json.dumps(
+        {"items": [{"id": 2, "name": "open"}], "count": 1}
+    )
+    rows = list_ticket_states_basher()
+    assert rows == [{"id": 2, "name": "open"}]
+
+
+@patch("zammad_mcp.basher_client.call_basher_tool")
+def test_list_groups_basher_accepts_bare_array(mock_basher: Mock) -> None:
+    from zammad_mcp.basher_client import list_groups_basher
+
+    mock_basher.return_value = json.dumps([{"id": 3, "name": "Support"}])
+    rows = list_groups_basher()
+    assert rows == [{"id": 3, "name": "Support"}]

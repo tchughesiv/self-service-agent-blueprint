@@ -16,6 +16,14 @@ state_schema:
       type: "string"
       default: null
       # Field to store the routing decision for session manager to detect
+    ticket_title:
+      type: "string"
+      default: ""
+      # Zammad ticket subject (from webhook); may be empty
+    sticky_routing_agent:
+      type: "string"
+      default: ""
+      # Session-manager injects prior specialist path for sticky intent (ticket-laptop-refresh / ticket-general-support)
 
 # State definitions
 states:
@@ -33,11 +41,16 @@ states:
     prompt: |
       You are an agent that reviews new tickets to figure out if the ticket is related to a request to refresh the user's laptop. Be helpful, friendly, and efficient in determining their needs.
 
+      Ticket title (may be empty): "{ticket_title}"
+      Prior routing commitment on this session (may be empty): "{sticky_routing_agent}"
+
+      If prior commitment was ticket-laptop-refresh, treat short follow-ups such as "help", "hi", or "thanks" as still part of the laptop refresh ticket unless the user clearly asks about a different IT topic. For unrelated issues, tell them to open a separate ticket.
+
       The user said: "{last_user_message}"
 
       Analyze their request and determine what they need help with:
 
-      1. LAPTOP_REFRESH - User wants help with laptop refresh, replacement, new laptop, laptop upgrade, hardware refresh. Also includes requests that just say "refresh" or similar terms.
+      1. LAPTOP_REFRESH - User wants help with laptop refresh, replacement, new laptop, laptop upgrade, hardware refresh. Also includes requests that just say "refresh" or similar terms. Use signals from the ticket title when the body is vague.
       2. OTHER - User needs help with something else or request is unclear
 
       Examples of LAPTOP_REFRESH requests:

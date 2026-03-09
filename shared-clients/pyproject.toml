@@ -29,6 +29,8 @@ line_length = 88
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# Prefer monorepo shared-models source over a stale install in .venv/site-packages.
+pythonpath = ["../shared-models/src"]
 
 [tool.mypy]
 python_version = "3.12"

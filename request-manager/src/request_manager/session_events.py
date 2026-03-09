@@ -1,6 +1,8 @@
 """Session event handling for eventing-based session management."""
 
 import asyncio
+import os
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
 from shared_models import (
@@ -9,6 +11,7 @@ from shared_models import (
     SessionResponse,
     configure_logging,
     create_cloudevent_response,
+    get_or_create_zammad_ticket_session,
     resolve_canonical_user_id,
 )
 from shared_models.cloudevent_utils import CloudEventHandler
@@ -62,6 +65,68 @@ async def _handle_session_create_or_get_event(
             user_id, integration_type=integration_type, db=db
         )
 
+        if integration_type == IntegrationType.ZAMMAD:
+            md = session_request.get("integration_metadata") or {}
+            tid_raw = md.get("ticket_id")
+            if tid_raw is None:
+                logger.error(
+                    "Zammad session event missing ticket_id in integration_metadata",
+                    event_id=event_id,
+                )
+                return await create_cloudevent_response(
+                    status="error",
+                    message="Zammad requires ticket_id in integration_metadata",
+                    details={"event_id": event_id},
+                )
+            try:
+                tid_int = int(tid_raw)
+            except (TypeError, ValueError):
+                logger.error(
+                    "Invalid ticket_id for Zammad session event",
+                    event_id=event_id,
+                    ticket_id=tid_raw,
+                )
+                return await create_cloudevent_response(
+                    status="error",
+                    message="Invalid ticket_id for Zammad session event",
+                    details={"event_id": event_id},
+                )
+            if tid_int < 1:
+                return await create_cloudevent_response(
+                    status="error",
+                    message="ticket_id must be positive",
+                    details={"event_id": event_id},
+                )
+            expires_at = datetime.now(timezone.utc) + timedelta(
+                hours=int(os.getenv("SESSION_TIMEOUT_HOURS", "336"))
+            )
+            try:
+                z_sess = await get_or_create_zammad_ticket_session(
+                    db,
+                    canonical_user_id=canonical_user_id,
+                    ticket_id=tid_int,
+                    channel_id=session_request.get("channel_id"),
+                    thread_id=session_request.get("thread_id"),
+                    integration_metadata=md,
+                    user_context=session_request.get("user_context", {}),
+                    expires_at=expires_at,
+                )
+            except ValueError as ve:
+                return await create_cloudevent_response(
+                    status="error",
+                    message=str(ve),
+                    details={"event_id": event_id},
+                )
+            await _publish_session_ready_event(z_sess, correlation_id, event_id)
+            return await create_cloudevent_response(
+                status="success",
+                message="Zammad ticket session resolved",
+                details={
+                    "session_id": z_sess.session_id,
+                    "event_id": event_id,
+                },
+            )
+
         # Check for existing active session first (fast path)
         session_manager = BaseSessionManager(db)
         existing_session = await session_manager.get_active_session(
@@ -96,6 +161,7 @@ async def _handle_session_create_or_get_event(
             channel_id=session_request.get("channel_id"),
             thread_id=session_request.get("thread_id"),
             external_session_id=session_request.get("external_session_id"),
+            explicit_session_id=None,
             integration_metadata=session_request.get("integration_metadata", {}),
             user_context=session_request.get("user_context", {}),
         )

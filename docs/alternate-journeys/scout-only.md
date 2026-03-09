@@ -81,6 +81,26 @@ export HF_TOKEN=1234
 Setting LG_PROMPT_LAPTOP_REFRESH as shown above ensures that we are using the small prompt approach
 tuned for Llama-4-Scout-17B-16E.
 
+#### LangGraph defaults vs overrides (two different laptop agents)
+
+The quickstart defines **two** laptop-related LangGraph configs:
+
+| Agent name (`config/agents/*.yaml`) | Default state machine (`lg_state_machine_config`) | Env override |
+|--------------------------------------|---------------------------------------------------|--------------|
+| **`laptop-refresh`** (general chat / non-ticket flow) | `lg-prompt-big.yaml` (see `laptop-refresh-agent.yaml`) | **`LG_PROMPT_LAPTOP_REFRESH`** |
+| **`ticket-laptop-refresh`** (ticket routing → Zammad specialist) | **`ticket-laptop-refresh-lg-prompt-big.yaml`** | **`LG_PROMPT_TICKET_LAPTOP_REFRESH`** |
+
+Naming follows `LG_PROMPT_<AGENT_NAME>` with agent name uppercased and hyphens replaced by underscores (`ticket-laptop-refresh` → `TICKET_LAPTOP_REFRESH`).
+
+For Scout 17B you typically set **both** overrides when you care about both flows:
+
+```bash
+export LG_PROMPT_LAPTOP_REFRESH=/app/agent-service/config/lg-prompts/lg-prompt-small-scout.yaml
+export LG_PROMPT_TICKET_LAPTOP_REFRESH=/app/agent-service/config/lg-prompts/ticket-laptop-refresh-lg-prompt-small-scout.yaml
+```
+
+If you only set `LG_PROMPT_LAPTOP_REFRESH`, the **ticket / Zammad** path still uses its **default big** ticket YAML (or whatever Helm `requestManagement.agentService.promptOverrides` sets for `lg-prompt-ticket-laptop-refresh`). The [ticketing Helm overlay](../../helm/values-ticketing.yaml) pins `lg-prompt-ticket-laptop-refresh` to the big ticket prompt unless you override it in values.
+
 #### Step 3: build container images (optional)
 
 If using pre-built images, which is recommended until later steps, **skip this step**.

@@ -1,4 +1,5 @@
-{{- if .Values.bootstrap.createToken }}
+{{- $wi := .Values.bootstrap.waitForZammadInitJob | default true }}
+{{- if or .Values.bootstrap.createToken $wi }}
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -28,12 +29,19 @@ metadata:
     "helm.sh/hook-weight": "5"
     "helm.sh/hook-delete-policy": before-hook-creation
 rules:
+{{- if .Values.bootstrap.createToken }}
 - apiGroups: [""]
   resources: ["secrets"]
   verbs: ["get", "patch", "update"]
 - apiGroups: ["apps"]
   resources: ["deployments"]
   verbs: ["get", "patch", "update"]
+{{- end }}
+{{- if $wi }}
+- apiGroups: ["batch"]
+  resources: ["jobs"]
+  verbs: ["get", "list", "watch"]
+{{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

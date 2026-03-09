@@ -4,7 +4,7 @@ model: ""
 system_message: "You are an agent that reviews new tickets to determine if the ticket is related to refreshing the user's laptop. Be helpful, friendly, and efficient in determining their needs."
 lg_state_machine_config: "config/lg-prompts/ticket-routing.yaml"
 mcp_servers:
-  - name: "zammad-mcp"
+  - name: "zammad"
     uri: "http://mcp-zammad-mcp:8000/mcp"
     require_approval: "never"
 knowledge_bases: []

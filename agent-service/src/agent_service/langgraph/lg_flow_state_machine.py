@@ -1424,7 +1424,10 @@ class ConversationSession:
                 raise
 
     async def send_message(
-        self, message: str, token_context: Optional[str] = None
+        self,
+        message: str,
+        token_context: Optional[str] = None,
+        state_patch: Optional[dict[str, Any]] = None,
     ) -> str:
         """
         Send a message to the agent and return the response.
@@ -1433,6 +1436,7 @@ class ConversationSession:
         Args:
             message: The user message to send to the agent
             token_context: Optional context for token counting (e.g., "session_123")
+            state_patch: Optional dict merged into graph state (e.g. ticket_title, sticky_routing_agent)
 
         Returns:
             The agent's response message as a string
@@ -1449,10 +1453,16 @@ class ConversationSession:
             # Get current thread state with retry logic for connection errors
             current_state = await self._get_state_with_retry()
 
+            current_result: Any = None
+
             # Initialize conversation if needed
             if not current_state.values:
                 # First message - initialize with empty state and let the graph handle initialization
                 initial_state = self.state_machine.create_initial_state()
+
+                if state_patch:
+                    for key, val in state_patch.items():
+                        initial_state[key] = val
 
                 # Check if create_initial_state() already added the initial_user_message
                 # If not, we need to add the passed message
@@ -1476,7 +1486,7 @@ class ConversationSession:
                 if token_context:
                     self.current_token_context = token_context
 
-                result: Any = await self.app.ainvoke(
+                current_result = await self.app.ainvoke(
                     initial_state, config=self.thread_config
                 )
             else:
@@ -1485,6 +1495,10 @@ class ConversationSession:
                 # Note: Copy the state to avoid modifying the original checkpoint state
                 # This is critical for PostgreSQL saver to work correctly
                 current_values = current_state.values.copy()
+
+                if state_patch:
+                    for key, val in state_patch.items():
+                        current_values[key] = val
 
                 # Add the new user message to the existing messages
                 current_values["messages"].append(HumanMessage(content=message))
@@ -1496,13 +1510,12 @@ class ConversationSession:
                 if token_context:
                     self.current_token_context = token_context
 
-                result2: Any = await self.app.ainvoke(
+                current_result = await self.app.ainvoke(
                     current_values, config=self.thread_config
                 )
 
             # Extract agent response
             agent_response = ""
-            current_result = result if "result" in locals() else result2
             if current_result and current_result.get("messages"):
                 # Find the last AI message
                 for msg in reversed(current_result["messages"]):

@@ -10,14 +10,27 @@ ticketingZammad:
   # Bootstrap image registry/repo/tag: defaults from helm/zammad/values.yaml (avoid duplicating here).
   # Makefile overlay still sets ticketingZammad.bootstrap.* from REGISTRY/VERSION at helm-install-ticketing.
   # Bootstrap job: seeds users/groups and (with createToken=true) creates MCP agent token in-cluster.
+  # Registers Zammad Webhook + Trigger → integration-dispatcher (cluster-internal URL by default).
+  # webhookSecret defaults in-chart when empty (*ssa-zammad-webhook-default*); override for production.
+  webhookSecret: ""
   bootstrap:
+    integrationWebhook:
+      enabled: true
+      # url: omit to use http://<mainChartReleaseName>-integration-dispatcher.<namespace>.svc.cluster.local/zammad/webhook
+      mainChartReleaseName: "self-service-agent"
+      # Webhook trigger: limit to group(s) by name (bootstrap resolves to ids). Override with triggerGroupIds if you prefer numeric ids.
+      triggerGroupNames: "Users"
+      # Do not POST to the agent after manager handoff (same tag as ZAMMAD_TAG_MANAGER_REVIEW / send_to_manager_review).
+      triggerTagsExclude: "pending-manager-review"
     adminEmail: "admin@zammad.local"
     adminPassword: "ZammadR0cks!"
     autowizardToken: "ssa-zammad-autowizard-9f3a2b1c"
     createToken: true
     credentialsSecret: "self-service-agent-zammad-credentials"
     mcpDeployment: "mcp-zammad-mcp"
-    requestManagerDeployment: "self-service-agent-request-manager"
+    integrationDispatcherDeployment: "self-service-agent-integration-dispatcher"
+    # Comma-separated (optional): extra customer users — same as mockServiceNow / TEST_USERS + mock-employee-data. Makefile: export TEST_USERS=... for helm-install-ticketing.
+    testUsers: ""
 
   # OpenShift Route for external UI access
   externalRoute:
@@ -55,13 +68,92 @@ ticketingZammad:
       initContainers:
         volumePermissions:
           enabled: false
+      # Reduce CrashLoopBackOff while Rails boots / runs migrations (defaults are tight on tcp timeout).
       nginx:
         trustedProxies:
           - 10.0.0.0/8
           - 172.16.0.0/12
           - 192.168.0.0/16
+        startupProbe:
+          tcpSocket:
+            port: 8080
+          periodSeconds: 5
+          timeoutSeconds: 5
+          failureThreshold: 60
+        livenessProbe:
+          tcpSocket:
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 15
+          timeoutSeconds: 10
+          failureThreshold: 8
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 10
+          failureThreshold: 8
       railsserver:
         trustedProxies: "['127.0.0.1', '::1', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16']"
+        startupProbe:
+          tcpSocket:
+            port: 3000
+          periodSeconds: 5
+          timeoutSeconds: 5
+          failureThreshold: 60
+        livenessProbe:
+          tcpSocket:
+            port: 3000
+          initialDelaySeconds: 120
+          periodSeconds: 15
+          timeoutSeconds: 10
+          failureThreshold: 8
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 3000
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          timeoutSeconds: 10
+          failureThreshold: 8
+        resources:
+          requests:
+            cpu: 250m
+            memory: 768Mi
+          limits:
+            cpu: "2"
+            memory: 2Gi
+      websocket:
+        startupProbe:
+          tcpSocket:
+            port: 6042
+          periodSeconds: 5
+          timeoutSeconds: 5
+          failureThreshold: 60
+        livenessProbe:
+          tcpSocket:
+            port: 6042
+          initialDelaySeconds: 60
+          periodSeconds: 15
+          timeoutSeconds: 10
+          failureThreshold: 10
+        readinessProbe:
+          tcpSocket:
+            port: 6042
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          timeoutSeconds: 10
+          failureThreshold: 8
+      scheduler:
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: "1"
+            memory: 1Gi
 
     postgresql:
       volumePermissions:
@@ -82,14 +174,14 @@ ticketingZammad:
             adaptSecurityContext: force
 
 agent:
-  defaultAgentId: ticket-review-agent
+  defaultAgentId: "routing-agent"
+  zammadDefaultAgentId: "ticket-review-agent"
 
 requestManagement:
   agentService:
     promptOverrides:
       lg-prompt-ticket-laptop-refresh: /app/agent-service/config/lg-prompts/ticket-laptop-refresh-lg-prompt-big.yaml
 
-# Enable zammad-mcp MCP server
 mcp-servers:
   mcp-servers:
     zammad-mcp:

@@ -22,4 +22,40 @@ bootstrap:
   createToken: false
   credentialsSecret: ""
   mcpDeployment: ""
-  requestManagerDeployment: ""
+  integrationDispatcherDeployment: ""
+  # Optional: Zammad REST API Webhook + Trigger → integration-dispatcher (see README.md § Integration with Zammad ticketing)
+  integrationWebhook:
+    enabled: false
+    # Full URL; if empty when enabled, defaults to http://<mainChartReleaseName>-integration-dispatcher.<namespace>.svc.cluster.local/zammad/webhook
+    url: ""
+    mainChartReleaseName: "self-service-agent"
+    # Plain secret (dev only); prefer hmacSecretRef for prod
+    hmacSecret: ""
+    hmacSecretRef:
+      name: ""
+      key: "zammad-webhook-secret"
+    # Optional Zammad trigger conditions (see zammad-bootstrap env ZAMMAD_TRIGGER_*). Prefer narrowing here over dispatcher allowlists.
+    # triggerGroupNames: comma-separated group names — bootstrap resolves to ids (e.g. "Users"). Preferred over raw ids when ids vary by install.
+    triggerGroupNames: ""
+    # triggerGroupIds: comma-separated internal ids — overrides triggerGroupNames if both set (same env precedence in bootstrap).
+    triggerGroupIds: ""
+    triggerSkipGroupFilter: false
+    triggerTagsAny: ""
+    triggerTagsAll: ""
+    # Comma-separated tags that must not be on the ticket (e.g. pending-manager-review after manager handoff).
+    triggerTagsExclude: ""
+    # Optional override for integration trigger article.sender_id (default in bootstrap: 2 = Customer per Zammad seeds).
+    customerSenderId: ""
+    # Customer web "new ticket" group picker (Zammad setting customer_ticket_create_group_ids). Omit = bootstrap defaults to Users only.
+    customerTicketCreateGroupNames: ""
+    # If true, do not set that setting (Zammad default: all groups — usually wrong once internal queues exist).
+    skipCustomerCreateGroupLimit: false
+    # Before bootstrap.py: init polls GET …/getting_started (same container image as bootstrap; stdlib urllib).
+    waitForZammadApi: true
+    waitForZammadMaxAttempts: 180
+    waitForZammadIntervalSec: 5
+    # Wait for zammad-helm zammad-init Job (DB migrations) before HTTP wait — requires RBAC (batch/jobs).
+    waitForZammadInitJob: true
+    waitForZammadInitJobTimeoutSec: 3600
+    # Comma-separated emails: extra synthetic customers (mock-employee-data TEST_USERS). Same idea as mockServiceNow.testUsers.
+    testUsers: ""

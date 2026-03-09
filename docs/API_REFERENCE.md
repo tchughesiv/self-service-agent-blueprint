@@ -517,6 +517,36 @@ Handle Slack slash commands.
 }
 ```
 
+#### POST /zammad/webhook
+
+Receives Zammad **Trigger → Webhook** POSTs so ticket creates and updates can flow into Request Manager. Deployment and Operator setup are described in [README.md](../README.md#integration-with-zammad-ticketing-optional).
+
+**Authentication**: Required — **HMAC-SHA1** over the raw body in **`X-Hub-Signature`**, using **`ZAMMAD_WEBHOOK_SECRET`**. Verification is always enforced; an unset or empty secret still fails verification (**401**). The signature may be sent as a hex string or prefixed with `sha1=`.
+
+**Required headers**:
+
+| Header | Description |
+| ------ | ----------- |
+| `X-Hub-Signature` | HMAC-SHA1 of the request body (hex, optional `sha1=` prefix). |
+| `X-Zammad-Delivery` | Unique id for this delivery (deduplication). If missing → **400** with `"Missing X-Zammad-Delivery header"`. |
+
+**Optional headers**:
+
+| Header | Description |
+| ------ | ----------- |
+| `X-Zammad-Trigger` | Trigger identifier when present. |
+
+**Request body**: JSON from Zammad (typically includes **`ticket`** and **`article`**). Malformed JSON → **400** with `"Invalid JSON body"`.
+
+**Successful response**:
+```json
+{
+  "status": "ok"
+}
+```
+
+**Errors**: **401** `"Invalid signature"`; **400** missing `X-Zammad-Delivery` or invalid JSON; **500** on unexpected server errors.
+
 ### Delivery Endpoints
 
 #### POST /deliver

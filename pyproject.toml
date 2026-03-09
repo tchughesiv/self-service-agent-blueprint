@@ -32,6 +32,7 @@ mypy_path = "shared-clients/src:shared-models/src:tracing-config/src"
 
 [tool.pytest.ini_options]
 testpaths = ["test"]
+pythonpath = ["shared-models/src", "shared-clients/src", "tracing-config/src"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]

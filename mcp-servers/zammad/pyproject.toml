@@ -49,6 +49,7 @@ line_length = 88
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+pythonpath = ["../../shared-models/src", "../../tracing-config/src", "../mcp-common/src"]
 
 [tool.mypy]
 python_version = "3.12"
@@ -58,7 +59,6 @@ mypy_path = "../../tracing-config/src:../../shared-models/src:../mcp-common/src"
 module = [
     "mcp_common.*",
     "opentelemetry.*",
-    "shared_models.*",
 ]
 follow_imports = "skip"
 

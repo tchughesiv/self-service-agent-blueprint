@@ -16,10 +16,10 @@ from zammad_mcp import settings as zammad_mcp_settings
 from zammad_mcp.basher_client import (
     assert_ticket_customer_matches_basher,
     call_basher_tool,
-    get_user_id_by_email,
+    fetch_zammad_customer_user,
+    fetch_zammad_user_via_rest,
 )
 from zammad_mcp.zammad_auth_id import parse_email_and_ticket_id
-from zammad_mcp.zammad_rest_client import fetch_zammad_customer_user_rest
 
 SERVICE_NAME = "zammad-mcp-server"
 logger = configure_logging(SERVICE_NAME)
@@ -133,19 +133,26 @@ def mark_as_agent_managed_laptop_refresh(
 ) -> str:
     """Tag this ticket for agent-managed laptop refresh."""
     _, ticket_id, _ = _authorize_ticket(ctx)
-    tag = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS.agent_managed_tag
+    s = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS
+    tag = s.agent_managed_tag
     call_basher_tool("zammad_add_ticket_tag", {"ticket_id": ticket_id, "tag": tag})
 
-    owner = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS.laptop_specialist_owner
+    owner = s.laptop_specialist_owner
+    state_ip = s.state_in_progress
+    # Basher ``TicketUpdateParams`` accepts ``state``, ``owner``, ``group`` as names/emails — not ``*_id``.
+    payload: dict[str, Any] = {}
     if owner:
-        get_user_id_by_email(owner)
-        call_basher_tool(
-            "zammad_update_ticket",
-            {"ticket_id": ticket_id, "owner": owner},
-        )
+        payload["owner"] = owner.strip()
+    if state_ip:
+        payload["state"] = state_ip.strip()
+    if payload:
+        call_basher_tool("zammad_update_ticket", {"ticket_id": ticket_id, **payload})
+
     parts = [f"Ticket {ticket_id} tagged as {tag!r}"]
     if owner:
         parts.append(f"owner set to {owner!r}")
+    if state_ip:
+        parts.append(f"state set to {state_ip!r}")
     return ", ".join(parts) + "."
 
 
@@ -157,19 +164,25 @@ def mark_as_general_agent_managed(
 ) -> str:
     """Tag this ticket for agent-managed general support."""
     _, ticket_id, _ = _authorize_ticket(ctx)
-    tag = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS.general_agent_managed_tag
+    s = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS
+    tag = s.general_agent_managed_tag
     call_basher_tool("zammad_add_ticket_tag", {"ticket_id": ticket_id, "tag": tag})
 
-    owner = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS.general_specialist_owner
+    owner = s.general_specialist_owner
+    state_ip = s.state_in_progress
+    payload: dict[str, Any] = {}
     if owner:
-        get_user_id_by_email(owner)
-        call_basher_tool(
-            "zammad_update_ticket",
-            {"ticket_id": ticket_id, "owner": owner},
-        )
+        payload["owner"] = owner.strip()
+    if state_ip:
+        payload["state"] = state_ip.strip()
+    if payload:
+        call_basher_tool("zammad_update_ticket", {"ticket_id": ticket_id, **payload})
+
     parts = [f"Ticket {ticket_id} tagged as {tag!r}"]
     if owner:
         parts.append(f"owner set to {owner!r}")
+    if state_ip:
+        parts.append(f"state set to {state_ip!r}")
     return ", ".join(parts) + "."
 
 
@@ -180,7 +193,10 @@ def close(ctx: Context[Any, Any], dummy_parameter: str = "") -> str:
     """Close the ticket."""
     _, ticket_id, _ = _authorize_ticket(ctx)
     state = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS.state_closed
-    call_basher_tool("zammad_update_ticket", {"ticket_id": ticket_id, "state": state})
+    call_basher_tool(
+        "zammad_update_ticket",
+        {"ticket_id": ticket_id, "state": state.strip()},
+    )
     return f"Ticket {ticket_id} moved to state {state!r}."
 
 
@@ -195,14 +211,18 @@ def escalate_for_human_review(ctx: Context[Any, Any], dummy_parameter: str = "")
 
     gname = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS.group_escalated_laptop
     gstrip = gname.strip()
+    owner_mail = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS.owner_escalated_laptop.strip()
     update: dict[str, Any] = {}
     if gstrip:
         update["group"] = gstrip
+    if owner_mail:
+        update["owner"] = owner_mail
     if update:
         call_basher_tool("zammad_update_ticket", {"ticket_id": ticket_id, **update})
 
     gmsg = f", group {gname!r}" if gstrip else ""
-    return f"Ticket {ticket_id} tagged {tag!r}{gmsg}."
+    omsg = f", owner {update['owner']!r}" if owner_mail and "owner" in update else ""
+    return f"Ticket {ticket_id} tagged {tag!r}{gmsg}{omsg}."
 
 
 @mcp.tool()
@@ -211,7 +231,7 @@ def escalate_for_human_review(ctx: Context[Any, Any], dummy_parameter: str = "")
 def send_to_manager_review(ctx: Context[Any, Any], dummy_parameter: str = "") -> str:
     """Assign this ticket to the customer's manager for approval."""
     _, ticket_id, cust_uid = _authorize_ticket(ctx)
-    customer_user = fetch_zammad_customer_user_rest(cust_uid)
+    customer_user = fetch_zammad_customer_user(cust_uid)
     field = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS.user_manager_field
     raw = customer_user.get(field)
     manager = (str(raw).strip() if raw is not None else "") or ""
@@ -225,12 +245,13 @@ def send_to_manager_review(ctx: Context[Any, Any], dummy_parameter: str = "") ->
     tag = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS.tag_manager_review
     call_basher_tool("zammad_add_ticket_tag", {"ticket_id": ticket_id, "tag": tag})
 
-    get_user_id_by_email(manager)
-    call_basher_tool(
-        "zammad_update_ticket",
-        {"ticket_id": ticket_id, "owner": manager},
-    )
-    return f"Ticket {ticket_id} assigned to {manager!r}, tag {tag!r}."
+    gname = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS.group_manager_review
+    payload: dict[str, Any] = {"owner": manager.strip()}
+    if gname.strip():
+        payload["group"] = gname.strip()
+    call_basher_tool("zammad_update_ticket", {"ticket_id": ticket_id, **payload})
+    gmsg = f", group {gname!r}" if gname.strip() else ""
+    return f"Ticket {ticket_id} assigned to {manager!r}, tag {tag!r}{gmsg}."
 
 
 @mcp.tool()
@@ -239,17 +260,30 @@ def send_to_manager_review(ctx: Context[Any, Any], dummy_parameter: str = "") ->
 def route_to_human_managed_queue(
     ctx: Context[Any, Any], dummy_parameter: str = ""
 ) -> str:
-    """Route this ticket to the human-managed queue."""
+    """Route this ticket to the human-managed queue (general-agent escalation).
+
+    Matches laptop ``escalate_for_human_review`` semantics: adds the human-escalation tag,
+    then updates group (and optional owner when ``ZAMMAD_OWNER_HUMAN_MANAGED`` is set).
+    """
     _, ticket_id, _ = _authorize_ticket(ctx)
-    gname = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS.group_human_managed
+    s = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS
+    tag = s.tag_escalate_human
+    call_basher_tool("zammad_add_ticket_tag", {"ticket_id": ticket_id, "tag": tag})
+
+    gname = s.group_human_managed
     gstrip = gname.strip()
+    owner_mail = s.owner_human_managed.strip()
+    update: dict[str, Any] = {}
     if gstrip:
-        call_basher_tool(
-            "zammad_update_ticket",
-            {"ticket_id": ticket_id, "group": gstrip},
-        )
-    gmsg = f"group {gname!r}" if gstrip else "no group change"
-    return f"Ticket {ticket_id} routed to {gmsg}."
+        update["group"] = gstrip
+    if owner_mail:
+        update["owner"] = owner_mail
+    if update:
+        call_basher_tool("zammad_update_ticket", {"ticket_id": ticket_id, **update})
+
+    gmsg = f", group {gname!r}" if gstrip else ""
+    omsg = f", owner {update['owner']!r}" if owner_mail and "owner" in update else ""
+    return f"Ticket {ticket_id} tagged {tag!r}{gmsg}{omsg}."
 
 
 @mcp.tool()
@@ -279,7 +313,7 @@ def get_employee_laptop_info(
         - Laptop Warranty: Current warranty status (Active/Expired)
     """
     email, _ticket_id, cust_uid = _authorize_ticket(ctx)
-    user = fetch_zammad_customer_user_rest(cust_uid)
+    user = fetch_zammad_customer_user(cust_uid)
 
     logger.info(
         "Getting laptop info from Zammad user profile",
@@ -288,6 +322,16 @@ def get_employee_laptop_info(
     )
 
     current_laptop_raw = user.get("current_laptop")
+    if not (isinstance(current_laptop_raw, str) and current_laptop_raw.strip()):
+        # Basher ``zammad_get_user`` JSON often omits object-manager User fields; REST returns them.
+        logger.info(
+            "current_laptop missing from Basher user JSON; loading user via Zammad REST",
+            tool="get_employee_laptop_info",
+            customer_id=cust_uid,
+        )
+        user = fetch_zammad_user_via_rest(cust_uid)
+        current_laptop_raw = user.get("current_laptop")
+
     if not current_laptop_raw:
         raise ValueError(
             f"No laptop data found for user {email}. "
