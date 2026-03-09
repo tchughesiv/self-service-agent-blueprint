@@ -14,6 +14,7 @@ from .schemas import (
     SlackRequest,
     ToolRequest,
     WebRequest,
+    ZammadRequest,
 )
 
 
@@ -23,7 +24,13 @@ class RequestNormalizer:
     def normalize_request(
         self,
         request: Union[
-            BaseRequest, SlackRequest, WebRequest, CLIRequest, EmailRequest, ToolRequest
+            BaseRequest,
+            SlackRequest,
+            WebRequest,
+            CLIRequest,
+            EmailRequest,
+            ToolRequest,
+            ZammadRequest,
         ],
         session_id: str,
         current_agent_id: Optional[str] = None,
@@ -61,6 +68,8 @@ class RequestNormalizer:
             return self._normalize_email_request(request, base_data)
         elif isinstance(request, ToolRequest):
             return self._normalize_tool_request(request, base_data)
+        elif isinstance(request, ZammadRequest):
+            return self._normalize_zammad_request(request, base_data)
         else:
             return self._normalize_base_request(request, base_data)
 
@@ -145,6 +154,34 @@ class RequestNormalizer:
             integration_context=integration_context,
             user_context=user_context,
             requires_routing=True,
+        )
+
+    def _normalize_zammad_request(
+        self, request: ZammadRequest, base_data: Dict[str, Any]
+    ) -> NormalizedRequest:
+        """Normalize Zammad ticketing request.
+
+        Routes to ticket-laptop-refresh (APPENG-4759). New tickets and follow-ups both
+        reach the request manager; webhook may add ticket-type filters / metadata later.
+        """
+        integration_context = {
+            "ticket_id": request.ticket_id,
+            "article_id": request.article_id,
+            "group_id": request.group_id,
+            "zammad_delivery_id": request.zammad_delivery_id,
+            "platform": "zammad",
+        }
+
+        # Zammad requests bypass routing; specialist handles ticket channel (see APPENG-4759)
+        base_data["target_agent_id"] = "ticket-laptop-refresh"
+        # Keep base_data["session_id"] from create_or_get_session — it must match the
+        # RequestSession row (RequestLog FK). Ticket/thread identity is in integration_context.
+
+        return NormalizedRequest(
+            **base_data,
+            integration_context=integration_context,
+            user_context={"platform_user_id": str(request.created_by_id)},
+            requires_routing=False,
         )
 
     def _normalize_tool_request(

@@ -3,12 +3,18 @@
 import asyncio
 import os
 from abc import ABC, abstractmethod
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
 from fastapi import HTTPException, status
-from shared_models import CloudEventSender, SessionResponse, configure_logging
-from shared_models.models import NormalizedRequest
+from shared_models import (
+    CloudEventSender,
+    SessionResponse,
+    configure_logging,
+    get_enum_value,
+    get_or_create_zammad_ticket_session,
+)
+from shared_models.models import IntegrationType, NormalizedRequest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .normalizer import RequestNormalizer
@@ -125,6 +131,38 @@ async def create_or_get_session_shared(
         db=db,
     )
 
+    session_timeout_hours = _get_session_timeout_hours()
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=session_timeout_hours)
+
+    # Zammad: one stable session per ticket per user (not one session per user like other channels).
+    req_integration = getattr(request, "integration_type", None)
+    if (
+        req_integration is not None
+        and get_enum_value(req_integration) == IntegrationType.ZAMMAD.value
+    ):
+        tid_raw = getattr(request, "ticket_id", None)
+        if tid_raw is None:
+            md_early = getattr(request, "metadata", {}) or {}
+            tid_raw = md_early.get("ticket_id")
+        parsed_ticket_id: Optional[int] = None
+        if tid_raw is not None:
+            try:
+                parsed_ticket_id = int(tid_raw)
+            except (TypeError, ValueError):
+                parsed_ticket_id = None
+        if parsed_ticket_id is not None and parsed_ticket_id >= 1:
+            z_sess = await get_or_create_zammad_ticket_session(
+                db,
+                canonical_user_id=canonical_user_id,
+                ticket_id=parsed_ticket_id,
+                channel_id=getattr(request, "channel_id", None),
+                thread_id=getattr(request, "thread_id", None),
+                integration_metadata=getattr(request, "metadata", {}) or {},
+                user_context={},
+                expires_at=expires_at,
+            )
+            return z_sess
+
     # Check if a session_id was provided in metadata (e.g., from X-Session-ID header in email reply, or thread metadata)
     # This allows integrations to provide a session_id to continue an existing session
     request_metadata = getattr(request, "metadata", {}) or {}
@@ -236,9 +274,7 @@ async def create_or_get_session_shared(
                 filter_by_integration_type=filter_by_integration_type,
             )
 
-            # Use the cleanup utility function
-            from shared_models import get_enum_value
-
+            # Use the cleanup utility function (get_enum_value: module import above)
             from .database_utils import cleanup_old_sessions
 
             # Pass integration_type only if filtering by it, otherwise None
@@ -283,21 +319,15 @@ async def create_or_get_session_shared(
     # Create new session via event (with fallback to direct DB access)
     # This uses eventing for race condition prevention while maintaining resilience
     import uuid
-    from datetime import timedelta
 
     from shared_models import BaseSessionManager, SessionCreate
-
-    session_timeout_hours = _get_session_timeout_hours()
-    expires_at = datetime.now(timezone.utc) + timedelta(hours=session_timeout_hours)
 
     # Get integration_type from request, with fallback to None if not available
     request_integration_type = getattr(request, "integration_type", None)
 
     # SessionCreate requires integration_type, so we need to handle None case
     if request_integration_type is None:
-        from shared_models.models import IntegrationType
-
-        # Default to WEB if not specified
+        # Default to WEB if not specified (IntegrationType: module import)
         request_integration_type = IntegrationType.WEB
 
     # Try eventing-based session creation first
@@ -402,6 +432,7 @@ async def create_or_get_session_shared(
         channel_id=getattr(request, "channel_id", None),
         thread_id=getattr(request, "thread_id", None),
         external_session_id=None,
+        explicit_session_id=None,
         integration_metadata=request.metadata or {},
         user_context={},
     )
@@ -831,6 +862,30 @@ class UnifiedRequestProcessor:
                         "User has no email address - cannot perform email-based lookups",
                         canonical_user_id=normalized_request.user_id,
                     )
+
+            # Zammad MCP requires AUTHORITATIVE_USER_ID = {email}-{internal_ticket_id}.
+            # UUID→email replacement above leaves bare email; append ticket id from webhook context.
+            if (
+                get_enum_value(normalized_request.integration_type)
+                == IntegrationType.ZAMMAD.value
+            ):
+                ctx = normalized_request.integration_context or {}
+                tid = ctx.get("ticket_id")
+                if tid is not None:
+                    tid_str = str(tid).strip()
+                    uid_str = str(normalized_request.user_id)
+                    if tid_str.isdigit() and not is_uuid(uid_str):
+                        base = (
+                            uid_str.rsplit("-", 1)[0]
+                            if ("-" in uid_str and uid_str.rsplit("-", 1)[-1].isdigit())
+                            else uid_str
+                        )
+                        normalized_request.user_id = f"{base}-{tid_str}"
+                        logger.info(
+                            "Zammad: user_id set to email-ticket form for MCP",
+                            user_id=normalized_request.user_id,
+                            ticket_id=tid_str,
+                        )
         except Exception as e:
             logger.warning(
                 "Failed to retrieve user email for normalization",

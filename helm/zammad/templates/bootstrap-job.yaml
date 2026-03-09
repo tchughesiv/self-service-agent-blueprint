@@ -8,7 +8,7 @@ metadata:
     app.kubernetes.io/instance: {{ .Release.Name }}
     app.kubernetes.io/component: zammad-bootstrap
   annotations:
-    "helm.sh/hook": post-install
+    "helm.sh/hook": post-install,post-upgrade
     "helm.sh/hook-delete-policy": before-hook-creation
 spec:
   backoffLimit: 10
@@ -62,6 +62,54 @@ spec:
               value: {{ .Values.bootstrap.credentialsSecret | quote }}
             - name: ZAMMAD_MCP_DEPLOYMENT
               value: {{ .Values.bootstrap.mcpDeployment | quote }}
-            - name: ZAMMAD_REQUEST_MANAGER_DEPLOYMENT
-              value: {{ .Values.bootstrap.requestManagerDeployment | quote }}
+            - name: ZAMMAD_INTEGRATION_DISPATCHER_DEPLOYMENT
+              value: {{ .Values.bootstrap.integrationDispatcherDeployment | quote }}
             {{- end }}
+{{- $iw := .Values.bootstrap.integrationWebhook | default dict }}
+{{- if $iw.enabled }}
+{{- $rel := $iw.mainChartReleaseName | default "self-service-agent" }}
+{{- $defaultUrl := printf "http://%s-integration-dispatcher.%s.svc.cluster.local/zammad/webhook" $rel .Release.Namespace }}
+{{- $url := $iw.url | default $defaultUrl }}
+            - name: ZAMMAD_INTEGRATION_WEBHOOK_URL
+              value: {{ $url | quote }}
+{{- $plainHmac := default "" $iw.hmacSecret }}
+{{- if $plainHmac }}
+            - name: ZAMMAD_WEBHOOK_SECRET
+              value: {{ $plainHmac | quote }}
+{{- else }}
+{{- $href := $iw.hmacSecretRef | default dict }}
+{{- $parentChartName := $rel }}
+{{- $pfn := .Release.Name }}
+{{- if not (contains $parentChartName .Release.Name) }}
+{{- $pfn = printf "%s-%s" .Release.Name $parentChartName | trunc 63 | trimSuffix "-" }}
+{{- end }}
+{{- $defaultIntSec := printf "%s-integration-secrets" $pfn }}
+{{- $hrefName := $href.name | default $defaultIntSec }}
+            - name: ZAMMAD_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $hrefName | quote }}
+                  key: {{ $href.key | default "zammad-webhook-secret" | quote }}
+                  optional: true
+{{- end }}
+{{- if ($iw.triggerGroupNames | default "") }}
+            - name: ZAMMAD_TRIGGER_GROUP_NAMES
+              value: {{ $iw.triggerGroupNames | quote }}
+{{- end }}
+{{- if ($iw.triggerGroupIds | default "") }}
+            - name: ZAMMAD_TRIGGER_GROUP_IDS
+              value: {{ $iw.triggerGroupIds | quote }}
+{{- end }}
+{{- if ($iw.triggerTagsAny | default "") }}
+            - name: ZAMMAD_TRIGGER_TAGS_ANY
+              value: {{ $iw.triggerTagsAny | quote }}
+{{- end }}
+{{- if ($iw.triggerTagsAll | default "") }}
+            - name: ZAMMAD_TRIGGER_TAGS_ALL
+              value: {{ $iw.triggerTagsAll | quote }}
+{{- end }}
+{{- if $iw.triggerSkipGroupFilter }}
+            - name: ZAMMAD_TRIGGER_SKIP_GROUP_FILTER
+              value: "true"
+{{- end }}
+{{- end }}

@@ -82,7 +82,7 @@ from .session_lock import (
 )
 
 # Export session management
-from .session_manager import BaseSessionManager
+from .session_manager import BaseSessionManager, get_or_create_zammad_ticket_session
 from .session_schemas import SessionCreate, SessionResponse, SessionUpdate
 
 # Export user utilities
@@ -142,6 +142,7 @@ __all__ = [
     "EventTypes",
     "agent_response_event_id",
     "BaseSessionManager",
+    "get_or_create_zammad_ticket_session",
     "SessionCreate",
     "SessionResponse",
     "SessionUpdate",

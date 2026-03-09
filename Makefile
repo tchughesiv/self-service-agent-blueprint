@@ -492,7 +492,8 @@ help:
 	@echo "    LG_PROMPT_<AGENT_NAME>            - Override prompt config for any agent (generic pattern)"
 	@echo "                                        Replace <AGENT_NAME> with uppercase agent name (use _ for -)"
 	@echo "    Examples:"
-	@echo "      LG_PROMPT_LAPTOP_REFRESH        - Override laptop-refresh agent"
+	@echo "      LG_PROMPT_LAPTOP_REFRESH        - Override laptop-refresh agent (non-ticket / general flow)"
+	@echo "      LG_PROMPT_TICKET_LAPTOP_REFRESH - Override ticket-laptop-refresh (Zammad / ticket channel)"
 	@echo "      LG_PROMPT_ROUTING               - Override routing agent"
 	@echo "      LG_PROMPT_EMAIL_UPDATE          - Override email-update agent"
 	@echo "    Usage: make helm-install-test LG_PROMPT_LAPTOP_REFRESH=config/lg-prompts/custom.yaml"
@@ -1561,8 +1562,7 @@ define helm_install_common
 		-n $(NAMESPACE) --dry-run=client -o yaml | kubectl apply -f -
 
 	@echo "Cleaning up any existing jobs..."
-	@kubectl delete job -l app.kubernetes.io/component=init -n $(NAMESPACE) --ignore-not-found || true
-	@kubectl delete job -l app.kubernetes.io/name=self-service-agent -n $(NAMESPACE) --ignore-not-found || true
+	@kubectl delete job -l app.kubernetes.io/instance=$(MAIN_CHART_NAME) -n $(NAMESPACE) --ignore-not-found || true
 	@echo "Installing $(MAIN_CHART_NAME) helm chart $(1)"
 	@if [ -n "$(GIT_BRANCH)" ] && [ "$(origin VERSION)" = "undefined" ]; then \
 		echo "Using image version: $(VERSION) (auto-detected from branch: $(GIT_BRANCH))"; \
@@ -1716,6 +1716,8 @@ helm-install-ticketing: namespace helm-depend
 		printf '    imageRegistry: "%s"\n' '$(REGISTRY)'; \
 		printf '    imageRepository: "%s"\n' 'self-service-agent-zammad-bootstrap'; \
 		printf '    imageTag: "%s"\n' '$(VERSION)'; \
+		printf '    integrationWebhook:\n'; \
+		printf '      mainChartReleaseName: "%s"\n' '$(MAIN_CHART_NAME)'; \
 		if [ -n "$$ZAMMAD_UID" ] || [ -n "$$ZAMMAD_FQDN" ]; then \
 			printf '  zammad:\n'; \
 			if [ -n "$$ZAMMAD_UID" ]; then \
@@ -1790,11 +1792,23 @@ _helm-install-ticketing-print-checklist:
 		echo "     API:    http://localhost:8080/api/v1"; \
 	fi
 	@echo ""
+	@echo "  2. Zammad FQDN: pre-computed / Makefile overlay when needed so the Route and HTTPS behave correctly."
+	@echo ""
+	@echo "  3. If the MCP token was not written by the bootstrap Job:"
+	@echo "     - kubectl logs -n $(NAMESPACE) job/$(MAIN_CHART_NAME)-bootstrap"
+	@echo "       (or: kubectl logs -n $(NAMESPACE) -l app.kubernetes.io/component=zammad-bootstrap)"
+	@echo "     - Ensure ticketingZammad.bootstrap.createToken and credentialsSecret match your cluster."
+	@echo ""
 	@ZAMMAD_EMBED_ROUTE=$$(oc get route ssa-zammad-embed -n $(NAMESPACE) -o jsonpath='{.spec.host}' 2>/dev/null); \
+	n=4; \
 	if [ -n "$$ZAMMAD_EMBED_ROUTE" ]; then \
-		echo "  2. Chat widget (embed page loads the live preview): Admin → Channels → Chat (agents must be available)."; \
+		echo "  $$n. Chat widget (embed page loads the live preview): Admin → Channels → Chat (agents must be available)."; \
+		echo "     Full chat → agent reply loop needs integration-dispatcher + webhook/MCP when enabled."; \
 		echo ""; \
-	fi
+		n=$$(($$n+1)); \
+	fi; \
+	echo "  $$n. Webhook: ticketing defaults enable ticketingZammad.bootstrap.integrationWebhook; the post-install bootstrap Job creates the Webhook + Trigger → integration-dispatcher (docs/TICKETING_CHANNEL_GAMEPLAN.md §5.2.1). Set ticketingZammad.webhookSecret so $(MAIN_CHART_NAME)-integration-secrets includes zammad-webhook-secret for HMAC verification."
+	@echo ""
 	@echo "  Admin login defaults: ZAMMAD_ADMIN_EMAIL / ZAMMAD_ADMIN_PASSWORD (see Makefile; must match autoWizard in helm/values-ticketing.yaml)."
 	@echo "  More: README.md, docs/HELM_EXPORT_ANSIBLE.md"
 	@echo ""

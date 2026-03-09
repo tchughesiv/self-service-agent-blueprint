@@ -66,6 +66,10 @@ module = [
 ]
 ignore_missing_imports = true
 
+[tool.pytest.ini_options]
+# Prefer monorepo source over a stale install in .venv/site-packages (see also tool.mypy).
+pythonpath = ["../shared-models/src", "../shared-clients/src", "../tracing-config/src"]
+
 [tool.uv.sources]
 self-service-agent-shared-models = { path = "../shared-models" }
 self-service-agent-shared-clients = { path = "../shared-clients" }

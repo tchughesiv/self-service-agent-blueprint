@@ -93,6 +93,10 @@ make ansible-apply-demo NAMESPACE=your-namespace
 # make helm-install-ticketing NAMESPACE=your-namespace
 ```
 
+#### Zammad MCP naming (do not rename lightly)
+
+The MCP server entry under **`mcp-servers.mcp-servers`** must use the key **`zammad-mcp`**, not **`zammad`**. The Zammad Helm subchart already labels its pods with `app.kubernetes.io/name: zammad`. The upstream `mcp-servers` chart derives labels from the YAML key; using `zammad` made Service **`mcp-zammad`** select **all** Zammad workload pods (nginx, railsserver, etc.), so traffic to `:8000` often hit pods that are not the MCP server (`connection refused`). With **`zammad-mcp`**, the MCP Service is **`mcp-zammad-mcp`** and only targets the MCP deployment. Agent MCP URIs use **`http://mcp-zammad-mcp:8000/mcp`**. See the comment above `zammad-mcp` in `helm/values.yaml` and `mcp-servers/zammad/README.md`.
+
 ## Architecture
 
 ### Core Components

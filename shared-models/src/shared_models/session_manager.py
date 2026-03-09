@@ -1,11 +1,12 @@
 """Session management for shared database operations."""
 
+import asyncio
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Union
 
 from shared_models import configure_logging
-from shared_models.models import RequestSession, SessionStatus
+from shared_models.models import IntegrationType, RequestSession, SessionStatus
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,8 +37,9 @@ class BaseSessionManager:
         """Create a new Request Manager session in the database.
 
         Handles unique constraint violations by retrying with exponential backoff.
-        The unique constraint on (user_id, integration_type) where status='ACTIVE'
-        prevents multiple active sessions per user/integration.
+        The partial unique index on (user_id, integration_type) where status='ACTIVE'
+        prevents multiple active sessions per user/integration for most integrations;
+        ZAMMAD is excluded so multiple active ticket-scoped sessions per user are allowed.
 
         Args:
             session_data: Session creation data
@@ -49,12 +51,18 @@ class BaseSessionManager:
         Raises:
             IntegrityError: If retries are exhausted and constraint violation persists
         """
-        import asyncio
-
         for attempt in range(max_retries):
+            raw_explicit = getattr(session_data, "explicit_session_id", None)
+            explicit = (
+                raw_explicit.strip()
+                if isinstance(raw_explicit, str) and raw_explicit.strip()
+                else None
+            )
+            session_id_value = explicit if explicit else str(uuid.uuid4())
+
             try:
                 session = RequestSession(
-                    session_id=str(uuid.uuid4()),
+                    session_id=session_id_value,
                     user_id=session_data.user_id,
                     integration_type=get_enum_value(session_data.integration_type),
                     channel_id=session_data.channel_id,
@@ -85,6 +93,24 @@ class BaseSessionManager:
                 await self.db_session.rollback()
 
                 error_str = str(e).lower()
+                # Concurrent create with same explicit session_id (e.g. zammad-{ticket_id})
+                if "uq_request_sessions_session_id" in error_str or (
+                    "unique" in error_str
+                    and "session_id" in error_str
+                    and explicit is not None
+                ):
+                    existing_same_id = await self.get_session(session_id_value)
+                    if existing_same_id is not None and str(
+                        existing_same_id.user_id
+                    ) == str(session_data.user_id):
+                        logger.info(
+                            "Session already exists for explicit session_id (race)",
+                            session_id=session_id_value,
+                            user_id=session_data.user_id,
+                        )
+                        return existing_same_id
+                    raise
+
                 # Check if it's the unique constraint violation for active sessions
                 if "idx_one_active_session_per_user_integration" in error_str or (
                     "unique" in error_str and "active" in error_str
@@ -281,3 +307,80 @@ class BaseSessionManager:
 
         await self.db_session.execute(stmt)
         await self.db_session.commit()
+
+
+async def get_or_create_zammad_ticket_session(
+    db_session: AsyncSession,
+    *,
+    canonical_user_id: str,
+    ticket_id: int,
+    channel_id: Optional[str],
+    thread_id: Optional[str],
+    integration_metadata: Dict[str, Any],
+    user_context: Dict[str, Any],
+    expires_at: datetime,
+) -> SessionResponse:
+    """Resolve or create the per-ticket Zammad session (stable id ``zammad-{ticket_id}``).
+
+    Multiple active ZAMMAD sessions per user are allowed (migration 003 partial unique index).
+    """
+    stable_sid = f"zammad-{ticket_id}"
+    stmt = select(RequestSession).where(RequestSession.session_id == stable_sid)
+    result = await db_session.execute(stmt)
+    existing = result.scalar_one_or_none()
+
+    if existing is not None:
+        if str(existing.user_id) != str(canonical_user_id):
+            logger.error(
+                "Zammad ticket session owned by another user",
+                session_id=stable_sid,
+                expected_user_id=canonical_user_id,
+                actual_user_id=str(existing.user_id),
+            )
+            raise ValueError(
+                f"Session {stable_sid} is not owned by user {canonical_user_id}"
+            )
+        touch_values: Dict[str, Any] = {
+            "last_request_at": datetime.now(timezone.utc),
+            "expires_at": expires_at,
+        }
+        if get_enum_value(existing.status) != SessionStatus.ACTIVE.value:
+            touch_values["status"] = SessionStatus.ACTIVE.value
+        upd_existing = (
+            update(RequestSession)
+            .where(RequestSession.session_id == stable_sid)
+            .values(**touch_values)
+            .returning(RequestSession)
+        )
+        res_touch = await db_session.execute(upd_existing)
+        updated = res_touch.scalar_one_or_none()
+        await db_session.commit()
+        if updated is None:
+            raise RuntimeError(f"Session {stable_sid} missing after touch")
+        return SessionResponse.model_validate(updated)
+
+    manager = BaseSessionManager(db_session)
+    session_data = SessionCreate(
+        user_id=canonical_user_id,
+        integration_type=IntegrationType.ZAMMAD,
+        explicit_session_id=stable_sid,
+        channel_id=channel_id,
+        thread_id=thread_id,
+        external_session_id=None,
+        integration_metadata=integration_metadata,
+        user_context=user_context,
+    )
+    created = await manager.create_session(session_data)
+
+    upd = (
+        update(RequestSession)
+        .where(RequestSession.session_id == created.session_id)
+        .values(expires_at=expires_at)
+    )
+    await db_session.execute(upd)
+    await db_session.commit()
+
+    refreshed = await manager.get_session(created.session_id)
+    if refreshed is None:
+        raise RuntimeError(f"Session {created.session_id} missing after create")
+    return refreshed

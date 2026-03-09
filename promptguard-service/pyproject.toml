@@ -38,6 +38,10 @@ name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
 explicit = true
 
+[tool.pytest.ini_options]
+# Prefer monorepo source over a stale install in .venv/site-packages (see also tool.uv.sources).
+pythonpath = ["../shared-models/src", "../tracing-config/src"]
+
 [dependency-groups]
 dev = [
     "wheel>=0.46.2",

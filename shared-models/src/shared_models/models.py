@@ -36,6 +36,7 @@ __all__ = [
     "RequestStatus",
     "PodHeartbeat",
     "User",
+    "ZammadTicketCustomerAnchor",
     "RequestSession",
     "RequestLog",
     "UserIntegrationConfig",
@@ -66,6 +67,7 @@ class IntegrationType(str, Enum):
     TEAMS = "TEAMS"
     DISCORD = "DISCORD"
     TEST = "TEST"
+    ZAMMAD = "ZAMMAD"
 
 
 class SessionStatus(str, Enum):
@@ -121,6 +123,21 @@ class User(Base, TimestampMixin):  # type: ignore[misc]
     )
 
 
+class ZammadTicketCustomerAnchor(Base):  # type: ignore[misc]
+    """First customer identity seen for a Zammad ticket (webhook-enforced; immutable email key)."""
+
+    __tablename__ = "zammad_ticket_customer_anchors"
+
+    ticket_id = Column(BigInteger, primary_key=True)
+    zammad_customer_id = Column(BigInteger, nullable=True)
+    email_normalized = Column(String(512), nullable=False)
+    created_at = Column(
+        TIMESTAMP(timezone=True),
+        server_default=text("CURRENT_TIMESTAMP"),
+        nullable=False,
+    )
+
+
 # Request Manager Models
 class RequestSession(Base, TimestampMixin):  # type: ignore[misc]
     """User conversation sessions."""
@@ -128,7 +145,7 @@ class RequestSession(Base, TimestampMixin):  # type: ignore[misc]
     __tablename__ = "request_sessions"
 
     id = Column(Integer, primary_key=True)
-    session_id = Column(String(36), unique=True, nullable=False, index=True)
+    session_id = Column(String(255), unique=True, nullable=False, index=True)
     user_id = Column(
         UUID(as_uuid=False),
         ForeignKey("users.user_id"),
@@ -198,7 +215,7 @@ class RequestLog(Base, TimestampMixin):  # type: ignore[misc]
     id = Column(Integer, primary_key=True)
     request_id = Column(String(255), unique=True, nullable=False, index=True)
     session_id = Column(
-        String(36),
+        String(255),
         ForeignKey("request_sessions.session_id"),
         nullable=False,
         index=True,
@@ -343,7 +360,7 @@ class DeliveryLog(Base, TimestampMixin):  # type: ignore[misc]
 
     # Request/session context
     request_id = Column(String(255), nullable=False, index=True)
-    session_id = Column(String(36), nullable=False, index=True)
+    session_id = Column(String(255), nullable=False, index=True)
     user_id = Column(
         UUID(as_uuid=False),
         ForeignKey("users.user_id"),
@@ -616,6 +633,8 @@ class DeliveryRequest(BaseModel):
         None  # ISO timestamp of receive time, for delivery ordering
     )
     priority_override: Optional[int] = None
+    # Copy of RequestLog normalized_request.integration_context (e.g. Zammad ticket_id)
+    integration_context: Dict[str, Any] = Field(default_factory=dict)
     # Email threading (RFC 5322): set on outgoing reply so clients keep the thread
     email_message_id: Optional[str] = None  # Message-ID of the email we're replying to
     email_in_reply_to: Optional[str] = None  # In-Reply-To from user's email

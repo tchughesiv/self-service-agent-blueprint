@@ -28,6 +28,7 @@ class ZammadMcpSettings:
 
     agent_managed_tag: str
     state_closed: str
+    state_in_progress: str
     tag_escalate_human: str
     group_escalated_laptop: str
     tag_manager_review: str
@@ -99,6 +100,9 @@ def load_zammad_mcp_settings() -> ZammadMcpSettings:
             "ZAMMAD_AGENT_MANAGED_TAG", "agent-managed-laptop-refresh"
         ),
         state_closed=_str_env("ZAMMAD_STATE_CLOSED", "closed"),
+        # mark_as_agent_managed_laptop_refresh: set ticket state (e.g. "open"). Unset in env = skip
+        # (conservative); Helm sets open by default.
+        state_in_progress=_group_env("ZAMMAD_STATE_IN_PROGRESS", ""),
         tag_escalate_human=_str_env(
             "ZAMMAD_TAG_ESCALATE_HUMAN", "escalated-human-review"
         ),

@@ -424,6 +424,13 @@ class IntegrationDefaultsService:
                 "retry_delay_seconds": 10,
                 "config": {},
             },
+            "ZAMMAD": {
+                "enabled": False,  # Updated by health check (ZAMMAD_URL + ZAMMAD_HTTP_TOKEN)
+                "priority": 6,
+                "retry_count": 3,
+                "retry_delay_seconds": 60,
+                "config": {},
+            },
         }
 
         # Override with environment variables if available
@@ -591,6 +598,11 @@ class IntegrationDefaultsService:
 
         # Controlled by enabled flag only (no meaningful health check)
         health_status["SMS"] = False
+
+        # Zammad REST delivery (ticket channel): enabled when API URL + token are set
+        zammad_url = (os.getenv("ZAMMAD_URL") or "").strip()
+        zammad_token = (os.getenv("ZAMMAD_HTTP_TOKEN") or "").strip()
+        health_status["ZAMMAD"] = bool(zammad_url and zammad_token)
 
         return health_status
 
@@ -788,6 +800,15 @@ class IntegrationDefaultsService:
                         "No email address available, disabling EMAIL integration",
                         user_id=user_id,
                     )
+                    config["enabled"] = False
+
+            # Zammad: only for ticket responses that carry Zammad integration_context
+            if default_config.integration_type == IntegrationType.ZAMMAD:
+                if (
+                    not context
+                    or context.get("platform") != "zammad"
+                    or context.get("ticket_id") in (None, "", 0)
+                ):
                     config["enabled"] = False
 
             # Only include enabled integrations

@@ -22,4 +22,23 @@ bootstrap:
   createToken: false
   credentialsSecret: ""
   mcpDeployment: ""
-  requestManagerDeployment: ""
+  integrationDispatcherDeployment: ""
+  # Optional: Zammad REST API Webhook + Trigger → integration-dispatcher (see docs/TICKETING_CHANNEL_GAMEPLAN.md §5.2.1)
+  integrationWebhook:
+    enabled: false
+    # Full URL; if empty when enabled, defaults to http://<mainChartReleaseName>-integration-dispatcher.<namespace>.svc.cluster.local/zammad/webhook
+    url: ""
+    mainChartReleaseName: "self-service-agent"
+    # Plain secret (dev only); prefer hmacSecretRef for prod
+    hmacSecret: ""
+    hmacSecretRef:
+      name: ""
+      key: "zammad-webhook-secret"
+    # Optional Zammad trigger conditions (see zammad-bootstrap env ZAMMAD_TRIGGER_*). Prefer narrowing here over dispatcher allowlists.
+    # triggerGroupNames: comma-separated group names — bootstrap resolves to ids (e.g. "Users"). Preferred over raw ids when ids vary by install.
+    triggerGroupNames: ""
+    # triggerGroupIds: comma-separated internal ids — overrides triggerGroupNames if both set (same env precedence in bootstrap).
+    triggerGroupIds: ""
+    triggerSkipGroupFilter: false
+    triggerTagsAny: ""
+    triggerTagsAll: ""

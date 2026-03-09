@@ -133,19 +133,26 @@ def mark_as_agent_managed_laptop_refresh(
 ) -> str:
     """Tag this ticket for agent-managed laptop refresh."""
     _, ticket_id, _ = _authorize_ticket(ctx)
-    tag = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS.agent_managed_tag
+    s = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS
+    tag = s.agent_managed_tag
     call_basher_tool("zammad_add_ticket_tag", {"ticket_id": ticket_id, "tag": tag})
 
-    owner = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS.laptop_specialist_owner
+    owner = s.laptop_specialist_owner
+    state_ip = s.state_in_progress
+    update: dict[str, Any] = {"ticket_id": ticket_id}
     if owner:
         get_user_id_by_email(owner)
-        call_basher_tool(
-            "zammad_update_ticket",
-            {"ticket_id": ticket_id, "owner": owner},
-        )
+        update["owner"] = owner
+    if state_ip:
+        update["state"] = state_ip
+    if len(update) > 1:
+        call_basher_tool("zammad_update_ticket", update)
+
     parts = [f"Ticket {ticket_id} tagged as {tag!r}"]
     if owner:
         parts.append(f"owner set to {owner!r}")
+    if state_ip:
+        parts.append(f"state set to {state_ip!r}")
     return ", ".join(parts) + "."
 
 

@@ -10,14 +10,22 @@ ticketingZammad:
   # Bootstrap image registry/repo/tag: defaults from helm/zammad/values.yaml (avoid duplicating here).
   # Makefile overlay still sets ticketingZammad.bootstrap.* from REGISTRY/VERSION at helm-install-ticketing.
   # Bootstrap job: seeds users/groups and (with createToken=true) creates MCP agent token in-cluster.
+  # Registers Zammad Webhook + Trigger → integration-dispatcher (cluster-internal URL by default).
+  # Set ticketingZammad.webhookSecret in helm/values.yaml (or override) so integration-secrets contains zammad-webhook-secret for HMAC.
   bootstrap:
+    integrationWebhook:
+      enabled: true
+      # url: omit to use http://<mainChartReleaseName>-integration-dispatcher.<namespace>.svc.cluster.local/zammad/webhook
+      mainChartReleaseName: "self-service-agent"
+      # Webhook trigger: limit to group(s) by name (bootstrap resolves to ids). Override with triggerGroupIds if you prefer numeric ids.
+      triggerGroupNames: "Users"
     adminEmail: "admin@zammad.local"
     adminPassword: "ZammadR0cks!"
     autowizardToken: "ssa-zammad-autowizard-9f3a2b1c"
     createToken: true
     credentialsSecret: "self-service-agent-zammad-credentials"
     mcpDeployment: "mcp-zammad-mcp"
-    requestManagerDeployment: "self-service-agent-request-manager"
+    integrationDispatcherDeployment: "self-service-agent-integration-dispatcher"
 
   # OpenShift Route for external UI access
   externalRoute:
@@ -89,7 +97,6 @@ requestManagement:
     promptOverrides:
       lg-prompt-ticket-laptop-refresh: /app/agent-service/config/lg-prompts/ticket-laptop-refresh-lg-prompt-big.yaml
 
-# Enable zammad-mcp MCP server
 mcp-servers:
   mcp-servers:
     zammad-mcp:

@@ -1,6 +1,7 @@
 """Tests for Zammad MCP wrapper tools (mocked Basher MCP + REST auth)."""
 
 import os
+from dataclasses import replace
 from typing import Any
 from unittest.mock import Mock, patch
 
@@ -60,7 +61,9 @@ def test_mark_as_agent_managed(
     mock_assert.return_value = 100
     ctx = MockContext(auth_headers)
 
-    result = mark_as_agent_managed_laptop_refresh(ctx)
+    no_state = replace(load_zammad_mcp_settings(), state_in_progress="")
+    with patch("zammad_mcp.server.zammad_mcp_settings.ZAMMAD_MCP_SETTINGS", no_state):
+        result = mark_as_agent_managed_laptop_refresh(ctx)
 
     mock_assert.assert_called_once()
     names = [c[0][0] for c in mock_basher.call_args_list]
@@ -79,6 +82,55 @@ def test_mark_as_agent_managed(
     }
     mock_resolve_uid.assert_called_once_with("agent.laptop-specialist@example.com")
     assert "tagged" in result.lower() or "Ticket 100" in result
+
+
+@patch("zammad_mcp.server.get_user_id_by_email")
+@patch("zammad_mcp.server.call_basher_tool")
+@patch("zammad_mcp.server.assert_ticket_customer_matches_basher")
+def test_mark_as_agent_managed_merges_state_with_owner(
+    mock_assert: Mock,
+    mock_basher: Mock,
+    mock_resolve_uid: Mock,
+    auth_headers: dict[str, str],
+) -> None:
+    mock_assert.return_value = 100
+    ctx = MockContext(auth_headers)
+    merged = replace(load_zammad_mcp_settings(), state_in_progress="open")
+    with patch("zammad_mcp.server.zammad_mcp_settings.ZAMMAD_MCP_SETTINGS", merged):
+        mark_as_agent_managed_laptop_refresh(ctx)
+
+    upd = mock_basher.call_args_list[1][0][1]
+    assert upd == {
+        "ticket_id": 100,
+        "owner": "agent.laptop-specialist@example.com",
+        "state": "open",
+    }
+
+
+@patch("zammad_mcp.server.call_basher_tool")
+@patch("zammad_mcp.server.assert_ticket_customer_matches_basher")
+def test_mark_as_agent_managed_state_only_skips_owner_resolution(
+    mock_assert: Mock,
+    mock_basher: Mock,
+    auth_headers: dict[str, str],
+) -> None:
+    """When owner is empty but ZAMMAD_STATE_IN_PROGRESS is set, update state only."""
+    mock_assert.return_value = 100
+    ctx = MockContext(auth_headers)
+    merged = replace(
+        load_zammad_mcp_settings(),
+        laptop_specialist_owner="",
+        state_in_progress="open",
+    )
+    with patch("zammad_mcp.server.zammad_mcp_settings.ZAMMAD_MCP_SETTINGS", merged):
+        mark_as_agent_managed_laptop_refresh(ctx)
+
+    names = [c[0][0] for c in mock_basher.call_args_list]
+    assert names == ["zammad_add_ticket_tag", "zammad_update_ticket"]
+    assert mock_basher.call_args_list[1][0][1] == {
+        "ticket_id": 100,
+        "state": "open",
+    }
 
 
 @patch("zammad_mcp.server.call_basher_tool")
