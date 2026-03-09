@@ -26,6 +26,7 @@ Transform IT service delivery using AI to lower support effort, improve complian
   - [Integration with Slack (optional)](#integration-with-slack-optional)
   - [Integration with real ServiceNow (optional)](#integration-with-real-servicenow-optional)
   - [Integration with email (optional)](#integration-with-email-optional)
+  - [Zammad ticketing (optional)](#zammad-ticketing-optional)
   - [Run evaluations](#run-evaluations)
   - [Follow the flow with tracing](#follow-the-flow-with-tracing)
   - [Trying out smaller prompts](#trying-out-smaller-prompts)
@@ -106,6 +107,7 @@ By the end of this quickstart, you will have:
 - (Optional) PromptGuard for prompt injection protection
 - (Optional) Safety shields for content moderation
 - (Optional) Langfuse for session-level observability of multi-turn conversations
+- (Optional) Zammad helpdesk deployment and ticketing Helm profile (`make helm-install-ticketing`) for future ticketing-channel integration
 - Understanding of how to customize for your own use cases
 
 #### Key technologies you'll learn
@@ -962,6 +964,30 @@ on your email client or the test email server UI):
 - ✓ Receive email notifications and responses
 - ✓ Maintain conversation context through email threads
 - ✓ Test email integration end-to-end
+
+---
+
+### Zammad ticketing (optional)
+
+You can deploy **[Zammad](https://zammad.org/)** (helpdesk + chat widget) alongside the quickstart for experiments or future ticketing-channel work. This path is **infrastructure-focused**: Helm values, Makefile targets, and optional OpenShift Routes for the Zammad UI and a small **embed helper page** (chat widget snippet + preview). It does not by itself wire Zammad webhooks into the request-manager or agent—that is separate application work.
+
+**One-shot install (recommended):** installs the main chart with ticketing values, deploys Zammad, triggers autowizard seeding, and attempts in-cluster API token creation for the Zammad MCP server.
+
+```bash
+export NAMESPACE=your-namespace
+make helm-install-ticketing NAMESPACE=$NAMESPACE
+```
+
+**Zammad only** (e.g. bring-your-own main chart later):
+
+```bash
+make deploy-zammad NAMESPACE=$NAMESPACE
+make undeploy-zammad NAMESPACE=$NAMESPACE   # remove Zammad from the namespace
+```
+
+**Details:**
+
+- **Admin credentials** default to the seeded user in `helm/values-zammad-deploy.yaml` (must match `ZAMMAD_ADMIN_EMAIL` / `ZAMMAD_ADMIN_PASSWORD` in the Makefile when running token/bootstrap targets).
 
 ---
 
