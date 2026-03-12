@@ -81,19 +81,21 @@ Ensure you have the required tools installed:
    cd <repository-directory>  # The directory name matches the repository name
    ```
 
-2. **Install dependencies:**
+2. **Install dependencies (local dev):**
    ```bash
-   make install-all
+   make deps-all
    ```
 
    Or install specific components:
    ```bash
-   make install                    # Self-service agent dependencies
-   make install-request-manager    # Request manager dependencies
-   make install-agent-service      # Agent service dependencies
-   make install-integration-dispatcher  # Integration dispatcher dependencies
-   make install-mcp-snow          # ServiceNow MCP dependencies
+   make deps                       # Self-service agent dependencies (root)
+   make deps-request-manager       # Request manager dependencies
+   make deps-agent-service         # Agent service dependencies
+   make deps-integration-dispatcher # Integration dispatcher dependencies
+   make deps-mcp-snow              # ServiceNow MCP dependencies
    ```
+
+   **Note:** `make install` deploys to a cluster (Helm); use `INSTALL_MODE=test|demo|prod` (default: test). `make uninstall` removes the deployment and namespace; `make helm-uninstall` removes the deployment only (keeps namespace).
 
 3. **Run tests:**
    ```bash

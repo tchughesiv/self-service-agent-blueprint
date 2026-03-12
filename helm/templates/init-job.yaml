@@ -64,6 +64,10 @@ spec:
             runAsNonRoot: true
             seccompProfile:
               type: RuntimeDefault
+          {{- if and (hasKey .Values "requestManagement") (hasKey .Values.requestManagement "initJob") .Values.requestManagement.initJob.resources }}
+          resources:
+            {{- toYaml .Values.requestManagement.initJob.resources | nindent 12 }}
+          {{- end }}
           command:
             - /bin/bash
             - -c

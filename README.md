@@ -415,6 +415,8 @@ For first deployment, we recommend **Testing Mode (Mock Eventing)**:
 - Tests event-driven patterns
 - Simpler than production infrastructure
 
+**Demo mode:** For ephemeral demos (e.g., conferences), see [Helm export + Ansible](docs/HELM_EXPORT_ANSIBLE.md). Option A: `make helm-install-demo` or `make install INSTALL_MODE=demo` (Helm-only, deploys Greenmail + demo values). Option B: `make ansible-apply-demo` (export + Ansible). Use `make uninstall` for full teardown (removes namespace); `make helm-uninstall` removes deployment only (keeps namespace).
+
 For detailed information about deployment modes, see the [Deployment Mode Guide](guides/DEPLOYMENT_MODE_GUIDE.md).
 
 #### Step 2: set required environment variables
@@ -474,6 +476,7 @@ oc new-project $NAMESPACE
 
 # Deploy in testing mode (Mock Eventing)
 make helm-install-test NAMESPACE=$NAMESPACE
+# Or use shorthand: make install NAMESPACE=$NAMESPACE (defaults to test; use INSTALL_MODE=demo|prod for others)
 ```
 
 **Expected outcome:**

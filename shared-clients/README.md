@@ -153,11 +153,11 @@ This package is designed to be used as a local dependency within the self-servic
 
 ```bash
 # From the project root, install all dependencies
-make install-all
+make deps-all
 
 # Or install just shared-clients
-cd shared-clients
-uv sync
+make deps-shared-clients
+# Or from this directory: cd shared-clients && uv sync
 
 # Install with dev dependencies
 uv sync --group dev

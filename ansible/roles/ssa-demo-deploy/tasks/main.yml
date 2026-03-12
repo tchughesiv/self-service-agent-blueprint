@@ -1,0 +1,71 @@
+---
+# Deploy SSA demo from exported helm manifests
+# Demo deploy flow: namespace -> job cleanup -> test-email-server -> helm manifests -> wait
+
+- name: Ensure namespace exists
+  ansible.builtin.shell: |
+    kubectl create namespace {{ target_namespace }} 2>/dev/null || true
+    kubectl label namespace {{ target_namespace }} modelmesh-enabled=false --overwrite
+  changed_when: true
+
+- name: Clean up existing jobs (init and self-service-agent)
+  ansible.builtin.shell: |
+    kubectl delete job -l app.kubernetes.io/component=init -n {{ target_namespace }} --ignore-not-found || true
+    kubectl delete job -l app.kubernetes.io/name={{ main_chart_name }} -n {{ target_namespace }} --ignore-not-found || true
+  changed_when: true
+
+- name: Apply test-email-server manifest first (SMTP/IMAP must exist before integration-dispatcher)
+  ansible.builtin.command:
+    cmd: "kubectl apply -f {{ test_email_server_manifest }} -n {{ target_namespace }}"
+    chdir: "{{ playbook_dir }}/../.."
+  changed_when: true
+
+- name: Wait for test-email-server to be ready
+  ansible.builtin.command:
+    cmd: "kubectl rollout status deploy/test-email-server -n {{ target_namespace }} --timeout=5m"
+  changed_when: false
+
+- name: Apply ServiceNow credentials secret
+  ansible.builtin.command:
+    cmd: "kubectl apply -f {{ helm_export_dir }}/servicenow-credentials-secret.yaml -n {{ target_namespace }}"
+    chdir: "{{ playbook_dir }}/../.."
+  changed_when: true
+
+- name: Apply helm-exported manifests
+  ansible.builtin.command:
+    cmd: "kubectl apply -R -f {{ helm_export_dir }}/{{ main_chart_name }} -n {{ target_namespace }}"
+    chdir: "{{ playbook_dir }}/../.."
+  changed_when: true
+
+- name: Wait for deployments to be ready
+  ansible.builtin.command:
+    cmd: >
+      kubectl rollout status
+      deploy/{{ main_chart_name }}-request-manager
+      deploy/{{ main_chart_name }}-integration-dispatcher
+      deploy/{{ main_chart_name }}-agent-service
+      deploy/llamastack
+      deploy/mcp-{{ main_chart_name }}-snow
+      statefulset/pgvector
+      deploy/{{ main_chart_name }}-mock-eventing
+      deploy/{{ main_chart_name }}-mock-servicenow
+      -n {{ target_namespace }}
+      --timeout=10m
+  changed_when: false
+
+- name: Wait for db-migration job
+  ansible.builtin.command:
+    cmd: "kubectl wait --for=condition=complete job/{{ main_chart_name }}-db-migration -n {{ target_namespace }} --timeout=10m"
+  changed_when: false
+
+- name: Wait for init job
+  ansible.builtin.command:
+    cmd: "kubectl wait --for=condition=complete job/{{ main_chart_name }}-init -n {{ target_namespace }} --timeout=10m"
+  changed_when: false
+
+- name: Print deployment URLs
+  ansible.builtin.debug:
+    msg: |
+      Demo deployed to namespace {{ target_namespace }}.
+      Run: kubectl get routes -n {{ target_namespace }}
+      Run: kubectl get svc -n {{ target_namespace }}

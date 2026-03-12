@@ -1,0 +1,120 @@
+# Demo environment (conference demos, ephemeral)
+# Extends values-test. Use with: -f helm/values-test.yaml -f helm/values-demo.yaml
+# Note: security.email.smtpHost and imapHost are set via --set in Makefile (namespace-dependent)
+#
+# Resource constraints are based on observed usage in tommy namespace. Liberal limits
+# to avoid OOMKilled/CPU throttling during demos.
+
+testIntegrationEnabled: true
+
+# Subchart resources (llamastack, pgvector, mcp-servers)
+llama-stack:
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1.5Gi
+    limits:
+      cpu: "2"
+      memory: 4Gi
+
+pgvector:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 384Mi   # 266Mi observed under load
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+mcp-servers:
+  mcp-servers:
+    self-service-agent-snow:
+      resources:
+        requests:
+          cpu: 100m
+          memory: 512Mi
+        limits:
+          cpu: 500m
+          memory: 768Mi
+
+requestManagement:
+  knative:
+    mockEventing:
+      enabled: true
+      resources:
+        requests:
+          cpu: 100m
+          memory: 512Mi
+        limits:
+          cpu: 500m
+          memory: 768Mi
+
+  requestManager:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 512Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+
+  integrationDispatcher:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 512Mi
+      limits:
+        cpu: 500m
+        memory: 768Mi
+
+  agentService:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 768Mi   # 639Mi observed under load
+      limits:
+        cpu: "1"
+        memory: 1Gi
+
+  initJob:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+  dbMigration:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+mockServiceNow:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+security:
+  email:
+    smtpPort: "3025"
+    smtpUsername: "itsupport@selfservice.local"
+    smtpPassword: "testpass123"
+    smtpUseTls: "false"
+    fromEmail: "itsupport@selfservice.local"
+    fromName: "Self-Service Agent"
+    imapPort: "3143"
+    imapUsername: "itsupport@selfservice.local"
+    imapPassword: "testpass123"
+    imapUseSsl: "false"
+    imapMailbox: "INBOX"
+    imapPollInterval: "5"
+    # smtpHost and imapHost set via --set (need NAMESPACE for service DNS)

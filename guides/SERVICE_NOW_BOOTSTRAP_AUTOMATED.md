@@ -79,7 +79,7 @@ The [config.json](../scripts/servicenow-bootstrap/config.json) file contains sta
 Install the project and its dependencies:
 
 ```bash
-make install-servicenow-bootstrap
+make deps-servicenow-bootstrap
 ```
 
 ### 3. Run Complete Setup
