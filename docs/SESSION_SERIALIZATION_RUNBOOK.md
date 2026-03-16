@@ -37,6 +37,8 @@ Without both layers, the agent can receive msg1 before msg0 (wrong context, out-
 | What | Value |
 |------|-------|
 | **503 causes** | RequestLog creation failure, session lock timeout, transient DB error, agent timeout |
+| **Broker retries** | 10 per hop (Knative/mock); events go to DLQ when exhausted |
+| **Reclaim** | Only for stuck `processing` (pod crash); does not retry `failed` |
 | **Key env vars** | `SESSION_LOCK_WAIT_TIMEOUT`, `RECLAIM_ACTION`, `POD_HEARTBEAT_GRACE_SECONDS` |
 | **Metrics** | `request_manager_session_lock_acquire_duration_seconds`, `request_manager_reclaim_total` |
 | **Mock eventing** | Must run with 1 replica (`requestManagement.knative.mockEventing.replicas: 1`) for FIFO |
@@ -78,6 +80,50 @@ A request in `processing` is stuck if **either**:
 - **Sessions with new traffic**: Reclaim runs on-demand when a handler acquires the session lock.
 - **Sessions with no new traffic**: Background task runs every `BACKGROUND_RECLAIM_INTERVAL_SECONDS` to reclaim across all sessions.
 - **Worst-case** for a session with no new requests: `POD_HEARTBEAT_GRACE_SECONDS` + `BACKGROUND_RECLAIM_INTERVAL_SECONDS` (e.g. 30 + 45 = 75s).
+
+### Reclaim vs. explicit failure (no retry)
+
+Reclaim only resets requests stuck in `processing` (e.g. pod crashed before updating status). It does **not** retry requests that were explicitly marked `failed`:
+
+- When agent-service exhausts broker retries (10× 503) or request-manager times out waiting for a response, the request is marked `FAILED`. Reclaim never touches `FAILED`.
+- Those requests stay failed. User recovery: send another message (creates a new request).
+
+---
+
+## Broker retry and failure behavior
+
+### Retry limits (enforced by broker)
+
+| Layer | Config | Where |
+|-------|--------|-------|
+| **Knative broker** | `retry: 10` | `helm/templates/knative-broker.yaml` |
+| **Knative triggers** | `retry: 10` (varies by trigger) | `helm/templates/knative-triggers.yaml` |
+| **Mock eventing** | `max_retries = 10` for 5xx | `mock-eventing-service/` |
+
+When a subscriber returns 5xx, the broker retries delivery. Each hop (integration-dispatcher → request-manager, request-manager → agent-service, etc.) has its own retry budget.
+
+### What happens when retries are exhausted
+
+1. **Event** → broker gives up, sends to dead-letter queue (DLQ). Kafka broker handles this automatically; no DLQ consumer exists in this codebase.
+2. **RequestLog** → if request-manager was waiting for agent-service: it times out (~`AGENT_TIMEOUT`), marks the request `FAILED`, and returns 503 to the broker (triggering broker retries on the upstream hop).
+3. **User** → gets no response for that request. Recovery: send another message.
+
+### DLQ reprocessing (not implemented)
+
+Reprocessing events from the DLQ is **not** implemented and requires careful design before adding. Naive reprocessing can cause:
+
+- **Stale responses**: By the time an event reaches the DLQ, the user may have sent newer messages; a late response to an old message can be confusing.
+- **Out-of-order delivery**: If request A failed, request B succeeded, and we later reprocess A, the user would see: response to B, then response to A—breaking expected conversation order.
+
+Any future DLQ consumer should preserve per-session ordering (e.g. only reprocess if no newer request exists for that session) and consider staleness before re-publishing.
+
+### Ordering
+
+Per-partition FIFO is preserved via `partitionkey=session_id` and `kafka.eventing.knative.dev/delivery.order: ordered`. Messages that go to DLQ drop out of the main flow; subsequent messages in the same session are still delivered in order.
+
+### Why agent-service releases the claim on 5xx
+
+On 502/503/504, agent-service calls `release_event_claim` so the broker retry can re-claim and process the event instead of skipping it as a duplicate. Without this, every broker retry would be skipped (already claimed).
 
 ---
 
@@ -158,6 +204,7 @@ PostgreSQL `max_connections` is set to 200 for all envs (test/prod). Pool sizes 
 | Users see 503 "Service temporarily unavailable" | Lock timeout, RequestLog creation failure, or transient DB connection error | Check DB connectivity; increase `SESSION_LOCK_WAIT_TIMEOUT`; verify no session has excessive concurrent requests; retry on transient connection errors |
 | Requests stuck in `processing` | Pod crashed before completing; heartbeat/reclaim not running | Verify `pod_heartbeats` has recent rows; ensure background reclaim task is running; check DB connectivity |
 | No response in Slack/email | Request reclaimed but requeue loop never processed it | Verify `RECLAIM_ACTION=requeue`; check agent-service is processing; inspect `request_logs` for status transitions |
+| Request marked `failed` after agent never responded | Broker exhausted 10 retries (agent 503) or request-manager timed out | User can send another message. Check agent-service health; see [Broker retry and failure behavior](#broker-retry-and-failure-behavior). |
 | No response in Slack; agent logs "Event already claimed - skipping duplicate" | (1) Legacy: request-manager and agent shared `processed_events` with unique(event_id). (2) REQUEST_CREATED and AGENT_RESPONSE_READY both used event_id=request_id, colliding when request-manager claims both. | (1) Fixed: composite key (event_id, processed_by). (2) Fixed: AGENT_RESPONSE_READY uses namespaced event_id `agent-response:{request_id}`. request_id in payload remains the trace key. |
 | No response in email; request-manager logs "value too long for type character varying(36)" or `StringDataRightTruncationError` | Email Message-IDs (e.g. `<id@mail.gmail.com>`) exceed VARCHAR(36). request_logs/delivery_logs need longer columns. | Apply migration 001; it defines `request_id`, `cloudevent_id`, `last_request_id` as VARCHAR(255). If DB was created with older 001, run manual `ALTER` or reset DB. |
 | Integration test: "response order is [1,0,2], expected [0,1,2]" | Stale test or dev branch (no FIFO): dev has no partition key and no session serialization | Ensure request-manager FIFO + partition key on events; use `STAGGER_MS=1800` (default) or `3000` for higher margin |
