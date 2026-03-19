@@ -50,7 +50,8 @@ Use standard kubernetes scaling techniques. For agent-service, integration-dispa
     uvicornWorkers: 4  # Number of uvicorn worker processes for handling concurrent requests
 ```
 
-In addition, autoscaling can also be configured to scale up the number of pods as load increases.
+
+In test mode **Mock-eventing must stay at 1 replica** when using partition-key ordering—multiple replicas would break per-session FIFO (events for the same partition_key can hit different pods). 
 
 These are a few documents which may be of interest:
 
