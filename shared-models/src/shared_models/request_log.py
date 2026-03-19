@@ -1,7 +1,7 @@
 """RequestLog ordering utilities for session FIFO.
 
 Used by agent-service to enforce RequestLog as source of truth for processing order
-(defense in depth alongside partition key). Before processing, the agent checks
+Before processing, the agent checks
 whether any earlier request (by created_at) is still pending or processing.
 """
 
