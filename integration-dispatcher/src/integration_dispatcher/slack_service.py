@@ -8,14 +8,18 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 import httpx
-from cloudevents.http import CloudEvent, to_structured
+from cloudevents.conversion import to_structured
+from cloudevents.http import CloudEvent
 from shared_clients.stream_processor import LlamaStackStreamProcessor
 from shared_models import (
+    SOURCE_SERVICE_INTEGRATION_DISPATCHER,
     BaseSessionManager,
     CloudEventSender,
     DatabaseUtils,
     EventTypes,
     configure_logging,
+    insert_outbox_event,
+    mark_outbox_published,
     verify_slack_signature,
 )
 from shared_models.database import get_database_manager
@@ -25,6 +29,7 @@ from slack_sdk.web.async_client import AsyncWebClient
 from sqlalchemy import select
 
 from .slack_schemas import SlackInteractionPayload, SlackSlashCommand
+from .thread_lock import build_slack_thread_key, with_thread_lock
 from .user_mapping_utils import (
     ensure_email_mapping_consistency,
     resolve_user_id_from_email,
@@ -99,13 +104,15 @@ class SlackService:
         self, event_data: Dict[str, Any], event_type: str
     ) -> bool:
         """Send a CloudEvent to the broker."""
-        # Use CloudEventSender for REQUEST_CREATED events
+        # Use CloudEventSender for REQUEST_CREATED events.
+        # Slack: max_retries=0 to fail fast within ~3s; Slack retries webhook.
         if event_type == EventTypes.REQUEST_CREATED:
             return await self.cloudevent_sender.send_request_event(
                 request_data=event_data,
                 request_id=event_data.get("request_id"),
                 user_id=event_data.get("user_id"),
                 session_id=event_data.get("session_id"),
+                max_retries=0,
             )
         else:
             # For other event types, use CloudEventBuilder directly
@@ -310,6 +317,7 @@ class SlackService:
                 "slack_team_id": effective_team_id,
                 "slack_user_id": original_slack_user_id,  # Keep original Slack user ID for reference
                 "source": "slack_message",
+                "request_id": slack_message_id,  # Deterministic id for broker dedup (retry safety)
             }
 
             logger.debug(
@@ -960,7 +968,10 @@ class SlackService:
         integration_type: str,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Forward request to Request Manager via CloudEvent."""
+        """Forward request to Request Manager via CloudEvent.
+
+        Acquires per-thread lock (FIFO) before publish so events reach broker in order.
+        """
         try:
             # Extract Slack-specific fields from metadata
             if metadata is None:
@@ -971,81 +982,119 @@ class SlackService:
             slack_user_id = metadata.get("slack_user_id", user_id)
             slack_team_id = metadata.get("slack_team_id", "")
 
-            # Look up user's email from canonical user_id
-            user_email = None
-            try:
-                db_manager = get_database_manager()
-                async with db_manager.get_session() as db:
-                    stmt = select(User).where(User.user_id == user_id)
-                    result = await db.execute(stmt)
-                    user = result.scalar_one_or_none()
-                    if user and user.primary_email:
-                        user_email = str(user.primary_email)
-                        logger.debug(
-                            "Retrieved user email from canonical user_id",
-                            user_id=user_id,
-                            user_email=user_email,
-                        )
-            except Exception as e:
-                logger.warning(
-                    "Failed to retrieve user email",
-                    user_id=user_id,
-                    error=str(e),
-                )
-
-            logger.info(
-                "Extracting Slack fields from metadata",
-                user_id=user_id,
-                user_email=user_email,
-                metadata=metadata,
-                slack_user_id=slack_user_id,
-                channel_id=channel_id,
-                thread_id=thread_id,
-                slack_team_id=slack_team_id,
+            thread_key = build_slack_thread_key(
+                slack_team_id or "unknown",
+                channel_id or "",
+                thread_id or "",
             )
+            db_manager = get_database_manager()
 
-            # Create payload - Request Manager will generate request_id and session_id
-            # Include email_from similar to how email service does it
-            event_data = {
-                "user_id": user_id,
-                "content": content,
-                "integration_type": integration_type,
-                "request_type": "slack_interaction",
-                "channel_id": channel_id,
-                "thread_id": thread_id,
-                "slack_user_id": slack_user_id,
-                "slack_team_id": slack_team_id,
-                "metadata": metadata or {},
-            }
+            async def _locked_forward() -> None:
+                # Look up user's email from canonical user_id
+                user_email = None
+                try:
+                    async with db_manager.get_session() as db:
+                        stmt = select(User).where(User.user_id == user_id)
+                        result = await db.execute(stmt)
+                        user = result.scalar_one_or_none()
+                        if user and user.primary_email:
+                            user_email = str(user.primary_email)
+                            logger.debug(
+                                "Retrieved user email from canonical user_id",
+                                user_id=user_id,
+                                user_email=user_email,
+                            )
+                except Exception as e:
+                    logger.warning(
+                        "Failed to retrieve user email",
+                        user_id=user_id,
+                        error=str(e),
+                    )
 
-            # Include email_from if available (similar to email service)
-            if user_email:
-                event_data["email_from"] = user_email
-
-            logger.debug(
-                "Sending Slack request via CloudEvent to Request Manager",
-                user_id=user_id,
-                channel_id=channel_id,
-                slack_user_id=slack_user_id,
-                slack_team_id=slack_team_id,
-                thread_id=thread_id,
-            )
-
-            # Send via CloudEvent
-            success = await self._send_cloudevent(
-                event_data, EventTypes.REQUEST_CREATED
-            )
-            if success:
                 logger.info(
-                    "Request forwarded to Request Manager via CloudEvent",
+                    "Extracting Slack fields from metadata",
                     user_id=user_id,
-                    status="success",
+                    user_email=user_email,
+                    metadata=metadata,
+                    slack_user_id=slack_user_id,
+                    channel_id=channel_id,
+                    thread_id=thread_id,
+                    slack_team_id=slack_team_id,
                 )
-            else:
-                logger.error(
-                    "Failed to forward request to Request Manager via CloudEvent",
+
+                # Create payload. Include request_id from metadata when present (Slack: slack-{event_id})
+                # for deterministic event_id and broker/request-manager dedup on retry.
+                event_data = {
+                    "user_id": user_id,
+                    "content": content,
+                    "integration_type": integration_type,
+                    "request_type": "slack_interaction",
+                    "channel_id": channel_id,
+                    "thread_id": thread_id,
+                    "slack_user_id": slack_user_id,
+                    "slack_team_id": slack_team_id,
+                    "metadata": metadata or {},
+                }
+                if metadata and metadata.get("request_id"):
+                    event_data["request_id"] = metadata["request_id"]
+
+                # Session ID for partition key (Kafka ordering); user_id used when None (first request)
+                if metadata and metadata.get("session_id"):
+                    event_data["session_id"] = metadata["session_id"]
+
+                # Include email_from if available (similar to email service)
+                if user_email:
+                    event_data["email_from"] = user_email
+
+                request_id = event_data.get("request_id") or str(uuid.uuid4())
+                event_data.setdefault("request_id", request_id)
+
+                # Step 0.25 outbox: INSERT before publish; durable accept
+                async with db_manager.get_session() as db:
+                    outbox_id = await insert_outbox_event(
+                        db,
+                        source_service=SOURCE_SERVICE_INTEGRATION_DISPATCHER,
+                        event_type=EventTypes.REQUEST_CREATED,
+                        idempotency_key=request_id,
+                        payload=event_data,
+                        thread_order_key=thread_key,
+                    )
+                    if outbox_id is None:
+                        logger.info(
+                            "Outbox duplicate - skipping",
+                            request_id=request_id,
+                            thread_key=thread_key,
+                        )
+                        return
+
+                logger.debug(
+                    "Sending Slack request via CloudEvent to Request Manager",
                     user_id=user_id,
+                    channel_id=channel_id,
+                    slack_user_id=slack_user_id,
+                    slack_team_id=slack_team_id,
+                    thread_id=thread_id,
                 )
+
+                # Try publish immediately; publisher job retries on failure
+                success = await self._send_cloudevent(
+                    event_data, EventTypes.REQUEST_CREATED
+                )
+                if success:
+                    async with db_manager.get_session() as db:
+                        await mark_outbox_published(db, outbox_id)
+                    logger.info(
+                        "Request forwarded to Request Manager via CloudEvent",
+                        user_id=user_id,
+                        status="success",
+                    )
+                else:
+                    logger.error(
+                        "Failed to forward request to Request Manager via CloudEvent",
+                        user_id=user_id,
+                    )
+
+            await with_thread_lock(thread_key, db_manager, _locked_forward)
 
         except Exception as e:
             logger.error(

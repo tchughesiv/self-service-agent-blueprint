@@ -8,6 +8,8 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "self-service-agent.labels" . | nindent 4 }}
+  annotations:
+    kafka.eventing.knative.dev/delivery.order: ordered  # Per-partition FIFO for session ordering
 spec:
   broker: {{ .Values.requestManagement.knative.broker.name }}
   filter:
@@ -17,7 +19,7 @@ spec:
   subscriber:
     uri: http://{{ include "self-service-agent.fullname" . }}-request-manager.{{ .Release.Namespace }}.svc.cluster.local/api/v1/events/cloudevents
   delivery:
-    retry: 3
+    retry: 10
     backoffPolicy: exponential
     backoffDelay: PT1S
     # Dead letter handling is done automatically by Kafka Broker
@@ -30,6 +32,8 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "self-service-agent.labels" . | nindent 4 }}
+  annotations:
+    kafka.eventing.knative.dev/delivery.order: ordered  # Per-partition FIFO for session ordering
 spec:
   broker: {{ .Values.requestManagement.knative.broker.name }}
   filter:
@@ -39,7 +43,7 @@ spec:
   subscriber:
     uri: http://{{ include "self-service-agent.fullname" . }}-agent-service.{{ .Release.Namespace }}.svc.cluster.local/api/v1/events/cloudevents
   delivery:
-    retry: 3
+    retry: 10
     backoffPolicy: exponential
     backoffDelay: PT1S
     # Dead letter handling is done automatically by Kafka Broker
@@ -51,6 +55,8 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "self-service-agent.labels" . | nindent 4 }}
+  annotations:
+    kafka.eventing.knative.dev/delivery.order: ordered  # Per-partition FIFO for session ordering
 spec:
   broker: {{ .Values.requestManagement.knative.broker.name }}
   filter:
@@ -60,7 +66,7 @@ spec:
   subscriber:
     uri: http://{{ include "self-service-agent.fullname" . }}-integration-dispatcher.{{ .Release.Namespace }}.svc.cluster.local
   delivery:
-    retry: 3
+    retry: 10
     backoffPolicy: exponential
     backoffDelay: PT1S
     # Dead letter handling is done automatically by Kafka Broker
@@ -72,6 +78,8 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "self-service-agent.labels" . | nindent 4 }}
+  annotations:
+    kafka.eventing.knative.dev/delivery.order: ordered  # Per-partition FIFO for session ordering
 spec:
   broker: {{ .Values.requestManagement.knative.broker.name }}
   filter:
@@ -81,7 +89,7 @@ spec:
   subscriber:
     uri: http://{{ include "self-service-agent.fullname" . }}-agent-service.{{ .Release.Namespace }}.svc.cluster.local/api/v1/events/cloudevents
   delivery:
-    retry: 3
+    retry: 10
     backoffPolicy: exponential
     backoffDelay: PT1S
     # Dead letter handling is done automatically by Kafka Broker
@@ -94,6 +102,8 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "self-service-agent.labels" . | nindent 4 }}
+  annotations:
+    kafka.eventing.knative.dev/delivery.order: ordered  # Per-partition FIFO for session ordering
 spec:
   broker: {{ .Values.requestManagement.knative.broker.name }}
   filter:
@@ -103,9 +113,9 @@ spec:
   subscriber:
     uri: http://{{ include "self-service-agent.fullname" . }}-request-manager.{{ .Release.Namespace }}.svc.cluster.local/api/v1/events/cloudevents
   delivery:
-    retry: 2
+    retry: 10
     backoffPolicy: exponential
-    backoffDelay: PT0.5S
+    backoffDelay: PT1S
 ---
 # Trigger for immediate user notifications (request acknowledgment)
 apiVersion: eventing.knative.dev/v1
@@ -115,6 +125,8 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "self-service-agent.labels" . | nindent 4 }}
+  annotations:
+    kafka.eventing.knative.dev/delivery.order: ordered  # Per-partition FIFO for notification order
 spec:
   broker: {{ .Values.requestManagement.knative.broker.name }}
   filter:
@@ -135,6 +147,8 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "self-service-agent.labels" . | nindent 4 }}
+  annotations:
+    kafka.eventing.knative.dev/delivery.order: ordered  # Per-partition FIFO for notification order
 spec:
   broker: {{ .Values.requestManagement.knative.broker.name }}
   filter:
@@ -155,6 +169,8 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "self-service-agent.labels" . | nindent 4 }}
+  annotations:
+    kafka.eventing.knative.dev/delivery.order: ordered  # Per-partition FIFO for state consistency
 spec:
   broker: {{ .Values.requestManagement.knative.broker.name }}
   filter:
@@ -164,7 +180,7 @@ spec:
   subscriber:
     uri: http://{{ include "self-service-agent.fullname" . }}-agent-service.{{ .Release.Namespace }}.svc.cluster.local/api/v1/events/cloudevents
   delivery:
-    retry: 3
+    retry: 10
     backoffPolicy: exponential
     backoffDelay: PT1S
     # Dead letter handling is done automatically by Kafka Broker
@@ -177,6 +193,8 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "self-service-agent.labels" . | nindent 4 }}
+  annotations:
+    kafka.eventing.knative.dev/delivery.order: ordered  # Per-partition FIFO for session consistency
 spec:
   broker: {{ .Values.requestManagement.knative.broker.name }}
   filter:
@@ -186,7 +204,7 @@ spec:
   subscriber:
     uri: http://{{ include "self-service-agent.fullname" . }}-request-manager.{{ .Release.Namespace }}.svc.cluster.local/api/v1/events/cloudevents
   delivery:
-    retry: 3
+    retry: 5
     backoffPolicy: exponential
     backoffDelay: PT1S
     # Dead letter handling is done automatically by Kafka Broker
@@ -199,6 +217,8 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "self-service-agent.labels" . | nindent 4 }}
+  annotations:
+    kafka.eventing.knative.dev/delivery.order: ordered  # Per-partition FIFO for session consistency
 spec:
   broker: {{ .Values.requestManagement.knative.broker.name }}
   filter:
@@ -208,8 +228,8 @@ spec:
   subscriber:
     uri: http://{{ include "self-service-agent.fullname" . }}-request-manager.{{ .Release.Namespace }}.svc.cluster.local/api/v1/events/cloudevents
   delivery:
-    retry: 2
+    retry: 5
     backoffPolicy: exponential
-    backoffDelay: PT0.5S
+    backoffDelay: PT1S
     # Dead letter handling is done automatically by Kafka Broker
 {{- end }}

@@ -2,6 +2,9 @@
 
 __version__ = "0.1.0"
 
+# Export advisory lock (request-manager, integration-dispatcher)
+from .advisory_lock import with_advisory_lock
+
 # Export CloudEvent utilities
 from .cloudevent_utils import (
     CloudEventHandler,
@@ -17,6 +20,7 @@ from .database import (
     get_db_config,
     get_db_session,
     get_db_session_dependency,
+    get_db_utc_now,
 )
 
 # Export CloudEvent utilities
@@ -24,6 +28,7 @@ from .events import (
     CloudEventBuilder,
     CloudEventSender,
     EventTypes,
+    agent_response_event_id,
 )
 
 # Export FastAPI utilities
@@ -51,8 +56,30 @@ from .logging import (
     log_response,
 )
 
+# Export outbox (Step 0.25)
+from .outbox import (
+    SOURCE_SERVICE_INTEGRATION_DISPATCHER,
+    insert_outbox_event,
+    mark_outbox_failed,
+    mark_outbox_published,
+    reset_outbox_for_retry,
+)
+
+# Export request log ordering utilities
+from .request_log import (
+    get_request_created_at,
+    has_earlier_pending_or_processing,
+)
+
 # Export security utilities
 from .security import verify_slack_signature
+
+# Export session lock (agent cross-pod serialization)
+from .session_lock import (
+    acquire_agent_session_lock,
+    release_agent_session_lock,
+    session_id_to_lock_key,
+)
 
 # Export session management
 from .session_manager import BaseSessionManager
@@ -90,6 +117,13 @@ __all__ = [
     "get_db_config",
     "get_db_session",
     "get_db_session_dependency",
+    "get_db_utc_now",
+    "acquire_agent_session_lock",
+    "release_agent_session_lock",
+    "session_id_to_lock_key",
+    "with_advisory_lock",
+    "get_request_created_at",
+    "has_earlier_pending_or_processing",
     "HealthChecker",
     "HealthCheckResult",
     "simple_health_check",
@@ -106,8 +140,14 @@ __all__ = [
     "CloudEventBuilder",
     "CloudEventSender",
     "EventTypes",
+    "agent_response_event_id",
     "BaseSessionManager",
     "SessionCreate",
     "SessionResponse",
     "SessionUpdate",
+    "SOURCE_SERVICE_INTEGRATION_DISPATCHER",
+    "insert_outbox_event",
+    "mark_outbox_failed",
+    "mark_outbox_published",
+    "reset_outbox_for_retry",
 ]

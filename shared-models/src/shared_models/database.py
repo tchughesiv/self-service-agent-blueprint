@@ -2,7 +2,8 @@
 
 import os
 from contextlib import asynccontextmanager
-from typing import Any, AsyncGenerator, Dict, List, Optional, Type, TypeVar
+from datetime import datetime, timedelta, timezone
+from typing import Any, AsyncGenerator, Dict, List, Optional, Type, TypeVar, cast
 
 import psycopg
 import psycopg_pool
@@ -37,6 +38,13 @@ class DatabaseConfig:
         self.sync_pool_min_size = int(os.getenv("DB_SYNC_POOL_MIN_SIZE", "1"))
         self.sync_pool_max_size = int(os.getenv("DB_SYNC_POOL_MAX_SIZE", "5"))
         self.sync_pool_timeout = int(os.getenv("DB_SYNC_POOL_TIMEOUT", "30"))
+
+        # PostgreSQL session timeouts (ms). statement_timeout must exceed SESSION_LOCK_WAIT_TIMEOUT
+        # so lock operations are not cancelled (request-manager override sets this for lock polling).
+        self.statement_timeout_ms = int(os.getenv("DB_STATEMENT_TIMEOUT", "30000"))
+        self.idle_transaction_timeout_ms = int(
+            os.getenv("DB_IDLE_TRANSACTION_TIMEOUT", "300000")
+        )
 
         # Debug settings
         self.echo_sql = os.getenv("SQL_DEBUG", "false").lower() == "true"
@@ -98,11 +106,14 @@ class DatabaseManager:
             max_overflow=self.config.max_overflow,
             pool_timeout=self.config.pool_timeout,
             connect_args={
-                "command_timeout": 30,  # Connection timeout
+                # Per-query timeout; align with statement_timeout (request-manager overrides for lock wait).
+                "command_timeout": self.config.statement_timeout_ms // 1000,
                 "server_settings": {
                     "application_name": "self-service-agent",
-                    "statement_timeout": "30000",  # 30 second statement timeout
-                    "idle_in_transaction_session_timeout": "300000",  # 5 minute idle timeout
+                    "statement_timeout": str(self.config.statement_timeout_ms),
+                    "idle_in_transaction_session_timeout": str(
+                        self.config.idle_transaction_timeout_ms
+                    ),
                 },
             },
         )
@@ -302,7 +313,7 @@ class DatabaseManager:
 
         # Determine expected version from parameter, environment, or default
         if expected_version is None:
-            expected_version = os.getenv("EXPECTED_MIGRATION_VERSION", "003")
+            expected_version = os.getenv("EXPECTED_MIGRATION_VERSION", "001")
 
         start_time = time()
         logger.info(
@@ -520,8 +531,6 @@ class DatabaseUtils:
             True if this pod successfully claimed the event (can process it)
             False if another pod already claimed it (must skip processing)
         """
-        from datetime import datetime, timedelta, timezone
-
         from sqlalchemy import select, update
 
         from .models import ProcessedEvent
@@ -531,9 +540,12 @@ class DatabaseUtils:
             return False
 
         try:
-            # First, check if event already exists and is stale
+            # First, check if this processor's claim already exists and is stale
             existing_event = await db.execute(
-                select(ProcessedEvent).where(ProcessedEvent.event_id == event_id)
+                select(ProcessedEvent).where(
+                    ProcessedEvent.event_id == event_id,
+                    ProcessedEvent.processed_by == processed_by,
+                )
             )
             existing = existing_event.scalar_one_or_none()
 
@@ -554,13 +566,14 @@ class DatabaseUtils:
                         )
                         stmt = (
                             update(ProcessedEvent)
-                            .where(ProcessedEvent.event_id == event_id)
+                            .where(
+                                ProcessedEvent.event_id == event_id,
+                                ProcessedEvent.processed_by == processed_by,
+                            )
                             .values(
                                 processed_by=processed_by,
                                 processing_result="processing",
-                                created_at=datetime.now(
-                                    timezone.utc
-                                ),  # Reset timestamp
+                                created_at=func.now(),  # DB clock for multi-pod consistency
                             )
                         )
                         await db.execute(stmt)
@@ -636,6 +649,7 @@ class DatabaseUtils:
     async def update_processed_event(
         db: AsyncSession,
         event_id: str,
+        processed_by: str,
         request_id: Optional[str] = None,
         session_id: Optional[str] = None,
         processing_result: str = "success",
@@ -649,6 +663,7 @@ class DatabaseUtils:
         Args:
             db: Database session
             event_id: Unique event identifier
+            processed_by: Service name that claimed the event (composite key with event_id)
             request_id: Request ID (if available)
             session_id: Session ID (if available)
             processing_result: Result of processing (success/error)
@@ -661,12 +676,18 @@ class DatabaseUtils:
         if not event_id:
             logger.warning("Cannot update processed event without event_id")
             return
+        if not processed_by:
+            logger.warning("Cannot update processed event without processed_by")
+            return
 
         try:
             # Update the existing ProcessedEvent record (created by try_claim_event_for_processing)
             stmt = (
                 update(ProcessedEvent)
-                .where(ProcessedEvent.event_id == event_id)
+                .where(
+                    ProcessedEvent.event_id == event_id,
+                    ProcessedEvent.processed_by == processed_by,
+                )
                 .values(
                     request_id=request_id,
                     session_id=session_id,
@@ -690,6 +711,39 @@ class DatabaseUtils:
                 error=str(e),
             )
             await db.rollback()
+
+    @staticmethod
+    async def release_event_claim(
+        db: AsyncSession, event_id: str, processed_by: str
+    ) -> bool:
+        """Delete a ProcessedEvent claim so a retry can re-claim and process.
+
+        Use for retriable errors (503, timeout) where the broker will retry.
+        Marking as "error" would cause try_claim to skip the retry forever.
+        """
+        from sqlalchemy import delete
+
+        from .models import ProcessedEvent
+
+        if not event_id or not processed_by:
+            return False
+        try:
+            stmt = delete(ProcessedEvent).where(
+                ProcessedEvent.event_id == event_id,
+                ProcessedEvent.processed_by == processed_by,
+            )
+            await db.execute(stmt)
+            await db.commit()
+            logger.debug("Released event claim for retry", event_id=event_id)
+            return True
+        except Exception as e:
+            logger.error(
+                "Failed to release event claim",
+                event_id=event_id,
+                error=str(e),
+            )
+            await db.rollback()
+            return False
 
     @staticmethod
     async def delete_record(db: AsyncSession, record: T) -> bool:
@@ -782,6 +836,24 @@ def get_database_manager() -> DatabaseManager:
     if _db_manager is None:
         _db_manager = DatabaseManager()
     return _db_manager
+
+
+async def get_db_utc_now() -> datetime:
+    """Get current UTC timestamp from database (avoids pod clock skew for ordering).
+
+    Use this instead of datetime.now(timezone.utc) when timestamps must be comparable
+    across pods (e.g. agent_received_at for FIFO ordering).
+    """
+    db_manager = get_database_manager()
+    async with db_manager.get_session() as db:
+        result = await db.execute(text("SELECT now()"))
+        ts = result.scalar()
+        if ts is None:
+            raise RuntimeError("SELECT now() returned None")
+        # Ensure timezone-aware (PostgreSQL now() returns timestamptz)
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        return cast(datetime, ts)
 
 
 def get_db_config() -> DatabaseConfig:

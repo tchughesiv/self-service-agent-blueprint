@@ -75,9 +75,10 @@ async def _handle_session_create_or_get_event(
                 user_id=canonical_user_id,
                 event_id=event_id,
             )
-            # Publish SESSION_READY event
+            # Publish SESSION_READY event (convert ORM to SessionResponse for model_dump)
+            session_response = SessionResponse.model_validate(existing_session)
             await _publish_session_ready_event(
-                existing_session, correlation_id, event_id
+                session_response, correlation_id, event_id
             )
             return await create_cloudevent_response(
                 status="success",
@@ -137,8 +138,9 @@ async def _handle_session_create_or_get_event(
                     user_id=canonical_user_id,
                     event_id=event_id,
                 )
+                session_response = SessionResponse.model_validate(existing_session)
                 await _publish_session_ready_event(
-                    existing_session, correlation_id, event_id
+                    session_response, correlation_id, event_id
                 )
                 return await create_cloudevent_response(
                     status="success",
@@ -241,8 +243,11 @@ async def _publish_session_ready_event(
         event_sender = CloudEventSender(broker_url, "request-manager")
 
         session_data = session.model_dump(mode="json")
+        # Use deterministic event_id for dedup on retry (one ready per create)
+        event_id = f"session-ready-{correlation_id}" if correlation_id else None
         success = await event_sender.send_session_ready_event(
             session_data=session_data,
+            event_id=event_id,
             correlation_id=correlation_id,
             session_id=session.session_id,
         )

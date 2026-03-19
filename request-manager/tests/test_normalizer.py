@@ -36,6 +36,37 @@ class TestRequestNormalizer:
         assert normalized.integration_context["slack_user_id"] == "U123456789"
         assert normalized.requires_routing is True
 
+    def test_normalize_slack_request_uses_request_id_from_metadata(self) -> None:
+        """Test that request_id from metadata is used when present (integration-dispatcher dedup)."""
+        slack_request = SlackRequest(
+            user_id="user123",
+            content="Hello",
+            channel_id="C123",
+            thread_id="123.456",
+            slack_user_id="U123",
+            slack_team_id="T123",
+            metadata={"request_id": "slack-event-abc123"},
+        )
+        normalized = self.normalizer.normalize_request(slack_request, self.session_id)
+        assert normalized.request_id == "slack-event-abc123"
+
+    def test_normalize_slack_request_generates_uuid_when_no_metadata_request_id(
+        self,
+    ) -> None:
+        """Test that uuid is generated when metadata has no request_id."""
+        slack_request = SlackRequest(
+            user_id="user123",
+            content="Hello",
+            channel_id="C123",
+            thread_id="123.456",
+            slack_user_id="U123",
+            slack_team_id="T123",
+        )
+        normalized = self.normalizer.normalize_request(slack_request, self.session_id)
+        assert normalized.request_id is not None
+        assert len(normalized.request_id) == 36
+        assert normalized.request_id != "slack-event-abc123"
+
     def test_normalize_slack_request_dm(self) -> None:
         """Test Slack request normalization for DM requests (no channel_id)."""
         slack_request = SlackRequest(

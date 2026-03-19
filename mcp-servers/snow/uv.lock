@@ -1676,26 +1676,18 @@ dependencies = [
 requires-dist = [
     { name = "alembic", specifier = ">=1.13.0" },
     { name = "asyncpg", specifier = ">=0.29.0" },
-    { name = "black", marker = "extra == 'dev'", specifier = ">=25.1.0" },
     { name = "cloudevents", specifier = ">=1.6.0" },
     { name = "fastapi", specifier = ">=0.129.0" },
-    { name = "flake8", marker = "extra == 'dev'", specifier = ">=7.3.0" },
     { name = "httpx", specifier = ">=0.25.0" },
-    { name = "isort", marker = "extra == 'dev'", specifier = ">=5.13.0" },
     { name = "langchain", specifier = ">=1.2.7" },
     { name = "langgraph-checkpoint-postgres", specifier = ">=2.0.0" },
-    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.17.1" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.1.0" },
     { name = "psycopg-pool", specifier = ">=3.2.0" },
     { name = "pydantic", specifier = ">=2.5.0" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.4.1" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=1.2.0" },
-    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=6.2.1" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.0" },
     { name = "structlog", specifier = ">=23.2.0" },
     { name = "urllib3", specifier = ">=2.6.3" },
 ]
-provides-extras = ["dev"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1878,20 +1870,23 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "black", marker = "extra == 'dev'", specifier = ">=25.1.0" },
-    { name = "flake8", marker = "extra == 'dev'", specifier = ">=7.3.0" },
-    { name = "isort", marker = "extra == 'dev'", specifier = ">=5.13.0" },
-    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.17.1" },
     { name = "opentelemetry-api", specifier = ">=1.37.0" },
     { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.37.0" },
     { name = "opentelemetry-instrumentation-httpx", specifier = ">=0.58b0" },
     { name = "opentelemetry-sdk", specifier = ">=1.37.0" },
     { name = "protobuf", specifier = ">=6.33.5" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.4.1" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=1.2.0" },
-    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=6.2.1" },
 ]
-provides-extras = ["dev"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "black", specifier = ">=25.1.0" },
+    { name = "flake8", specifier = ">=7.3.0" },
+    { name = "isort", specifier = ">=5.13.0" },
+    { name = "mypy", specifier = ">=1.17.1" },
+    { name = "pytest", specifier = ">=8.4.1" },
+    { name = "pytest-asyncio", specifier = ">=1.2.0" },
+    { name = "pytest-cov", specifier = ">=6.2.1" },
+]
 
 [[package]]
 name = "typer"

@@ -5,6 +5,8 @@ from typing import Any, Optional, cast
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .exceptions import RequestLogCreationError
+
 
 async def create_request_log_entry_unified(
     request_id: str,
@@ -15,25 +17,18 @@ async def create_request_log_entry_unified(
     integration_type: str,
     integration_context: dict[str, Any] | None = None,
     db: AsyncSession | None = None,
-    set_pod_name: bool = True,
 ) -> None:
     """Create RequestLog entry for any API type.
 
-    Args:
-        set_pod_name: If True, set pod_name for requests that wait for responses (request-manager endpoints).
-                     If False, don't set pod_name (e.g., CloudEvent requests from integration-dispatcher).
+    At accept: status=pending, pod_name=NULL (pod_name set at dequeue when processing).
+    Raises RequestLogCreationError on failure (caller should return 503).
     """
+    from shared_models import configure_logging
+    from shared_models.models import RequestLog, RequestStatus
+
+    logger = configure_logging("request-manager")
+
     try:
-        from shared_models.models import RequestLog
-
-        # Get pod name for tracking which pod initiated the request (only for requests that wait for responses)
-        pod_name = None
-        if set_pod_name:
-            from .communication_strategy import get_pod_name
-
-            pod_name = get_pod_name()
-
-        # Create RequestLog entry
         request_log = RequestLog(
             request_id=request_id,
             session_id=session_id,
@@ -50,21 +45,22 @@ async def create_request_log_entry_unified(
                 "request_type": request_type,
                 "integration_context": integration_context or {},
             },
-            agent_id=None,  # Will be set by Agent Service
-            processing_time_ms=None,  # Will be set by Agent Service
-            response_content=None,  # Will be set by Agent Service
-            response_metadata=None,  # Will be set by Agent Service
-            cloudevent_id=None,  # Will be set when CloudEvent is sent
-            cloudevent_type=None,  # Will be set when CloudEvent is sent
-            completed_at=None,  # Will be set by Agent Service
-            pod_name=pod_name,  # Track which pod initiated this request
+            agent_id=None,
+            processing_time_ms=None,
+            response_content=None,
+            response_metadata=None,
+            cloudevent_id=None,
+            cloudevent_type=None,
+            completed_at=None,
+            status=RequestStatus.PENDING.value,
+            processing_started_at=None,
+            pod_name=None,
         )
 
         if db:
             db.add(request_log)
             await db.commit()
         else:
-            # For backward compatibility with existing code that doesn't pass db
             from shared_models import get_database_manager
 
             db_manager = get_database_manager()
@@ -72,29 +68,20 @@ async def create_request_log_entry_unified(
                 session.add(request_log)
                 await session.commit()
 
-        from shared_models import configure_logging
-
-        logger = configure_logging("request-manager")
-
         logger.debug(
             "RequestLog entry created",
             request_id=request_id,
             session_id=session_id,
             request_type=request_type,
         )
-
     except Exception as e:
-        from shared_models import configure_logging
-
-        logger = configure_logging("request-manager")
-
         logger.warning(
             "Failed to create RequestLog entry",
             request_id=request_id,
             request_type=request_type,
             error=str(e),
         )
-        # Don't raise exception - RequestLog creation failure shouldn't stop request processing
+        raise RequestLogCreationError(f"Failed to create request record: {e}") from e
 
 
 async def try_claim_event_for_processing(
@@ -141,6 +128,7 @@ async def record_processed_event(
     await DatabaseUtils.update_processed_event(
         db,
         event_id,
+        processed_by,
         request_id=request_id,
         session_id=session_id,
         processing_result=processing_result,

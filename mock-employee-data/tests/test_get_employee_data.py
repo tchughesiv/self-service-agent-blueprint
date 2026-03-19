@@ -10,7 +10,7 @@ from mock_employee_data import MOCK_EMPLOYEE_DATA, get_employee_data
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 
-def test_without_test_users() -> bool:
+def test_without_test_users() -> None:
     """Test that get_employee_data() returns original data when TEST_USERS is not set."""
     # Ensure TEST_USERS is not set
     if "TEST_USERS" in os.environ:
@@ -24,10 +24,10 @@ def test_without_test_users() -> bool:
     print(f"Data matches: {result == MOCK_EMPLOYEE_DATA}")
     print()
 
-    return result == MOCK_EMPLOYEE_DATA
+    assert result == MOCK_EMPLOYEE_DATA
 
 
-def test_with_test_users() -> bool:
+def test_with_test_users() -> None:
     """Test that get_employee_data() includes TEST_USERS when set."""
     # Set TEST_USERS environment variable
     test_emails = "tgolan@redhat.com,jdenver@redhat.com"
@@ -60,14 +60,12 @@ def test_with_test_users() -> bool:
     )
     print()
 
-    return (
-        len(result) == len(MOCK_EMPLOYEE_DATA) + 2
-        and len(test_users_found) == 2
-        and all(email in result for email in MOCK_EMPLOYEE_DATA.keys())
-    )
+    assert len(result) == len(MOCK_EMPLOYEE_DATA) + 2
+    assert len(test_users_found) == 2
+    assert all(email in result for email in MOCK_EMPLOYEE_DATA.keys())
 
 
-def test_existing_user_not_duplicated() -> bool:
+def test_existing_user_not_duplicated() -> None:
     """Test that existing users in MOCK_EMPLOYEE_DATA are not duplicated."""
     # Use an existing email from MOCK_EMPLOYEE_DATA
     existing_email = "alice.johnson@company.com"
@@ -90,11 +88,9 @@ def test_existing_user_not_duplicated() -> bool:
     print(f"New user added: {'newuser@redhat.com' in result}")
     print()
 
-    return (
-        len(result) == len(MOCK_EMPLOYEE_DATA) + 1
-        and alice_data == original_alice_data
-        and "newuser@redhat.com" in result
-    )
+    assert len(result) == len(MOCK_EMPLOYEE_DATA) + 1
+    assert alice_data == original_alice_data
+    assert "newuser@redhat.com" in result
 
 
 def main() -> int:
@@ -102,24 +98,21 @@ def main() -> int:
     print("Testing get_employee_data() function with TEST_USERS support")
     print("=" * 60)
 
-    test1_passed = test_without_test_users()
-    test2_passed = test_with_test_users()
-    test3_passed = test_existing_user_not_duplicated()
-
-    print("=== Test Results ===")
-    print(f"Test 1 (without TEST_USERS): {'PASS' if test1_passed else 'FAIL'}")
-    print(f"Test 2 (with TEST_USERS): {'PASS' if test2_passed else 'FAIL'}")
-    print(
-        f"Test 3 (existing user not duplicated): {'PASS' if test3_passed else 'FAIL'}"
-    )
-    print()
-
-    if all([test1_passed, test2_passed, test3_passed]):
-        print("🎉 All tests PASSED!")
-        return 0
-    else:
+    try:
+        test_without_test_users()
+        test_with_test_users()
+        test_existing_user_not_duplicated()
+    except AssertionError:
         print("❌ Some tests FAILED!")
         return 1
+
+    print("=== Test Results ===")
+    print("Test 1 (without TEST_USERS): PASS")
+    print("Test 2 (with TEST_USERS): PASS")
+    print("Test 3 (existing user not duplicated): PASS")
+    print()
+    print("🎉 All tests PASSED!")
+    return 0
 
 
 if __name__ == "__main__":

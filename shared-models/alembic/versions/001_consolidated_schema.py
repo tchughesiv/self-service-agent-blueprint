@@ -1,17 +1,25 @@
-"""Initial database schema for self-service agent system
+"""Consolidated database schema for self-service agent system.
 
-Creates all required tables for the self-service agent system including:
-- Users table with canonical UUID-based user_id
-- Request sessions and logging with token tracking
-- User integration configurations and smart defaults
-- Integration credentials
-- Delivery logs and processed events
-- User integration mappings
-- PostgreSQL advisory lock function
+Single migration creating the full schema. Use when starting fresh (pre-production).
+Replaces migrations 001-004.
+
+Note: request_id, cloudevent_id, and last_request_id use VARCHAR(255) to accommodate
+email Message-IDs (e.g. <CAPbJ+...@mail.gmail.com>) which exceed UUID length (36).
+
+Creates:
+- Enums: integrationtype, sessionstatus, deliverystatus
+- users, request_sessions (with version, partial unique for one active per user/integration)
+- request_logs (with status, processing_started_at, indexes, updated_at trigger)
+- user_integration_configs, integration_credentials, delivery_logs
+- processed_events with UNIQUE(event_id, processed_by) for per-processor claims
+- integration_default_configs
+- user_integration_mappings (with partial unique for __NOT_FOUND__ sentinels)
+- pod_heartbeats, event_outbox
+- pg_advisory_lock_held function
 
 Revision ID: 001
 Revises:
-Create Date: 2024-01-01 00:00:00.000000
+Create Date: 2025-01-01 00:00:00.000000
 
 """
 
@@ -21,7 +29,7 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-# revision identifiers, used by Alembic.
+# revision identifiers
 revision: str = "001"
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
@@ -29,11 +37,10 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    """Upgrade database schema."""
-    # Create enums using raw SQL to avoid SQLAlchemy auto-management issues
+    """Create full database schema."""
     connection = op.get_bind()
 
-    # Create enums if they don't exist - values must match the model enums exactly
+    # Create enums
     enums_to_create = [
         (
             "integrationtype",
@@ -53,38 +60,25 @@ def upgrade() -> None:
         ("sessionstatus", ["ACTIVE", "INACTIVE", "EXPIRED", "ARCHIVED"]),
         ("deliverystatus", ["PENDING", "DELIVERED", "FAILED", "RETRYING", "EXPIRED"]),
     ]
-
-    # Create enums using DO blocks to handle IF NOT EXISTS logic
-    try:
-        for enum_name, enum_values in enums_to_create:
-            values_str = "', '".join(enum_values)
-            connection.execute(
-                sa.text(
-                    f"""
-                    DO $$ BEGIN
-                        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = '{enum_name}') THEN
-                            CREATE TYPE {enum_name} AS ENUM ('{values_str}');
-                        END IF;
-                    END $$;
+    for enum_name, enum_values in enums_to_create:
+        values_str = "', '".join(enum_values)
+        connection.execute(
+            sa.text(
+                f"""
+                DO $$ BEGIN
+                    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = '{enum_name}') THEN
+                        CREATE TYPE {enum_name} AS ENUM ('{values_str}');
+                    END IF;
+                END $$;
                 """
-                )
             )
+        )
 
-    except Exception:
-        import traceback
+    integration_type_enum = postgresql.ENUM(name="integrationtype", create_type=False)
+    session_status_enum = postgresql.ENUM(name="sessionstatus", create_type=False)
+    delivery_status_enum = postgresql.ENUM(name="deliverystatus", create_type=False)
 
-        traceback.print_exc()
-        raise
-
-    # Use PostgreSQL ENUM type that references existing enums without creating them
-    from sqlalchemy.dialects.postgresql import ENUM
-
-    # These reference the enums we created above - no values needed since they exist
-    integration_type_enum = ENUM(name="integrationtype", create_type=False)
-    session_status_enum = ENUM(name="sessionstatus", create_type=False)
-    delivery_status_enum = ENUM(name="deliverystatus", create_type=False)
-
-    # Create users table
+    # users
     op.create_table(
         "users",
         sa.Column(
@@ -109,7 +103,7 @@ def upgrade() -> None:
     )
     op.create_index("ix_users_primary_email", "users", ["primary_email"], unique=True)
 
-    # Create request_sessions table
+    # request_sessions (with version and partial unique from 003)
     op.create_table(
         "request_sessions",
         sa.Column("id", sa.Integer(), nullable=False),
@@ -124,21 +118,34 @@ def upgrade() -> None:
         sa.Column("channel_id", sa.String(length=255), nullable=True),
         sa.Column("thread_id", sa.String(length=255), nullable=True),
         sa.Column("integration_metadata", sa.JSON(), nullable=True),
-        sa.Column("total_requests", sa.Integer(), nullable=False),
+        sa.Column(
+            "total_requests",
+            sa.Integer(),
+            nullable=False,
+            server_default="0",
+        ),
         sa.Column(
             "last_request_at", postgresql.TIMESTAMP(timezone=True), nullable=True
         ),
         sa.Column("expires_at", postgresql.TIMESTAMP(timezone=True), nullable=True),
-        sa.Column("created_at", postgresql.TIMESTAMP(timezone=True), nullable=False),
-        sa.Column("updated_at", postgresql.TIMESTAMP(timezone=True), nullable=False),
-        # Additional fields
+        sa.Column(
+            "created_at",
+            postgresql.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+        ),
+        sa.Column(
+            "updated_at",
+            postgresql.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+        ),
         sa.Column("external_session_id", sa.String(length=255), nullable=True),
         sa.Column("current_agent_id", sa.String(length=255), nullable=True),
         sa.Column("conversation_thread_id", sa.String(length=255), nullable=True),
         sa.Column("user_context", sa.JSON(), nullable=True),
         sa.Column("conversation_context", sa.JSON(), nullable=True),
-        sa.Column("last_request_id", sa.String(length=36), nullable=True),
-        # Token tracking fields
+        sa.Column("last_request_id", sa.String(length=255), nullable=True),
         sa.Column(
             "total_input_tokens", sa.Integer(), nullable=False, server_default="0"
         ),
@@ -165,6 +172,7 @@ def upgrade() -> None:
             nullable=False,
             server_default="0",
         ),
+        sa.Column("version", sa.Integer(), nullable=False, server_default="0"),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_request_sessions")),
         sa.UniqueConstraint("session_id", name=op.f("uq_request_sessions_session_id")),
         sa.ForeignKeyConstraint(
@@ -179,12 +187,25 @@ def upgrade() -> None:
     op.create_index(
         "ix_request_sessions_user_id", "request_sessions", ["user_id"], unique=False
     )
+    op.create_index(
+        "ix_request_sessions_version",
+        "request_sessions",
+        ["version"],
+        unique=False,
+    )
+    op.execute(
+        """
+        CREATE UNIQUE INDEX idx_one_active_session_per_user_integration
+        ON request_sessions (user_id, integration_type)
+        WHERE status = 'ACTIVE'
+        """
+    )
 
-    # Create request_logs table
+    # request_logs (with status, processing_started_at from 004)
     op.create_table(
         "request_logs",
         sa.Column("id", sa.Integer(), nullable=False),
-        sa.Column("request_id", sa.String(length=36), nullable=False),
+        sa.Column("request_id", sa.String(length=255), nullable=False),
         sa.Column("session_id", sa.String(length=36), nullable=False),
         sa.Column("request_type", sa.String(length=50), nullable=False),
         sa.Column("request_content", sa.Text(), nullable=False),
@@ -193,12 +214,33 @@ def upgrade() -> None:
         sa.Column("processing_time_ms", sa.Integer(), nullable=True),
         sa.Column("response_content", sa.Text(), nullable=True),
         sa.Column("response_metadata", sa.JSON(), nullable=True),
-        sa.Column("cloudevent_id", sa.String(length=36), nullable=True),
+        sa.Column("cloudevent_id", sa.String(length=255), nullable=True),
         sa.Column("cloudevent_type", sa.String(length=100), nullable=True),
         sa.Column("pod_name", sa.String(255), nullable=True),
         sa.Column("completed_at", postgresql.TIMESTAMP(timezone=True), nullable=True),
-        sa.Column("created_at", postgresql.TIMESTAMP(timezone=True), nullable=False),
-        sa.Column("updated_at", postgresql.TIMESTAMP(timezone=True), nullable=False),
+        sa.Column(
+            "created_at",
+            postgresql.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+        ),
+        sa.Column(
+            "updated_at",
+            postgresql.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+        ),
+        sa.Column(
+            "status",
+            sa.String(50),
+            nullable=False,
+            server_default="completed",
+        ),
+        sa.Column(
+            "processing_started_at",
+            postgresql.TIMESTAMP(timezone=True),
+            nullable=True,
+        ),
         sa.ForeignKeyConstraint(
             ["session_id"],
             ["request_sessions.session_id"],
@@ -217,8 +259,44 @@ def upgrade() -> None:
     op.create_index(
         "ix_request_logs_pod_name", "request_logs", ["pod_name"], unique=False
     )
+    op.create_index(
+        "ix_request_logs_session_status_created",
+        "request_logs",
+        ["session_id", "status", "created_at"],
+        unique=False,
+    )
+    op.create_index(
+        "ix_request_logs_status_processing_started",
+        "request_logs",
+        ["status", "processing_started_at"],
+        postgresql_where=sa.text("status = 'processing'"),
+    )
 
-    # Create user_integration_configs table
+    # request_logs updated_at trigger
+    op.execute(
+        sa.text(
+            """
+            CREATE OR REPLACE FUNCTION set_request_logs_updated_at()
+            RETURNS TRIGGER AS $$
+            BEGIN
+                NEW.updated_at = CURRENT_TIMESTAMP;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+            """
+        )
+    )
+    op.execute(
+        sa.text(
+            """
+            CREATE TRIGGER trg_request_logs_updated_at
+            BEFORE UPDATE ON request_logs
+            FOR EACH ROW EXECUTE PROCEDURE set_request_logs_updated_at();
+            """
+        )
+    )
+
+    # user_integration_configs
     op.create_table(
         "user_integration_configs",
         sa.Column("id", sa.Integer(), nullable=False),
@@ -234,8 +312,18 @@ def upgrade() -> None:
         sa.Column("retry_count", sa.Integer(), nullable=False),
         sa.Column("retry_delay_seconds", sa.Integer(), nullable=False),
         sa.Column("created_by", sa.String(length=255), nullable=True),
-        sa.Column("created_at", postgresql.TIMESTAMP(timezone=True), nullable=False),
-        sa.Column("updated_at", postgresql.TIMESTAMP(timezone=True), nullable=False),
+        sa.Column(
+            "created_at",
+            postgresql.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+        ),
+        sa.Column(
+            "updated_at",
+            postgresql.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+        ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_user_integration_configs")),
         sa.UniqueConstraint("user_id", "integration_type", name="uq_user_integration"),
         sa.ForeignKeyConstraint(
@@ -257,7 +345,7 @@ def upgrade() -> None:
         unique=False,
     )
 
-    # Create integration_credentials table
+    # integration_credentials
     op.create_table(
         "integration_credentials",
         sa.Column("id", sa.Integer(), nullable=False),
@@ -266,28 +354,36 @@ def upgrade() -> None:
         sa.Column("encrypted_value", sa.Text(), nullable=False),
         sa.Column("description", sa.Text(), nullable=True),
         sa.Column("created_by", sa.String(length=255), nullable=True),
-        sa.Column("created_at", postgresql.TIMESTAMP(timezone=True), nullable=False),
-        sa.Column("updated_at", postgresql.TIMESTAMP(timezone=True), nullable=False),
+        sa.Column(
+            "created_at",
+            postgresql.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+        ),
+        sa.Column(
+            "updated_at",
+            postgresql.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+        ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_integration_credentials")),
         sa.UniqueConstraint(
             "integration_type", "credential_name", name="uq_integration_credential"
         ),
     )
 
-    # Create delivery_logs table
+    # delivery_logs
     op.create_table(
         "delivery_logs",
         sa.Column("id", sa.Integer(), nullable=False),
-        sa.Column("request_id", sa.String(length=36), nullable=False),
+        sa.Column("request_id", sa.String(length=255), nullable=False),
         sa.Column("session_id", sa.String(length=36), nullable=False),
         sa.Column(
             "user_id",
             postgresql.UUID(as_uuid=False),
             nullable=False,
         ),
-        sa.Column(
-            "integration_config_id", sa.Integer(), nullable=True
-        ),  # Allow null for smart defaults
+        sa.Column("integration_config_id", sa.Integer(), nullable=True),
         sa.Column("integration_type", integration_type_enum, nullable=False),
         sa.Column("subject", sa.Text(), nullable=True),
         sa.Column("content", sa.Text(), nullable=False),
@@ -305,8 +401,18 @@ def upgrade() -> None:
         sa.Column("error_message", sa.Text(), nullable=True),
         sa.Column("error_details", sa.JSON(), nullable=True),
         sa.Column("integration_metadata", sa.JSON(), nullable=True),
-        sa.Column("created_at", postgresql.TIMESTAMP(timezone=True), nullable=False),
-        sa.Column("updated_at", postgresql.TIMESTAMP(timezone=True), nullable=False),
+        sa.Column(
+            "created_at",
+            postgresql.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+        ),
+        sa.Column(
+            "updated_at",
+            postgresql.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+        ),
         sa.ForeignKeyConstraint(
             ["integration_config_id"],
             ["user_integration_configs.id"],
@@ -332,7 +438,7 @@ def upgrade() -> None:
         "ix_delivery_logs_user_id", "delivery_logs", ["user_id"], unique=False
     )
 
-    # Create processed_events table
+    # processed_events - UNIQUE(event_id, processed_by) from the start (no legacy constraint)
     op.create_table(
         "processed_events",
         sa.Column("id", sa.Integer(), nullable=False),
@@ -344,13 +450,25 @@ def upgrade() -> None:
         sa.Column("processed_by", sa.String(length=100), nullable=False),
         sa.Column("processing_result", sa.String(length=50), nullable=False),
         sa.Column("error_message", sa.Text(), nullable=True),
-        sa.Column("created_at", postgresql.TIMESTAMP(timezone=True), nullable=False),
-        sa.Column("updated_at", postgresql.TIMESTAMP(timezone=True), nullable=False),
+        sa.Column(
+            "created_at",
+            postgresql.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+        ),
+        sa.Column(
+            "updated_at",
+            postgresql.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+        ),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("event_id"),
+        sa.UniqueConstraint(
+            "event_id",
+            "processed_by",
+            name="uq_processed_events_event_id_processed_by",
+        ),
     )
-
-    # Create indexes for processed_events table
     op.create_index(
         "ix_processed_events_event_id", "processed_events", ["event_id"], unique=False
     )
@@ -367,7 +485,7 @@ def upgrade() -> None:
         unique=False,
     )
 
-    # Create integration_default_configs table
+    # integration_default_configs
     op.create_table(
         "integration_default_configs",
         sa.Column("id", sa.Integer(), nullable=False),
@@ -378,13 +496,23 @@ def upgrade() -> None:
         sa.Column("retry_count", sa.Integer(), nullable=False),
         sa.Column("retry_delay_seconds", sa.Integer(), nullable=False),
         sa.Column("created_by", sa.String(length=255), nullable=True),
-        sa.Column("created_at", postgresql.TIMESTAMP(timezone=True), nullable=False),
-        sa.Column("updated_at", postgresql.TIMESTAMP(timezone=True), nullable=False),
+        sa.Column(
+            "created_at",
+            postgresql.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+        ),
+        sa.Column(
+            "updated_at",
+            postgresql.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+        ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_integration_default_configs")),
         sa.UniqueConstraint("integration_type", name="uq_integration_default_type"),
     )
 
-    # Create user_integration_mappings table
+    # user_integration_mappings (with partial unique from 002)
     op.create_table(
         "user_integration_mappings",
         sa.Column("id", sa.Integer(), nullable=False),
@@ -401,7 +529,12 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.Column("last_validated_at", sa.TIMESTAMP(timezone=True), nullable=True),
-        sa.Column("validation_attempts", sa.Integer(), nullable=False, default=0),
+        sa.Column(
+            "validation_attempts",
+            sa.Integer(),
+            nullable=False,
+            server_default="0",
+        ),
         sa.Column("last_validation_error", sa.Text(), nullable=True),
         sa.Column("created_by", sa.String(length=255), nullable=True, default="system"),
         sa.Column(
@@ -423,8 +556,6 @@ def upgrade() -> None:
             name=op.f("fk_user_integration_mappings_user_id"),
         ),
     )
-
-    # Create indexes for user_integration_mappings
     op.create_index(
         "ix_user_integration_mapping_email_type",
         "user_integration_mappings",
@@ -453,20 +584,77 @@ def upgrade() -> None:
         ["integration_user_id", "integration_type"],
         unique=False,
     )
-
-    # Create unique constraints for user_integration_mappings
     op.create_unique_constraint(
         "uq_user_integration_mapping",
         "user_integration_mappings",
         ["user_id", "integration_type"],
     )
-    op.create_unique_constraint(
-        "uq_integration_user_id_type",
-        "user_integration_mappings",
-        ["integration_user_id", "integration_type"],
+    op.execute(
+        """
+        CREATE UNIQUE INDEX uq_integration_user_id_type
+        ON user_integration_mappings (integration_user_id, integration_type)
+        WHERE integration_user_id != '__NOT_FOUND__';
+        """
     )
 
-    # Create pg_advisory_lock_held function
+    # pod_heartbeats (from 004)
+    op.create_table(
+        "pod_heartbeats",
+        sa.Column("pod_name", sa.String(length=255), nullable=False),
+        sa.Column(
+            "last_check_in_at",
+            postgresql.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+        ),
+        sa.PrimaryKeyConstraint("pod_name", name=op.f("pk_pod_heartbeats")),
+    )
+
+    # event_outbox (from 004)
+    op.create_table(
+        "event_outbox",
+        sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
+        sa.Column("source_service", sa.String(length=255), nullable=False),
+        sa.Column("event_type", sa.String(length=255), nullable=False),
+        sa.Column("idempotency_key", sa.String(length=512), nullable=False),
+        sa.Column(
+            "thread_order_key",
+            sa.String(length=512),
+            nullable=True,
+        ),
+        sa.Column("payload", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+        sa.Column(
+            "status", sa.String(length=50), nullable=False, server_default="pending"
+        ),
+        sa.Column("last_error", sa.Text(), nullable=True),
+        sa.Column("retry_count", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column(
+            "created_at",
+            postgresql.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+        ),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_event_outbox")),
+    )
+    op.create_index(
+        "ix_event_outbox_status_created",
+        "event_outbox",
+        ["status", "created_at"],
+        unique=False,
+    )
+    op.create_index(
+        "ix_event_outbox_thread_order_created",
+        "event_outbox",
+        ["thread_order_key", "created_at"],
+        unique=False,
+    )
+    op.create_unique_constraint(
+        "uq_event_outbox_source_type_idempotency",
+        "event_outbox",
+        ["source_service", "event_type", "idempotency_key"],
+    )
+
+    # pg_advisory_lock_held
     op.execute(
         """
         CREATE OR REPLACE FUNCTION pg_advisory_lock_held(key BIGINT)
@@ -476,8 +664,6 @@ def upgrade() -> None:
         DECLARE
             lock_count INTEGER;
         BEGIN
-            -- Check if the current session holds the advisory lock
-            -- For single-argument pg_try_advisory_lock(bigint), objid matches the key
             SELECT COUNT(*)
             INTO lock_count
             FROM pg_locks
@@ -485,34 +671,63 @@ def upgrade() -> None:
               AND objid = key::BIGINT
               AND pid = pg_backend_pid()
               AND granted = TRUE;
-
             RETURN lock_count > 0;
         END;
         $$;
-    """
+        """
     )
 
 
 def downgrade() -> None:
-    """Downgrade database schema."""
-    # Drop function
+    """Drop all schema objects."""
     op.execute("DROP FUNCTION IF EXISTS pg_advisory_lock_held(BIGINT);")
 
-    # Drop tables in reverse order
+    op.drop_constraint(
+        "uq_event_outbox_source_type_idempotency",
+        "event_outbox",
+        type_="unique",
+    )
+    op.drop_index("ix_event_outbox_thread_order_created", table_name="event_outbox")
+    op.drop_index("ix_event_outbox_status_created", table_name="event_outbox")
+    op.drop_table("event_outbox")
+
+    op.drop_table("pod_heartbeats")
+
+    op.drop_index("uq_integration_user_id_type", "user_integration_mappings")
+    op.drop_constraint(
+        "uq_user_integration_mapping",
+        "user_integration_mappings",
+        type_="unique",
+    )
     op.drop_table("user_integration_mappings")
+
     op.drop_table("integration_default_configs")
     op.drop_table("processed_events")
     op.drop_table("delivery_logs")
     op.drop_table("integration_credentials")
     op.drop_table("user_integration_configs")
+
+    op.execute(
+        sa.text("DROP TRIGGER IF EXISTS trg_request_logs_updated_at ON request_logs")
+    )
+    op.execute(sa.text("DROP FUNCTION IF EXISTS set_request_logs_updated_at()"))
+
+    op.drop_index(
+        "ix_request_logs_status_processing_started",
+        table_name="request_logs",
+    )
+    op.drop_index(
+        "ix_request_logs_session_status_created",
+        table_name="request_logs",
+    )
     op.drop_table("request_logs")
+
+    op.execute("DROP INDEX IF EXISTS idx_one_active_session_per_user_integration")
     op.drop_table("request_sessions")
     op.drop_table("users")
 
-    # Drop enums using raw SQL
-    connection = op.get_bind()
-
     for enum_name in ["deliverystatus", "sessionstatus", "integrationtype"]:
+        connection = op.get_bind()
         result = connection.execute(
             sa.text(f"SELECT 1 FROM pg_type WHERE typname = '{enum_name}'")
         )

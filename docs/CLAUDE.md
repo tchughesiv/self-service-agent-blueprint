@@ -179,6 +179,7 @@ make helm-install-test NAMESPACE=dev
 ### Core Documentation
 - **`docs/HELM_EXPORT_ANSIBLE.md`**: Demo deployment (helm export + Ansible), env vars, export-then-apply
 - **`docs/API_REFERENCE.md`**: Complete API documentation and endpoints
+- **`docs/SESSION_SERIALIZATION_RUNBOOK.md`**: Session request serialization (one-per-session FIFO, reclaim) — env vars, stuck/failed behavior, test strategy
 - **`guides/INTEGRATION_GUIDE.md`**: Complete integration and request management guide
 - **`guides/SAFETY_SHIELDS_GUIDE.md`**: Safety shields and content moderation configuration
 - **`guides/PERFORMANCE_SCALING_GUIDE.md`**: Performance characteristics, scaling strategies, and optimization approaches

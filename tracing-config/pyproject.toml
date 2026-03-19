@@ -14,17 +14,6 @@ dependencies = [
     "opentelemetry-instrumentation-httpx>=0.58b0",
 ]
 
-[project.optional-dependencies]
-dev = [
-    "pytest>=8.4.1",
-    "pytest-asyncio>=1.2.0",
-    "pytest-cov>=6.2.1",
-    "black>=25.1.0",
-    "flake8>=7.3.0",
-    "isort>=5.13.0",
-    "mypy>=1.17.1",
-]
-
 [project.scripts]
 tracing-config = "tracing_config:main"
 
@@ -59,3 +48,14 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = "tracing_config.*"
 disable_error_code = ["attr-defined"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.1",
+    "pytest-asyncio>=1.2.0",
+    "pytest-cov>=6.2.1",
+    "black>=25.1.0",
+    "flake8>=7.3.0",
+    "isort>=5.13.0",
+    "mypy>=1.17.1",
+]

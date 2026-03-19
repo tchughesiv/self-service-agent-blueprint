@@ -18,17 +18,6 @@ dependencies = [
 [tool.hatch.build.targets.wheel]
 packages = ["src/shared_clients"]
 
-[project.optional-dependencies]
-dev = [
-    "pytest>=8.4.1",
-    "pytest-asyncio>=1.2.0",
-    "pytest-cov>=6.2.1",
-    "black>=25.1.0",
-    "flake8>=7.3.0",
-    "isort>=5.13.0",
-    "mypy>=1.17.1"
-]
-
 [tool.black]
 line-length = 88
 target-version = ['py312']
@@ -52,10 +41,11 @@ self-service-agent-shared-models = { path = "../shared-models" }
 
 [dependency-groups]
 dev = [
+    "pytest>=8.4.1",
+    "pytest-asyncio>=1.2.0",
+    "pytest-cov>=6.2.1",
     "black>=25.1.0",
     "flake8>=7.3.0",
     "isort>=5.13.0",
     "mypy>=1.17.1",
-    "pytest>=8.4.2",
-    "pytest-asyncio>=1.2.0",
 ]

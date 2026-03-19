@@ -15,15 +15,6 @@ dependencies = [
     "self-service-agent-shared-models",
 ]
 
-[project.optional-dependencies]
-dev = [
-    "pytest",
-    "pytest-cov",
-    "black",
-    "flake8",
-    "mypy",
-]
-
 [tool.hatch.build.targets.wheel]
 packages = ["test"]
 

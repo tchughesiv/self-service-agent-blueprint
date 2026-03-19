@@ -1,6 +1,6 @@
 # Makefile for RAG Deployment
 ifeq ($(NAMESPACE),)
-ifneq (,$(filter namespace install uninstall helm-install-test helm-install-prod helm-install-demo helm-export-demo helm-export-validate-demo ansible-apply-demo ansible-teardown-demo helm-uninstall helm-status helm-cleanup-eventing helm-cleanup-jobs deploy-email-server undeploy-email-server print-urls verify-triggers jaeger-deploy jaeger-undeploy,$(MAKECMDGOALS)))
+ifneq (,$(filter namespace install uninstall helm-install-test helm-install-prod helm-install-demo helm-export-demo helm-export-validate-demo ansible-apply-demo ansible-teardown-demo helm-uninstall helm-status helm-cleanup-eventing helm-cleanup-jobs deploy-email-server undeploy-email-server print-urls verify-triggers jaeger-deploy jaeger-undeploy test-session-serialization-integration test-session-reclaim-integration test-session-background-reclaim-integration,$(MAKECMDGOALS)))
 $(error NAMESPACE is not set)
 endif
 endif
@@ -219,7 +219,6 @@ helm_replica_count_args = \
 	$(if $(REPLICA_COUNT),--set llamastack.postInitScaling.enabled=true,) \
 	$(if $(REPLICA_COUNT),--set llamastack.postInitScaling.targetReplicas=$(REPLICA_COUNT),) \
 	$(if $(REPLICA_COUNT),--set mcp-servers.mcp-servers.self-service-agent-snow.replicas=$(REPLICA_COUNT),) \
-	$(if $(REPLICA_COUNT),--set requestManagement.knative.mockEventing.replicas=$(REPLICA_COUNT),) \
 	$(if $(REPLICA_COUNT),--set requestManagement.kafka.replicas=$(REPLICA_COUNT),) \
 	$(if $(REPLICA_COUNT),--set requestManagement.requestManager.replicas=$(REPLICA_COUNT),) \
 	$(if $(REPLICA_COUNT),--set requestManagement.integrationDispatcher.replicas=$(REPLICA_COUNT),) \
@@ -340,7 +339,6 @@ help:
 	@echo ""
 	@echo "Test Commands:"
 	@echo "  test-all                            - Run tests for all projects"
-	@echo "  test                                - Run tests for self-service agent"
 	@echo ""
 	@echo "ServiceNow PDI Commands:"
 	@echo "  servicenow-wake-install                      - Install Playwright for ServiceNow PDI wake-up"
@@ -375,6 +373,9 @@ help:
 	@echo "  test-short-resp-integration-request-mgr - Run short responses integration tests with Request Manager"
 	@echo "  test-long-resp-integration-request-mgr - Run long responses integration tests with Request Manager"
 	@echo "  test-long-concurrent-integration-request-mgr - Run long concurrent responses integration tests with Request Manager (concurrency=4)"
+	@echo "  test-session-serialization-integration - Run session serialization integration test (requires cluster, NAMESPACE=test)"
+	@echo "  test-session-reclaim-integration - Run session reclaim integration test (on-demand reclaim of stuck processing)"
+	@echo "  test-session-background-reclaim-integration - Run background reclaim integration test (~60s, requires cluster)"
 	@echo "  generate-two-sessions                   - Generate two sessions: one for alice.johnson@company.com and one for ahmed.hassan@company.com"
 	@echo ""
 	@echo "Utility Commands:"
@@ -404,7 +405,7 @@ help:
 	@echo "    REPLICA_COUNT                     - Number of replicas for scalable services (optional)"
 	@echo "                                        If set, overrides defaults from helm/values.yaml"
 	@echo "                                        If not set, uses defaults from helm/values.yaml"
-	@echo "                                        Applies to: llama-stack, snow MCP, mock-eventing, kafka,"
+	@echo "                                        Applies to: llama-stack, snow MCP, kafka,"
 	@echo "                                        request-manager, integration-dispatcher, and agent-service"
 	@echo ""
 	@echo "  Image Configuration:"
@@ -995,7 +996,7 @@ deps-servicenow-bootstrap:
 
 # Test code
 .PHONY: test-all
-test-all: test-shared-models test-shared-clients test test-request-manager test-agent-service test-integration-dispatcher test-mcp-snow test-servicenow-bootstrap test-mock-employee-data test-mock-servicenow
+test-all: test-shared-models test-shared-clients test-request-manager test-agent-service test-integration-dispatcher test-mcp-snow test-servicenow-bootstrap test-mock-employee-data test-mock-servicenow
 	@echo "All tests completed successfully!"
 
 # Lockfile management
@@ -1259,66 +1260,49 @@ check-requirements: check-uv-version
 	echo "✅ All requirements.txt files are in sync with their uv.lock files"
 
 
+# Test targets: sync dev deps ([dependency-groups] dev), then run pytest.
+# Usage: $(call run_pytest,Display Name,dir)
+define run_pytest
+	@echo "Running $(1) tests..."
+	cd $(2) && uv sync --group dev && uv run python -m pytest tests/
+	@echo "$(1) tests completed successfully!"
+endef
+
 .PHONY: test-shared-models
 test-shared-models:
-	@echo "Running shared models tests..."
-	cd shared-models && uv run python -m pytest || echo "No tests found for shared-models"
-	@echo "Shared models tests completed successfully!"
+	$(call run_pytest,shared models,shared-models)
 
 .PHONY: test-shared-clients
 test-shared-clients:
-	@echo "Running shared clients tests..."
-	cd shared-clients && uv run python -m pytest tests/ || echo "No tests found for shared-clients"
-	@echo "Shared clients tests completed successfully!"
-
-.PHONY: test
-test:
-	@echo "Running self-service agent tests..."
-	uv run python -m pytest test/ || echo "No tests found in self-service agent test directory"
-	@echo "Self-service agent test check completed!"
-
+	$(call run_pytest,shared clients,shared-clients)
 
 .PHONY: test-request-manager
 test-request-manager:
-	@echo "Running request manager tests..."
-	cd request-manager && uv run python -m pytest tests/
-	@echo "Request manager tests completed successfully!"
+	$(call run_pytest,request manager,request-manager)
 
 .PHONY: test-agent-service
 test-agent-service:
-	@echo "Running agent service tests..."
-	cd agent-service && uv run python -m pytest tests/ || echo "No tests found in agent service test directory"
-	@echo "Agent service test check completed!"
+	$(call run_pytest,agent service,agent-service)
 
 .PHONY: test-integration-dispatcher
 test-integration-dispatcher:
-	@echo "Running integration dispatcher tests..."
-	cd integration-dispatcher && uv run python -m pytest tests/ || echo "No tests found for integration dispatcher"
-	@echo "Integration dispatcher tests completed successfully!"
+	$(call run_pytest,integration dispatcher,integration-dispatcher)
 
 .PHONY: test-mcp-snow
 test-mcp-snow:
-	@echo "Running snow MCP tests..."
-	cd mcp-servers/snow && uv run python -m pytest tests/
-	@echo "Snow MCP tests completed successfully!"
+	$(call run_pytest,snow MCP,mcp-servers/snow)
 
 .PHONY: test-servicenow-bootstrap
 test-servicenow-bootstrap:
-	@echo "Running ServiceNow automation tests..."
-	cd scripts/servicenow-bootstrap && uv run python -m pytest tests/ || echo "No tests found for ServiceNow automation"
-	@echo "ServiceNow automation tests completed successfully!"
+	$(call run_pytest,ServiceNow automation,scripts/servicenow-bootstrap)
 
 .PHONY: test-mock-employee-data
 test-mock-employee-data:
-	@echo "Running mock employee data tests..."
-	cd mock-employee-data && uv run python -m pytest tests/ || echo "No tests found for mock employee data"
-	@echo "Mock employee data tests completed successfully!"
+	$(call run_pytest,mock employee data,mock-employee-data)
 
 .PHONY: test-mock-servicenow
 test-mock-servicenow:
-	@echo "Running mock ServiceNow tests..."
-	cd mock-service-now && uv run python -m pytest tests/ || echo "No tests found for mock ServiceNow"
-	@echo "Mock ServiceNow tests completed successfully!"
+	$(call run_pytest,mock servicenow,mock-service-now)
 
 .PHONY: sync-evaluations
 sync-evaluations:
@@ -1349,6 +1333,49 @@ test-long-concurrent-integration-request-mgr:
 	@echo "Running long concurrent responses integration test with Request Manager..."
 	uv --directory evaluations run evaluate.py -n 10 --test-script chat-responses-request-mgr.py --reset-conversation --timeout=1800 --concurrency 4 --message-timeout 120 $(VALIDATE_LAPTOP_DETAILS_FLAG) $(STRUCTURED_OUTPUT_FLAG)
 	@echo "long concurrent responses integrations tests with Request Manager completed successfully!"
+
+# Session tests hit load-balanced service so cross-pod scenarios are exercised (2+ replicas).
+# Override with REQUEST_MANAGER_URL=http://localhost:8080 for same-pod only.
+REQUEST_MANAGER_URL ?= http://$(MAIN_CHART_NAME)-request-manager:80
+# Stagger between sends per user; 1800 reduces created_at reorder flakiness with 2+ replicas.
+STAGGER_MS ?= 1800
+# Usage: $(call run_session_test,Display Name,script.py,extra_env,extra_args)
+define run_session_test
+	@echo "Running $(1) (requires cluster with NAMESPACE set)..."
+	kubectl exec deploy/$(MAIN_CHART_NAME)-request-manager -n $(NAMESPACE) -- \
+		env REQUEST_MANAGER_URL=$(REQUEST_MANAGER_URL) \
+		MESSAGE_TIMEOUT=250 \
+		$(3) \
+		/app/.venv/bin/python /app/test/$(2) $(4)
+	@echo "$(1) completed successfully!"
+endef
+
+.PHONY: test-session-serialization-integration
+test-session-serialization-integration:
+	$(call run_session_test,session serialization integration test,session_serialization_integration.py,STAGGER_MS=$(STAGGER_MS),--stagger-ms $(STAGGER_MS))
+
+.PHONY: test-session-reclaim-integration
+test-session-reclaim-integration:
+	$(call run_session_test,session reclaim integration test,session_reclaim_integration.py,,)
+
+.PHONY: test-session-background-reclaim-integration
+test-session-background-reclaim-integration:
+	@echo "Running background reclaim integration test (requires cluster with NAMESPACE set, ~60s for reclaim)..."
+	@# timeout 180: background reclaim runs every 45s; worst case ~60s. 180s allows for CI variance.
+	@TIMEOUT_CMD=$$(command -v timeout 2>/dev/null || command -v gtimeout 2>/dev/null || true) && \
+	if [ -n "$$TIMEOUT_CMD" ]; then \
+		$$TIMEOUT_CMD 180 kubectl exec deploy/$(MAIN_CHART_NAME)-request-manager -n $(NAMESPACE) -- \
+			env REQUEST_MANAGER_URL=$(REQUEST_MANAGER_URL) \
+			MESSAGE_TIMEOUT=250 \
+			/app/.venv/bin/python /app/test/session_background_reclaim_integration.py; \
+	else \
+		echo "Note: timeout not found (macOS: brew install coreutils for gtimeout); running without timeout"; \
+		kubectl exec deploy/$(MAIN_CHART_NAME)-request-manager -n $(NAMESPACE) -- \
+			env REQUEST_MANAGER_URL=$(REQUEST_MANAGER_URL) \
+			MESSAGE_TIMEOUT=250 \
+			/app/.venv/bin/python /app/test/session_background_reclaim_integration.py; \
+	fi
+	@echo "Background reclaim integration test completed successfully!"
 
 .PHONY: generate-two-sessions
 generate-two-sessions:

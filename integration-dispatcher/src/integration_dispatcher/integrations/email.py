@@ -441,7 +441,6 @@ class EmailIntegrationHandler(BaseIntegrationHandler):
             {self._get_agent_info_html(request) if config.get("include_agent_info", True) else ""}
 
             <div class="footer">
-                <p>Request ID: {request.request_id}</p>
                 <p>Session ID: {request.session_id}</p>
                 {self._get_signature_html() if config.get("include_signature", True) else ""}
             </div>
@@ -477,7 +476,6 @@ class EmailIntegrationHandler(BaseIntegrationHandler):
         text_parts.extend(
             [
                 "-" * 30,
-                f"Request ID: {request.request_id}",
                 f"Session ID: {request.session_id}",
             ]
         )

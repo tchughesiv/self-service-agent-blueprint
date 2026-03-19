@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import imaplib
 import os
 import re
 import socket
@@ -13,14 +14,19 @@ from typing import Any, Dict, Optional
 
 import aioimaplib
 from shared_models import (
+    SOURCE_SERVICE_INTEGRATION_DISPATCHER,
     CloudEventSender,
     DatabaseUtils,
+    EventTypes,
     configure_logging,
+    insert_outbox_event,
+    mark_outbox_published,
 )
 from shared_models.database import get_database_manager
 from shared_models.models import IntegrationType, ProcessedEvent
 from sqlalchemy import select, text
 
+from .thread_lock import build_email_thread_key, with_thread_lock
 from .user_mapping_utils import resolve_user_id_from_email
 
 logger = configure_logging("integration-dispatcher")
@@ -100,16 +106,27 @@ class EmailService:
         self._last_request_time: Dict[str, float] = {}
 
     def _create_email_message_id(
-        self, message_id: Optional[str], from_addr: str, date: Optional[str]
+        self,
+        message_id: Optional[str],
+        from_addr: str,
+        date: Optional[str],
+        imap_id: Optional[str] = None,
     ) -> str:
         """Create a unique identifier for an email message."""
         if message_id:
             # Use Message-ID header which is globally unique
             return f"email-{message_id}"
-        else:
-            # Fallback to from address and date if Message-ID missing
-            date_str = date or "unknown"
-            return f"email-{from_addr}-{date_str}"
+        # Fallback when Message-ID missing: include imap_id for uniqueness.
+        # Without it, same from+date would collide (e.g. multiple emails same day).
+        date_str = date or "unknown"
+        if imap_id is not None:
+            return f"email-{from_addr}-{date_str}-{imap_id}"
+        logger.warning(
+            "Email fallback id without imap_id - collision possible",
+            from_addr=from_addr,
+            date_str=date_str,
+        )
+        return f"email-{from_addr}-{date_str}"
 
     def _normalize_email_id(self, email_id: Any) -> bytes:
         """Normalize email ID to bytes format expected by IMAP operations.
@@ -414,6 +431,66 @@ class EmailService:
                 return self.pod_id
         return None
 
+    async def _sort_email_ids_by_received_time(
+        self, imap_client: Any, email_ids: list[str]
+    ) -> list[str]:
+        """Sort email IDs by INTERNALDATE (server receive time) for FIFO processing.
+
+        Falls back to numeric sort if INTERNALDATE fetch fails.
+        """
+        if len(email_ids) <= 1:
+            return email_ids
+        try:
+            message_set = ",".join(email_ids)
+            typ, data = await imap_client.fetch(message_set, "(INTERNALDATE)")
+            if typ != "OK" or not data:
+                logger.debug(
+                    "INTERNALDATE fetch failed, falling back to numeric sort",
+                    typ=typ,
+                    mailbox=self.imap_mailbox,
+                )
+                return sorted(email_ids, key=int)
+            # Parse FETCH response: "* N FETCH (INTERNALDATE \"DD-Mon-YYYY HH:MM:SS +HHMM\")"
+            id_to_date: Dict[str, tuple[Any, ...]] = {}
+            internaldate_re = re.compile(
+                rb"(\d+)\s+FETCH\s+\(INTERNALDATE\s+\"([^\"]+)\""
+            )
+            for item in data:
+                if isinstance(item, bytes):
+                    match = internaldate_re.search(item)
+                    if match:
+                        msg_id = match.group(1).decode("utf-8")
+                        date_str = match.group(2).decode("utf-8")
+                        try:
+                            parsed = imaplib.Internaldate2tuple(
+                                date_str.encode("utf-8")
+                            )
+                            if parsed is not None:
+                                id_to_date[msg_id] = parsed
+                        except (ValueError, TypeError):
+                            pass
+            if len(id_to_date) < len(email_ids):
+                logger.debug(
+                    "Could not parse INTERNALDATE for all messages, falling back to numeric sort",
+                    parsed=len(id_to_date),
+                    total=len(email_ids),
+                )
+                return sorted(email_ids, key=int)
+            # Use (9999,...) for missing so unparsed IDs sort to end
+            return sorted(
+                email_ids,
+                key=lambda eid: id_to_date.get(
+                    eid, (9999, 12, 31, 23, 59, 59, 0, 0, 0)
+                ),
+            )
+        except Exception as e:
+            logger.warning(
+                "Error sorting by INTERNALDATE, falling back to numeric sort",
+                error=str(e),
+                mailbox=self.imap_mailbox,
+            )
+            return sorted(email_ids, key=int)
+
     async def _poll_mailbox(self) -> None:
         """Poll IMAP mailbox for new emails.
 
@@ -496,9 +573,10 @@ class EmailService:
                         count=len(email_ids),
                         mailbox=self.imap_mailbox,
                     )
-                    # With leader election, only this pod polls, so no need to mark as read immediately
-                    # We'll mark as read after successful processing to allow retries on failure
-                    email_ids_to_process = email_ids
+                    # Sort by received time (INTERNALDATE) for FIFO processing
+                    email_ids_to_process = await self._sort_email_ids_by_received_time(
+                        imap_client, email_ids
+                    )
                 else:
                     logger.debug("No unread emails found", mailbox=self.imap_mailbox)
             else:
@@ -680,31 +758,8 @@ class EmailService:
 
                 # Create unique identifier for deduplication
                 email_message_id = self._create_email_message_id(
-                    message_id, from_addr, date
+                    message_id, from_addr, date, imap_id=email_id
                 )
-
-                # ✅ ATOMIC EVENT CLAIMING: Use check-and-set pattern to prevent duplicate processing
-                # This provides 100% guarantee - only one pod can claim and process an event
-                event_claimed = await DatabaseUtils.try_claim_event_for_processing(
-                    db,
-                    email_message_id,
-                    "email_message",
-                    "imap",
-                    "integration-dispatcher",
-                )
-
-                if not event_claimed:
-                    logger.debug(
-                        "Email already claimed by another pod - skipping duplicate",
-                        email_message_id=email_message_id,
-                        from_addr=from_addr,
-                    )
-                    # Mark as read since it's already been processed
-                    try:
-                        await imap_client.store(email_id, "+FLAGS", "\\Seen")
-                    except Exception:
-                        pass  # Ignore errors when marking as read
-                    return False
 
                 # Get body content
                 body = self._extract_body(email_message)
@@ -720,21 +775,23 @@ class EmailService:
                 # Resolve user_id
                 user_id = await self._resolve_user_id(from_addr, db)
 
-                # Simple rate limiting to prevent rapid-fire requests
+                # Rate limiting: wait (not skip) to preserve 2s cooldown while processing all emails in order
                 import time
 
                 current_time = time.time()
                 last_request_time = self._last_request_time.get(user_id, 0)
+                elapsed = current_time - last_request_time
 
-                if current_time - last_request_time < 2.0:  # 2 second cooldown
+                if elapsed < 2.0:  # 2 second cooldown per user
+                    sleep_time = 2.0 - elapsed
                     logger.debug(
-                        "Rate limiting: ignoring rapid email request",
+                        "Rate limiting: waiting before processing same-user email",
                         user_id=user_id,
-                        time_since_last=current_time - last_request_time,
+                        sleep_seconds=round(sleep_time, 1),
                     )
-                    return False
+                    await asyncio.sleep(sleep_time)
 
-                self._last_request_time[user_id] = current_time
+                self._last_request_time[user_id] = time.time()
 
                 logger.info(
                     "Processing incoming email",
@@ -743,6 +800,26 @@ class EmailService:
                     subject=subject[:50],
                     message_id=message_id,
                 )
+
+                # Claim immediately before forward to minimize crash window (claim + forward = ~100-500ms)
+                event_claimed = await DatabaseUtils.try_claim_event_for_processing(
+                    db,
+                    email_message_id,
+                    "email_message",
+                    "imap",
+                    "integration-dispatcher",
+                )
+                if not event_claimed:
+                    logger.debug(
+                        "Email already claimed - skipping duplicate",
+                        email_message_id=email_message_id,
+                        from_addr=from_addr,
+                    )
+                    try:
+                        await imap_client.store(email_id, "+FLAGS", "\\Seen")
+                    except Exception:
+                        pass
+                    return False
 
                 # Forward to Request Manager
                 success = await self._forward_to_request_manager(
@@ -754,6 +831,7 @@ class EmailService:
                     in_reply_to=in_reply_to,
                     references=references,
                     session_id=session_id,
+                    email_message_id=email_message_id,
                 )
 
                 return success
@@ -888,67 +966,96 @@ class EmailService:
         in_reply_to: Optional[str],
         references: Optional[str],
         session_id: Optional[str] = None,
+        email_message_id: Optional[str] = None,
     ) -> bool:
-        """Forward email to Request Manager via CloudEvent."""
+        """Forward email to Request Manager via CloudEvent.
+
+        Acquires per-thread lock (FIFO) before publish so events reach broker in order.
+        """
         try:
-            # Create event data - Request Manager will generate request_id and session_id
-            # If session_id is provided (from X-Session-ID header), include it so Request Manager can reuse the session
-            metadata = {
-                "email_from": from_address,
-                "email_subject": subject,
-                "email_message_id": message_id,
-                "email_in_reply_to": in_reply_to,
-                "email_references": references,
-                "source": "email_message",
-            }
+            thread_key = build_email_thread_key(from_address, in_reply_to, message_id)
+            db_manager = get_database_manager()
 
-            event_data = {
-                "user_id": user_id,
-                "content": content,
-                "integration_type": "EMAIL",
-                "request_type": "email_interaction",
-                "email_from": from_address,
-                "email_subject": subject,
-                "email_message_id": message_id,
-                "email_in_reply_to": in_reply_to,
-                "email_references": references,
-                "metadata": metadata,
-            }
+            async def _locked_forward() -> bool:
+                # Create event data. Include request_id (email_message_id) when present for deterministic
+                # event_id and broker/request-manager dedup on retry.
+                metadata = {
+                    "email_from": from_address,
+                    "email_subject": subject,
+                    "email_message_id": message_id,
+                    "email_in_reply_to": in_reply_to,
+                    "email_references": references,
+                    "source": "email_message",
+                }
 
-            # Include session_id if provided (from X-Session-ID header in email reply)
-            if session_id:
-                event_data["session_id"] = session_id
+                event_data = {
+                    "user_id": user_id,
+                    "content": content,
+                    "integration_type": "EMAIL",
+                    "request_type": "email_interaction",
+                    "email_from": from_address,
+                    "email_subject": subject,
+                    "email_message_id": message_id,
+                    "email_in_reply_to": in_reply_to,
+                    "email_references": references,
+                    "metadata": metadata,
+                }
+                idempotency_key = email_message_id or str(uuid.uuid4())
+                event_data["request_id"] = idempotency_key
+
+                if session_id:
+                    event_data["session_id"] = session_id
+                    logger.debug(
+                        "Including session_id from X-Session-ID header",
+                        session_id=session_id,
+                        from_address=from_address,
+                    )
+
+                # Step 0.25 outbox: INSERT before publish; durable accept
+                # Return True when committed so caller can mark email as read (recovery from outbox)
+                async with db_manager.get_session() as db:
+                    outbox_id = await insert_outbox_event(
+                        db,
+                        source_service=SOURCE_SERVICE_INTEGRATION_DISPATCHER,
+                        event_type=EventTypes.REQUEST_CREATED,
+                        idempotency_key=idempotency_key,
+                        payload=event_data,
+                        thread_order_key=thread_key,
+                    )
+                    if outbox_id is None:
+                        logger.info(
+                            "Outbox duplicate - skipping",
+                            idempotency_key=idempotency_key,
+                            thread_key=thread_key,
+                        )
+                        return False
+
                 logger.debug(
-                    "Including session_id from X-Session-ID header",
-                    session_id=session_id,
+                    "Sending email request via CloudEvent to Request Manager",
+                    user_id=user_id,
                     from_address=from_address,
+                    subject=subject[:50],
                 )
 
-            logger.debug(
-                "Sending email request via CloudEvent to Request Manager",
-                user_id=user_id,
-                from_address=from_address,
-                subject=subject[:50],
-            )
-
-            # Send via CloudEvent
-            success = await self._send_cloudevent(event_data)
-            if success:
-                logger.info(
-                    "Email forwarded to Request Manager via CloudEvent",
-                    user_id=user_id,
-                    status="success",
-                )
-                # Mark email as processed (read) after successful forwarding
-                # This prevents reprocessing on next poll
-                # Note: We still rely on deduplication as primary protection
+                # Try publish immediately; publisher job retries on failure
+                success = await self._send_cloudevent(event_data)
+                if success:
+                    async with db_manager.get_session() as db:
+                        await mark_outbox_published(db, outbox_id)
+                    logger.info(
+                        "Email forwarded to Request Manager via CloudEvent",
+                        user_id=user_id,
+                        status="success",
+                    )
+                else:
+                    logger.error(
+                        "Failed to forward email to Request Manager via CloudEvent",
+                        user_id=user_id,
+                    )
+                # Return True on durable accept (outbox committed) - caller marks email as read
                 return True
-            else:
-                logger.error(
-                    "Failed to forward email to Request Manager via CloudEvent",
-                    user_id=user_id,
-                )
-                return False
+
+            return await with_thread_lock(thread_key, db_manager, _locked_forward)
 
         except Exception as e:
             logger.error(

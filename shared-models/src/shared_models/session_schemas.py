@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from shared_models.models import IntegrationType, SessionStatus
 
 
@@ -66,5 +66,4 @@ class SessionResponse(BaseModel):
     updated_at: datetime
     last_request_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

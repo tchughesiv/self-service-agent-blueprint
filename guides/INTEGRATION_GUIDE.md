@@ -399,7 +399,7 @@ The system uses the existing `llama_agents` PostgreSQL database with these table
 - user_context (JSON)
 - conversation_context (JSON)
 - total_requests (Integer, Default: 0)
-- last_request_id (String(36), Optional)
+- last_request_id (String(255), Optional)
 - last_request_at (Timestamp, Optional)
 - expires_at (Timestamp, Optional)
 - created_at, updated_at (Timestamps)
@@ -408,8 +408,11 @@ The system uses the existing `llama_agents` PostgreSQL database with these table
 ### request_logs
 ```sql
 - id (Integer, Primary Key)
-- request_id (String(36), Unique, Indexed)
+- request_id (String(255), Unique, Indexed)
 - session_id (String(36), Foreign Key to request_sessions.session_id, Indexed)
+- status (Enum: pending, processing, completed, failed)
+- processing_started_at (Timestamp, Optional)
+- pod_name (String(255), Optional)
 - request_type (String(50))
 - request_content (Text)
 - normalized_request (JSON)
@@ -417,7 +420,7 @@ The system uses the existing `llama_agents` PostgreSQL database with these table
 - processing_time_ms (Integer, Optional)
 - response_content (Text, Optional)
 - response_metadata (JSON)
-- cloudevent_id (String(36), Optional)
+- cloudevent_id (String(255), Optional)
 - cloudevent_type (String(100), Optional)
 - created_at, updated_at, completed_at (Timestamps)
 ```

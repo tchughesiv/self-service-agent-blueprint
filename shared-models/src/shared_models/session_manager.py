@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional, Union
 
 from shared_models import configure_logging
 from shared_models.models import RequestSession, SessionStatus
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -273,8 +273,8 @@ class BaseSessionManager:
             .values(
                 total_requests=RequestSession.total_requests + 1,
                 last_request_id=request_id,
-                last_request_at=datetime.now(timezone.utc),
-                updated_at=datetime.now(timezone.utc),
+                last_request_at=func.now(),
+                updated_at=func.now(),
                 version=RequestSession.version + 1,  # Increment version atomically
             )
         )

@@ -19,6 +19,9 @@ from tracing_config.auto_tracing import tracingIsActive
 # Configure structured logging and auto tracing
 SERVICE_NAME = "mock-eventing-service"
 logger = configure_logging(SERVICE_NAME)
+
+# Delivery timeout: must exceed agent processing time (AGENT_TIMEOUT=120)
+DELIVERY_TIMEOUT = float(os.getenv("DELIVERY_TIMEOUT", "130"))
 auto_tracing_run(SERVICE_NAME, logger)
 
 
@@ -37,6 +40,11 @@ class MockEventingService:
         self.subscriptions: List[EventSubscription] = []
         self.event_history: List[Dict[str, Any]] = []
         self.delivery_attempts: Dict[str, int] = {}
+        # Per-(subscriber_url, partition_key) queues for ordered delivery (Kafka-like)
+        self._partition_queues: Dict[
+            tuple[str, str], asyncio.Queue[tuple[CloudEvent, EventSubscription]]
+        ] = {}
+        self._partition_workers: Dict[tuple[str, str], asyncio.Task[None]] = {}
 
     def add_subscription(self, subscription: EventSubscription) -> None:
         """Add an event subscription."""
@@ -68,11 +76,13 @@ class MockEventingService:
         event_type = event.get("type")
         event_id = event.get("id", str(uuid.uuid4()))
 
+        partition_key = event.get("partitionkey") or event.get("partitionKey") or ""
         logger.info(
             "Publishing event",
             event_id=event_id,
             event_type=event_type,
             source=event.get("source"),
+            partition_key=partition_key or "(none)",
         )
 
         # Store event in history
@@ -108,13 +118,65 @@ class MockEventingService:
             subscription_count=len(matching_subscriptions),
         )
 
-        # Deliver to all matching subscribers asynchronously
+        # Partition key for ordered delivery (Kafka-like: same key -> same "partition" -> FIFO)
+
+        # Deliver to all matching subscribers
         for subscription in matching_subscriptions:
-            # Create async task for each delivery (non-blocking)
-            asyncio.create_task(self._deliver_event_async(event, subscription))
+            if partition_key:
+                # Queue for ordered delivery per (subscriber, partition_key)
+                self._enqueue_partitioned_delivery(event, subscription, partition_key)
+            else:
+                # No partition key: deliver immediately (backward compat)
+                asyncio.create_task(self._deliver_event_async(event, subscription))
 
         # Return immediately - events are processed in background
         return True
+
+    def _enqueue_partitioned_delivery(
+        self, event: CloudEvent, subscription: EventSubscription, partition_key: str
+    ) -> None:
+        """Enqueue delivery for partition-key-ordered processing."""
+        key = (subscription.subscriber_url, partition_key)
+        if key not in self._partition_queues:
+            self._partition_queues[key] = asyncio.Queue()
+            self._partition_workers[key] = asyncio.create_task(
+                self._partition_delivery_worker(key)
+            )
+        self._partition_queues[key].put_nowait((event, subscription))
+
+    async def _partition_delivery_worker(self, key: tuple[str, str]) -> None:
+        """Process deliveries for one (subscriber, partition_key) in FIFO order.
+        Cleans up when idle (empty queue for IDLE_TIMEOUT_SEC) to avoid memory leak.
+        """
+        IDLE_TIMEOUT_SEC = 300.0  # 5 min empty -> remove partition
+        queue = self._partition_queues.get(key)
+        if not queue:
+            return
+        try:
+            while True:
+                try:
+                    event, subscription = await asyncio.wait_for(
+                        queue.get(), timeout=IDLE_TIMEOUT_SEC
+                    )
+                    await self._deliver_event_async(event, subscription)
+                except asyncio.TimeoutError:
+                    # Queue empty for IDLE_TIMEOUT_SEC -> idle partition, clean up
+                    # Re-check: item could have arrived during timeout
+                    if queue.empty():
+                        break
+                    continue
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.error(
+                        "Partition delivery worker error",
+                        key=key,
+                        error=str(e),
+                    )
+        finally:
+            self._partition_queues.pop(key, None)
+            self._partition_workers.pop(key, None)
+            logger.debug("Partition worker cleaned up (idle or cancelled)", key=key)
 
     async def _deliver_event_async(
         self, event: CloudEvent, subscription: EventSubscription
@@ -140,7 +202,7 @@ class MockEventingService:
 
         try:
             # Convert CloudEvent to HTTP format
-            from cloudevents.http import to_structured
+            from cloudevents.conversion import to_structured
 
             logger.info(
                 "Converting CloudEvent for delivery",
@@ -164,7 +226,7 @@ class MockEventingService:
                 body_preview=body[:200] if body else "empty",
             )
 
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=DELIVERY_TIMEOUT) as client:
                 response = await client.post(
                     subscription.subscriber_url,
                     headers=headers,
@@ -181,17 +243,48 @@ class MockEventingService:
                 )
 
         except Exception as e:
+            # str(e) can be empty for httpx.TimeoutException etc; include type
+            err_msg = str(e) or f"{type(e).__name__}"
             logger.error(
                 "Failed to deliver event",
                 event_id=event_id,
                 subscriber_url=subscription.subscriber_url,
                 attempt=attempt_count,
-                error=str(e),
+                error=err_msg,
+                error_type=type(e).__name__,
             )
 
-            # In mock mode, we'll simulate some failures for testing
-            if attempt_count < 3 and "timeout" in str(e).lower():
-                logger.info("Simulating retry for testing purposes")
+            # Retry on timeout (agent may be slow under load) or 503 (agent
+            # ordering check: "Earlier request still processing - retry later")
+            is_timeout = "timeout" in err_msg.lower() or "Timeout" in type(e).__name__
+            err_response = getattr(e, "response", None)
+            status_code = (
+                getattr(err_response, "status_code", None)
+                if err_response is not None
+                else None
+            )
+            is_retriable_5xx = status_code in (502, 503, 504)
+            max_retries = (
+                10 if is_retriable_5xx else 3
+            )  # Align with Kafka broker (retry: 10)
+
+            if attempt_count < max_retries and (is_timeout or is_retriable_5xx):
+                backoff = 2.0 if is_retriable_5xx else 1.0
+                logger.info(
+                    "Retrying delivery",
+                    event_id=event_id,
+                    next_attempt=attempt_count + 1,
+                    reason="timeout" if is_timeout else f"{status_code}",
+                )
+                await asyncio.sleep(backoff)
+                await self._deliver_event_async(event, subscription)
+            else:
+                logger.error(
+                    "Delivery failed after retries",
+                    event_id=event_id,
+                    subscriber_url=subscription.subscriber_url,
+                    attempts=attempt_count,
+                )
 
 
 # Initialize the mock service
@@ -491,6 +584,11 @@ async def reset_service() -> dict[str, str]:
     mock_service.subscriptions.clear()
     mock_service.event_history.clear()
     mock_service.delivery_attempts.clear()
+    # Cancel partition delivery workers
+    for task in mock_service._partition_workers.values():
+        task.cancel()
+    mock_service._partition_workers.clear()
+    mock_service._partition_queues.clear()
     return {"status": "reset", "message": "Mock service reset to initial state"}
 
 

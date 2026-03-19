@@ -32,17 +32,68 @@ Generate database environment variables from pgvector secret
     secretKeyRef:
       name: pgvector
       key: password
-{{/* Database Performance Configuration */}}
+{{/* Database Performance Configuration - unified pools, max_connections=200 */}}
 - name: DB_POOL_SIZE
-  value: {{ if hasKey .Values.requestManagement "database" }}{{ .Values.requestManagement.database.poolSize | default "10" | quote }}{{ else }}"10"{{ end }}
+  value: {{ if hasKey .Values.requestManagement "database" }}{{ .Values.requestManagement.database.poolSize | default "8" | quote }}{{ else }}"8"{{ end }}
 - name: DB_MAX_OVERFLOW
-  value: {{ if hasKey .Values.requestManagement "database" }}{{ .Values.requestManagement.database.maxOverflow | default "20" | quote }}{{ else }}"20"{{ end }}
+  value: {{ if hasKey .Values.requestManagement "database" }}{{ .Values.requestManagement.database.maxOverflow | default "8" | quote }}{{ else }}"8"{{ end }}
 - name: DB_POOL_TIMEOUT
   value: {{ if hasKey .Values.requestManagement "database" }}{{ .Values.requestManagement.database.poolTimeout | default "30" | quote }}{{ else }}"30"{{ end }}
 - name: DB_POOL_RECYCLE
   value: {{ if hasKey .Values.requestManagement "database" }}{{ .Values.requestManagement.database.poolRecycle | default "3600" | quote }}{{ else }}"3600"{{ end }}
 - name: DB_STATEMENT_TIMEOUT
   value: {{ if hasKey .Values.requestManagement "database" }}{{ .Values.requestManagement.database.statementTimeout | default "30000" | quote }}{{ else }}"30000"{{ end }}
+- name: DB_IDLE_TRANSACTION_TIMEOUT
+  value: {{ if hasKey .Values.requestManagement "database" }}{{ .Values.requestManagement.database.idleTransactionTimeout | default "300000" | quote }}{{ else }}"300000"{{ end }}
+{{/* Sync Connection Pool (PostgresSaver/LangGraph) */}}
+- name: DB_SYNC_POOL_MIN_SIZE
+  value: {{ if hasKey .Values.requestManagement "database" }}{{ .Values.requestManagement.database.syncPoolMinSize | default "1" | quote }}{{ else }}"1"{{ end }}
+- name: DB_SYNC_POOL_MAX_SIZE
+  value: {{ if hasKey .Values.requestManagement "database" }}{{ .Values.requestManagement.database.syncPoolMaxSize | default "5" | quote }}{{ else }}"5"{{ end }}
+- name: DB_SYNC_POOL_TIMEOUT
+  value: {{ if hasKey .Values.requestManagement "database" }}{{ .Values.requestManagement.database.syncPoolTimeout | default "30" | quote }}{{ else }}"30"{{ end }}
+{{- end }}
+
+{{/*
+Database env vars WITHOUT DB_STATEMENT_TIMEOUT (request-manager adds its own override)
+*/}}
+{{- define "self-service-agent.dbEnvVarsNoStatementTimeout" -}}
+{{/* Database Configuration */}}
+- name: POSTGRES_HOST
+  valueFrom:
+    secretKeyRef:
+      name: pgvector
+      key: host
+- name: POSTGRES_PORT
+  valueFrom:
+    secretKeyRef:
+      name: pgvector
+      key: port
+- name: POSTGRES_DB
+  valueFrom:
+    secretKeyRef:
+      name: pgvector
+      key: dbname
+- name: POSTGRES_USER
+  valueFrom:
+    secretKeyRef:
+      name: pgvector
+      key: user
+- name: POSTGRES_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: pgvector
+      key: password
+{{/* Database Performance (no DB_STATEMENT_TIMEOUT - request-manager overrides).
+     DB_POOL_SIZE/DB_MAX_OVERFLOW: prefer requestManager.database override when set. */}}
+- name: DB_POOL_SIZE
+  value: {{ if and (hasKey .Values.requestManagement "requestManager") (hasKey .Values.requestManagement.requestManager "database") (hasKey .Values.requestManagement.requestManager.database "poolSize") }}{{ .Values.requestManagement.requestManager.database.poolSize | quote }}{{ else if hasKey .Values.requestManagement "database" }}{{ .Values.requestManagement.database.poolSize | default "8" | quote }}{{ else }}"8"{{ end }}
+- name: DB_MAX_OVERFLOW
+  value: {{ if and (hasKey .Values.requestManagement "requestManager") (hasKey .Values.requestManagement.requestManager "database") (hasKey .Values.requestManagement.requestManager.database "maxOverflow") }}{{ .Values.requestManagement.requestManager.database.maxOverflow | quote }}{{ else if hasKey .Values.requestManagement "database" }}{{ .Values.requestManagement.database.maxOverflow | default "8" | quote }}{{ else }}"8"{{ end }}
+- name: DB_POOL_TIMEOUT
+  value: {{ if hasKey .Values.requestManagement "database" }}{{ .Values.requestManagement.database.poolTimeout | default "30" | quote }}{{ else }}"30"{{ end }}
+- name: DB_POOL_RECYCLE
+  value: {{ if hasKey .Values.requestManagement "database" }}{{ .Values.requestManagement.database.poolRecycle | default "3600" | quote }}{{ else }}"3600"{{ end }}
 - name: DB_IDLE_TRANSACTION_TIMEOUT
   value: {{ if hasKey .Values.requestManagement "database" }}{{ .Values.requestManagement.database.idleTransactionTimeout | default "300000" | quote }}{{ else }}"300000"{{ end }}
 {{/* Sync Connection Pool (PostgresSaver/LangGraph) */}}
@@ -139,6 +190,25 @@ Generate Request Manager specific environment variables
   value: {{ if and (hasKey .Values.requestManagement "requestManager") (hasKey .Values.requestManagement.requestManager "sessions") (hasKey .Values.requestManagement.requestManager.sessions "inactiveRetentionDays") }}{{ .Values.requestManagement.requestManager.sessions.inactiveRetentionDays | quote }}{{ else }}"30"{{ end }}
 - name: USE_SESSION_EVENTING
   value: {{ if and (hasKey .Values.requestManagement "requestManager") (hasKey .Values.requestManagement.requestManager "sessions") (hasKey .Values.requestManagement.requestManager.sessions "useSessionEventing") }}{{ .Values.requestManagement.requestManager.sessions.useSessionEventing | quote }}{{ else }}"true"{{ end }}
+{{/* Session serialization (one request in-flight per session, FIFO, reclaim) */}}
+- name: SESSION_LOCK_WAIT_TIMEOUT
+  value: {{ if and (hasKey .Values.requestManagement "requestManager") (hasKey .Values.requestManagement.requestManager "sessionSerialization") (hasKey .Values.requestManagement.requestManager.sessionSerialization "lockWaitTimeoutSeconds") }}{{ .Values.requestManagement.requestManager.sessionSerialization.lockWaitTimeoutSeconds | quote }}{{ else }}"180"{{ end }}
+- name: SESSION_LOCK_POLL_INTERVAL_SECONDS
+  value: {{ if and (hasKey .Values.requestManagement "requestManager") (hasKey .Values.requestManagement.requestManager "sessionSerialization") (hasKey .Values.requestManagement.requestManager.sessionSerialization "lockPollIntervalSeconds") }}{{ .Values.requestManagement.requestManager.sessionSerialization.lockPollIntervalSeconds | quote }}{{ else }}"0.05"{{ end }}
+{{/* DB_STATEMENT_TIMEOUT override: must exceed SESSION_LOCK_WAIT_TIMEOUT so lock operations are not cancelled (value in ms) */}}
+- name: DB_STATEMENT_TIMEOUT
+  value: {{ if and (hasKey .Values.requestManagement "requestManager") (hasKey .Values.requestManagement.requestManager "sessionSerialization") (hasKey .Values.requestManagement.requestManager.sessionSerialization "lockWaitTimeoutSeconds") }}{{ mul (.Values.requestManagement.requestManager.sessionSerialization.lockWaitTimeoutSeconds | int) 1000 | quote }}{{ else }}"180000"{{ end }}
+- name: SESSION_LOCK_STUCK_BUFFER_SECONDS
+  value: {{ if and (hasKey .Values.requestManagement "requestManager") (hasKey .Values.requestManagement.requestManager "sessionSerialization") (hasKey .Values.requestManagement.requestManager.sessionSerialization "stuckBufferSeconds") }}{{ .Values.requestManagement.requestManager.sessionSerialization.stuckBufferSeconds | quote }}{{ else }}"30"{{ end }}
+- name: POD_HEARTBEAT_INTERVAL_SECONDS
+  value: {{ if and (hasKey .Values.requestManagement "requestManager") (hasKey .Values.requestManagement.requestManager "sessionSerialization") (hasKey .Values.requestManagement.requestManager.sessionSerialization "heartbeatIntervalSeconds") }}{{ .Values.requestManagement.requestManager.sessionSerialization.heartbeatIntervalSeconds | quote }}{{ else }}"15"{{ end }}
+- name: POD_HEARTBEAT_GRACE_SECONDS
+  value: {{ if and (hasKey .Values.requestManagement "requestManager") (hasKey .Values.requestManagement.requestManager "sessionSerialization") (hasKey .Values.requestManagement.requestManager.sessionSerialization "heartbeatGraceSeconds") }}{{ .Values.requestManagement.requestManager.sessionSerialization.heartbeatGraceSeconds | quote }}{{ else }}"30"{{ end }}
+- name: BACKGROUND_RECLAIM_INTERVAL_SECONDS
+  value: {{ if and (hasKey .Values.requestManagement "requestManager") (hasKey .Values.requestManagement.requestManager "sessionSerialization") (hasKey .Values.requestManagement.requestManager.sessionSerialization "backgroundReclaimIntervalSeconds") }}{{ .Values.requestManagement.requestManager.sessionSerialization.backgroundReclaimIntervalSeconds | quote }}{{ else }}"45"{{ end }}
+- name: RECLAIM_ACTION
+  value: {{ if and (hasKey .Values.requestManagement "requestManager") (hasKey .Values.requestManagement.requestManager "sessionSerialization") (hasKey .Values.requestManagement.requestManager.sessionSerialization "reclaimAction") }}{{ .Values.requestManagement.requestManager.sessionSerialization.reclaimAction | quote }}{{ else }}"requeue"{{ end }}
+{{/* DB pool overrides are applied in dbEnvVarsNoStatementTimeout (single source to avoid duplicate env vars) */}}
 {{- end }}
 
 {{/*
@@ -397,9 +467,10 @@ Generate Integration Dispatcher specific environment variables
 
 {{/*
 Generate all environment variables for Request Manager
+(uses dbEnvVarsNoStatementTimeout; requestManagerEnvVars adds DB_STATEMENT_TIMEOUT override)
 */}}
 {{- define "self-service-agent.requestManagerAllEnvVars" -}}
-{{- include "self-service-agent.dbEnvVars" . }}
+{{- include "self-service-agent.dbEnvVarsNoStatementTimeout" . }}
 {{- include "self-service-agent.commonEnvVars" . }}
 {{- include "self-service-agent.requestManagerEnvVars" . }}
 {{- end }}

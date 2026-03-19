@@ -340,7 +340,7 @@ Retrieve conversations for review, audit, and quality assurance purposes.
       "current_thread_id": "langgraph-thread-id",
       "conversation": [
         {
-          "request_id": "uuid",
+          "request_id": "string",
           "timestamp": "2026-01-26T10:00:00Z",
           "integration_type": "CLI",
           "user_message": "hi",
