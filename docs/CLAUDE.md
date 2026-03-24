@@ -88,6 +88,9 @@ make helm-install-demo NAMESPACE=your-namespace
 # Option B: Helm export + Ansible (ephemeral, conference demos)
 make ansible-apply-demo NAMESPACE=your-namespace
 # See docs/HELM_EXPORT_ANSIBLE.md for env vars and export-then-apply workflow
+
+# Optional: Zammad + ticketing profile (deploy Zammad, MCP wiring; see README)
+# make helm-install-ticketing NAMESPACE=your-namespace
 ```
 
 ## Architecture
