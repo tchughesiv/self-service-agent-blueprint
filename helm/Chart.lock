@@ -7,9 +7,9 @@ dependencies:
   version: 0.5.6
 - name: llama-stack
   repository: https://rh-ai-quickstart.github.io/ai-architecture-charts
-  version: 0.6.9
+  version: 0.7.0
 - name: mcp-servers
   repository: https://rh-ai-quickstart.github.io/ai-architecture-charts
   version: 0.5.8
-digest: sha256:916b7d31b0f432532ff850191d9160c657e4e70f8dc9d85c72a90c8eb49dbf2b
-generated: "2026-01-27T11:11:12.473555-06:00"
+digest: sha256:c62cab03c06360340f6cbbb33f730a3d568e863384436df79913472166bad5ac
+generated: "2026-03-19T16:31:41.746370982+02:00"

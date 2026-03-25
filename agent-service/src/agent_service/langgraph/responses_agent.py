@@ -100,7 +100,11 @@ class Agent:
 
         try:
             models = await self.async_llama_client.models.list()
-            model_id = next(m.identifier for m in models if m.api_model_type == "llm")
+            model_id = next(
+                m.id
+                for m in models
+                if m.custom_metadata and m.custom_metadata.get("model_type") == "llm"
+            )
             if model_id:
                 logger.info("Using first available LLM model", model_id=model_id)
                 return str(model_id)
