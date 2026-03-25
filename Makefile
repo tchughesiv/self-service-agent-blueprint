@@ -392,6 +392,7 @@ help:
 	@echo "  test-mock-servicenow               - Run tests for mock ServiceNow"
 	@echo "  test-short-resp-integration-request-mgr - Run short responses integration tests with Request Manager"
 	@echo "  test-long-resp-integration-request-mgr - Run long responses integration tests with Request Manager"
+	@echo "  test-medium-resp-integration-request-mgr - Run medium responses integration tests with Request Manager (5 conversations)"
 	@echo "  test-long-concurrent-integration-request-mgr - Run long concurrent responses integration tests with Request Manager (concurrency=4)"
 	@echo "  test-session-serialization-integration - Run session serialization integration test (requires cluster, NAMESPACE=test)"
 	@echo "  test-session-reclaim-integration - Run session reclaim integration test (on-demand reclaim of stuck processing)"
@@ -1345,8 +1346,14 @@ test-short-resp-integration-request-mgr:
 .PHONY: test-long-resp-integration-request-mgr
 test-long-resp-integration-request-mgr:
 	@echo "Running long responses integration test with Request Manager..."
-	uv --directory evaluations run evaluate.py -n 20 --test-script chat-responses-request-mgr.py --reset-conversation --timeout=1800 $(VALIDATE_LAPTOP_DETAILS_FLAG) $(STRUCTURED_OUTPUT_FLAG)
+	uv --directory evaluations run evaluate.py -n 20 --test-script chat-responses-request-mgr.py --reset-conversation --timeout=1800 --message-timeout=120 $(VALIDATE_LAPTOP_DETAILS_FLAG) $(STRUCTURED_OUTPUT_FLAG)
 	@echo "long responses integrations tests with Request Manager completed successfully!"
+
+.PHONY: test-medium-resp-integration-request-mgr
+test-medium-resp-integration-request-mgr:
+	@echo "Running medium responses integration test with Request Manager..."
+	uv --directory evaluations run evaluate.py -n 5 --test-script chat-responses-request-mgr.py --reset-conversation --timeout=1800 --message-timeout=120 $(VALIDATE_LAPTOP_DETAILS_FLAG) $(STRUCTURED_OUTPUT_FLAG)
+	@echo "medium responses integrations tests with Request Manager completed successfully!"
 
 .PHONY: test-long-concurrent-integration-request-mgr
 test-long-concurrent-integration-request-mgr:
