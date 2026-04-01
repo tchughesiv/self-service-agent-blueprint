@@ -42,7 +42,7 @@ Asyncio is a great fit for this quickstart as we've seen that most of the time a
 
 ### Quickstart components
 
-Use standard kubernetes scaling techniques. For agent-service, integration-dispatcher, request-manager, you can scale the number of uvicorn workers as well as the number of replicas. For MCP servers (such as snow) the same is true, but special considerations which are covered in a later section. Both the number of workers and number of replicas can be configured in helm/values.yaml. As an example this snippet which is part of the configuration for the agent service sets 4 workers and 2 replicas:
+Use standard kubernetes scaling techniques. For **agent-service** and **request-manager**, you can scale the number of uvicorn workers as well as the number of replicas. **integration-dispatcher** is fixed at **one Uvicorn worker** per pod in the Helm chart (lifespan runs IMAP polling and the outbox publisher; multiple workers would duplicate that work). Scale integration-dispatcher by **replicas** only. For MCP servers (such as snow) the same is true, but special considerations which are covered in a later section. Both the number of workers and number of replicas can be configured in helm/values.yaml. As an example this snippet which is part of the configuration for the agent service sets 4 workers and 2 replicas:
 
 ```
  agentService:
@@ -58,7 +58,7 @@ These are a few documents which may be of interest:
 - [Scalability and performance | OpenShift Container Platform 4.20 Documentation](https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html/scalability_and_performance/index)
 - [Capacity management and overcommitment best practices in Red Hat OpenShift](https://www.redhat.com/en/blog/capacity-management-overcommitment-best-practices-openshift)
 
-The quickstart already uses 4 uvicornWorkers for each of the components. If you would like to try out multiple pods for each of the components you can set `REPLICA_COUNT` to set the number of pods to use. For example:
+The quickstart uses 4 uvicornWorkers for agent-service and request-manager by default; integration-dispatcher always uses 1 worker per pod. If you would like to try out multiple pods for each of the components you can set `REPLICA_COUNT` to set the number of pods to use. For example:
 
 ```
 make helm-install-test REPLICA_COUNT=2 ....

@@ -60,7 +60,11 @@ spec:
         - name: OTEL_EXPORTER_OTLP_ENDPOINT
           value: {{ $context.Values.otelExporter }}
         {{- end }}
-        {{- if $serviceConfig.uvicornWorkers }}
+        {{- if eq $serviceName "integration-dispatcher" }}
+        # Single process only: lifespan runs IMAP + outbox per worker; multi-worker duplicates work.
+        - name: UVICORN_WORKERS
+          value: "1"
+        {{- else if $serviceConfig.uvicornWorkers }}
         - name: UVICORN_WORKERS
           value: {{ $serviceConfig.uvicornWorkers | quote }}
         {{- end }}
