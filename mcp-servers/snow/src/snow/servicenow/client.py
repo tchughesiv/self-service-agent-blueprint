@@ -95,7 +95,7 @@ class ServiceNowClient:
 
     def _has_existing_request_for_laptop_model(
         self, existing_requests: List[Dict[str, Any]], laptop_model: str
-    ) -> tuple[bool, Optional[Dict[str, Any]]]:
+    ) -> Optional[Dict[str, Any]]:
         """
         Check if there's already an open request for the same laptop model.
 
@@ -104,13 +104,11 @@ class ServiceNowClient:
             laptop_model: The laptop model to check for.
 
         Returns:
-            Tuple of (bool, Optional[Dict]):
-            - True if existing request found, False otherwise
             - The existing request data if found, None otherwise
         """
         # If avoid_duplicates is disabled, skip the duplicate check entirely
         if not self.laptop_avoid_duplicates:
-            return False, None
+            return None
 
         for request in existing_requests:
             # Extract laptop choice from request - using new sc_req_item format
@@ -129,9 +127,9 @@ class ServiceNowClient:
                 # to maintain interface compatibility with calling code
                 modified_request = request.copy()
                 modified_request["number"] = req_number
-                return True, modified_request
+                return modified_request
 
-        return False, None
+        return None
 
     def _would_exceed_request_limit(
         self, existing_requests: List[Dict[str, Any]]
@@ -174,30 +172,28 @@ class ServiceNowClient:
         """
         logger.info("Opening ServiceNow laptop refresh request")
 
-        # Step 1: Check for existing open requests for this user
-        user_sys_id = params.who_is_this_request_for
-        logger.info("Checking for existing open requests", user_sys_id=user_sys_id)
-
-        existing_requests_result = self.get_open_laptop_requests_for_user(user_sys_id)
-        if not existing_requests_result["success"]:
-            return existing_requests_result
-
-        existing_requests = existing_requests_result["requests"]
-        logger.info(
-            "Found existing open request(s)", existing_requests=len(existing_requests)
-        )
+        # Step 1: Check for existing open requests for this user (only if needed)
+        existing_requests = []
+        if self.laptop_avoid_duplicates or self.laptop_request_limits is not None:
+            user_sys_id = params.who_is_this_request_for
+            logger.info("Checking for existing open requests", user_sys_id=user_sys_id)
+            existing_requests_result = self.get_open_laptop_requests_for_user(
+                user_sys_id
+            )
+            if not existing_requests_result["success"]:
+                return existing_requests_result
+            existing_requests = existing_requests_result["requests"]
+            logger.info(
+                "Found existing open request(s)",
+                existing_requests=len(existing_requests),
+            )
 
         # Step 2: Check if there's already an open request for the same laptop model
         current_laptop_model = params.laptop_choices
-        has_existing_model_request, existing_request = (
-            self._has_existing_request_for_laptop_model(
-                existing_requests, current_laptop_model
-            )
+        existing_request = self._has_existing_request_for_laptop_model(
+            existing_requests, current_laptop_model
         )
-        if has_existing_model_request:
-            assert (
-                existing_request is not None
-            ), "existing_request should not be None when has_existing_model_request is True"
+        if existing_request:
             return {
                 "success": True,
                 "message": f"Existing open request found for the same laptop model: {existing_request.get('number', 'N/A')}",
@@ -551,9 +547,14 @@ class ServiceNowClient:
         # - who_is_this_request_for equals user_sys_id
         # - state is open (typically states 1, 2)
         # - cat_item points to the laptop refresh catalog item
+        # Limit results to avoid timeouts on large tables.
+        # We only need enough to check limits and duplicates.
+        max_results = (self.laptop_request_limits or 10) + 1
         params = {
-            "sysparm_query": f"who_is_this_request_for={user_sys_id}^stateIN1,2^cat_item={self.laptop_refresh_id}",
+            "sysparm_query": f"cat_item={self.laptop_refresh_id}^stateIN1,2^who_is_this_request_for={user_sys_id}",
             "sysparm_fields": "number,variables.laptop_choices,state,request.number",
+            "sysparm_no_count": "true",
+            "sysparm_limit": str(max_results),
         }
 
         try:
