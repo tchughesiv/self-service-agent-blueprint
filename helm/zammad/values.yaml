@@ -1,0 +1,16 @@
+# Default values for the zammad wrapper chart.
+# Zammad subchart values go under the "zammad" key.
+# Override with helm/values-zammad-deploy.yaml.
+
+zammad: {}
+
+# OpenShift Route for external access to Zammad Web UI
+externalRoute:
+  enabled: false
+
+bootstrap:
+  image: "quay.io/rh-ai-quickstart/self-service-agent-zammad-bootstrap:latest"
+  # Must match autoWizard.config Users[0] and Token in helm/values-zammad-deploy.yaml
+  adminEmail: "admin@zammad.local"
+  adminPassword: "ZammadR0cks!"
+  autowizardToken: "ssa-zammad-autowizard-9f3a2b1c"
