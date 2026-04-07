@@ -482,6 +482,10 @@ help:
 	@echo "      LG_PROMPT_EMAIL_UPDATE          - Override email-update agent"
 	@echo "    Usage: make helm-install-test LG_PROMPT_LAPTOP_REFRESH=config/lg-prompts/custom.yaml"
 	@echo ""
+	@echo "  Routing Agent Configuration:"
+	@echo "    DEFAULT_AGENT_ID                  - Override the default routing agent (default: routing-agent)"
+	@echo "    Usage: make helm-install-test DEFAULT_AGENT_ID=my-custom-agent"
+	@echo ""
 	@echo "  Evaluation Configuration:"
 	@echo "    VALIDATE_FULL_LAPTOP_DETAILS    - Enable full laptop details validation (default: true)"
 	@echo "                                        Set to 'false' to disable: VALIDATE_FULL_LAPTOP_DETAILS=false"
@@ -1493,6 +1497,7 @@ define helm_install_common
 		$(TEST_USERS_ARGS) \
 		$(LANGFUSE_ARGS) \
 		$(FAULT_INJECTION_ARGS) \
+		$(DEFAULT_AGENT_ID_ARG) \
 		$(if $(filter-out "",$(2)),$(2),) \
 		$(EXTRA_HELM_ARGS)
 	@echo "Waiting for deployments to be ready..."
@@ -1550,6 +1555,7 @@ define helm_export
 		$(helm_test_users_args) \
 		$(if $(filter true,$(ENABLE_LANGFUSE)),--set langfuse.enabled=true,) \
 		$(helm_fault_injection_args) \
+		$(DEFAULT_AGENT_ID_ARG) \
 		$(if $(filter-out "",$(1)),$(1),) \
 		$(EXTRA_HELM_ARGS)
 	@echo "Helm export complete."
@@ -1558,6 +1564,7 @@ endef
 # Install with mock eventing service (testing/development/CI mode - default)
 # Extract all LG_PROMPT_* variables and convert them to Helm --set arguments
 PROMPT_OVERRIDES := $(foreach var,$(filter LG_PROMPT_%,$(.VARIABLES)),--set requestManagement.agentService.promptOverrides.lg-prompt-$(shell echo $(var:LG_PROMPT_%=%) | tr '[:upper:]' '[:lower:]' | tr '_' '-')=$($(var)))
+DEFAULT_AGENT_ID_ARG := $(if $(DEFAULT_AGENT_ID),--set agent.defaultAgentId=$(DEFAULT_AGENT_ID),)
 
 .PHONY: helm-install-test
 helm-install-test: namespace helm-depend
