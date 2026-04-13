@@ -1998,6 +1998,8 @@ helm-cleanup-eventing:
 helm-cleanup-jobs:
 	@echo "Cleaning up leftover jobs in namespace $(NAMESPACE)..."
 	@kubectl delete jobs -n $(NAMESPACE) -l app.kubernetes.io/name=self-service-agent --ignore-not-found || true
+	@echo "Removing Zammad wrapper bootstrap Job(s) if still present..."
+	@kubectl delete jobs -n $(NAMESPACE) -l app.kubernetes.io/component=zammad-bootstrap --ignore-not-found --wait=false 2>/dev/null || true
 	@echo "Job cleanup completed for namespace $(NAMESPACE)"
 
 # Check deployment status
@@ -2155,6 +2157,8 @@ deploy-zammad: namespace
 		ZAMMAD_ARGS="$$ZAMMAD_ARGS --set zammad.securityContext.runAsUser=$$ZAMMAD_UID --set zammad.securityContext.runAsGroup=$$ZAMMAD_UID --set zammad.securityContext.fsGroup=$$ZAMMAD_UID"; \
 		echo "OpenShift: using namespace UID $$ZAMMAD_UID for restricted SCC"; \
 	fi; \
+	echo "Removing prior Zammad bootstrap Job(s) if any (wrapper chart post-install hook; clean re-run)..."; \
+	kubectl delete jobs -n $(NAMESPACE) -l app.kubernetes.io/component=zammad-bootstrap --ignore-not-found --wait=false 2>/dev/null || true; \
 	helm upgrade --install zammad helm/zammad/ \
 		-n $(NAMESPACE) \
 		$$ZAMMAD_ARGS \
@@ -2221,7 +2225,10 @@ deploy-zammad: namespace
 undeploy-zammad:
 	@echo "Removing Zammad instance from namespace $(NAMESPACE)..."
 	@helm uninstall zammad-embed -n $(NAMESPACE) --ignore-not-found 2>/dev/null || true
+	@echo "Deleting Zammad bootstrap Job(s) (may outlive helm uninstall or block teardown)..."
+	@kubectl delete jobs -n $(NAMESPACE) -l app.kubernetes.io/component=zammad-bootstrap --ignore-not-found --wait=false 2>/dev/null || true
 	@helm uninstall zammad -n $(NAMESPACE) --ignore-not-found 2>/dev/null || true
+	@kubectl delete jobs -n $(NAMESPACE) -l app.kubernetes.io/component=zammad-bootstrap --ignore-not-found --wait=false 2>/dev/null || true
 	@echo "Waiting for pods to terminate, then removing Zammad PVCs..."
 	@sleep 5
 	@kubectl delete pvc -n $(NAMESPACE) -l app.kubernetes.io/instance=zammad --ignore-not-found 2>/dev/null || true
