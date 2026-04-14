@@ -1692,7 +1692,7 @@ helm-install-ticketing: namespace helm-depend
 		--from-literal=zammad-http-token="" \
 		-n $(NAMESPACE) --dry-run=client -o yaml | kubectl apply -f -; \
 	$(MAKE) _helm-install-ticketing-single ZAMMAD_URL="$$ZAMMAD_URL"
-	@echo "Step 2/4: Deploying Zammad (auto-detects Route hostname for FQDN and embed URL)..."
+	@echo "Step 2/4: Deploying Zammad (FQDN from Route; optional embed page: set ZAMMAD_EMBED_ENABLED=true on deploy-zammad)..."
 	@$(MAKE) deploy-zammad NAMESPACE=$(NAMESPACE)
 	@echo "Waiting for Zammad railsserver to be ready (may take 10+ minutes on first deploy)..."
 	@kubectl rollout status deployment/zammad-railsserver -n $(NAMESPACE) --timeout=15m
@@ -1746,7 +1746,11 @@ _helm-install-ticketing-print-checklist:
 	if [ -n "$$ZAMMAD_ROUTE" ]; then \
 		echo "     Web UI: https://$$ZAMMAD_ROUTE"; \
 		echo "     API:    https://$$ZAMMAD_ROUTE/api/v1"; \
-		if [ -n "$$ZAMMAD_EMBED_ROUTE" ]; then echo "     Embed:  https://$$ZAMMAD_EMBED_ROUTE (Zammad chat widget — embed snippet + live preview)"; fi; \
+		if [ -n "$$ZAMMAD_EMBED_ROUTE" ]; then \
+			echo "     Embed:  https://$$ZAMMAD_EMBED_ROUTE (Zammad chat widget — embed snippet + live preview)"; \
+		else \
+			echo "     Embed:  (not installed) Optional helper Route — add with: make deploy-zammad NAMESPACE=$(NAMESPACE) ZAMMAD_EMBED_ENABLED=true"; \
+		fi; \
 	else \
 		echo "     Port-forward: kubectl port-forward -n $(NAMESPACE) svc/zammad-nginx 8080:8080"; \
 		echo "     Web UI: http://localhost:8080"; \
@@ -1759,10 +1763,15 @@ _helm-install-ticketing-print-checklist:
 	@echo "     - make zammad-bootstrap-token NAMESPACE=$(NAMESPACE)"
 	@echo "     - Or create token in Zammad UI, then: make zammad-set-token NAMESPACE=$(NAMESPACE) ZAMMAD_TOKEN=<token>"
 	@echo ""
-	@echo "  4. Chat widget: Admin → Channels → Chat (agents must be available)."
-	@echo "     Full chat → agent reply loop needs app integration (webhook/MCP/agent) when enabled."
-	@echo ""
-	@echo "  5. (Optional) Webhook trigger for Zammad → blueprint (when that integration is merged)."
+	@ZAMMAD_EMBED_ROUTE=$$(oc get route ssa-zammad-embed -n $(NAMESPACE) -o jsonpath='{.spec.host}' 2>/dev/null); \
+	n=4; \
+	if [ -n "$$ZAMMAD_EMBED_ROUTE" ]; then \
+		echo "  $$n. Chat widget (embed page loads the live preview): Admin → Channels → Chat (agents must be available)."; \
+		echo "     Full chat → agent reply loop needs app integration (webhook/MCP/agent) when enabled."; \
+		echo ""; \
+		n=$$(($$n+1)); \
+	fi; \
+	echo "  $$n. (Optional) Webhook trigger for Zammad → blueprint (when that integration is merged)."
 	@echo ""
 	@echo "  Admin login defaults: ZAMMAD_ADMIN_EMAIL / ZAMMAD_ADMIN_PASSWORD (see Makefile; must match autoWizard in helm/values-zammad-deploy.yaml)."
 	@echo "  More: README.md, docs/HELM_EXPORT_ANSIBLE.md"
@@ -2141,6 +2150,8 @@ undeploy-email-server:
 # Zammad deployment (prerequisite for ticketing channel)
 ZAMMAD_HELM_REPO ?= https://zammad.github.io/zammad-helm
 ZAMMAD_CHART_VERSION ?= 16.0.4
+# Optional helm/zammad-embed (ssa-zammad-embed Route + snippet page). Literal true installs; anything else skips install and runs helm uninstall so a prior embed is removed.
+ZAMMAD_EMBED_ENABLED ?= false
 
 # ZAMMAD_FQDN: when set (e.g. from Route host), passed as extraEnv so Zammad accepts Route requests.
 # Used by helm-install-ticketing which installs our chart first (creates Route), then deploys Zammad.
@@ -2183,8 +2194,13 @@ deploy-zammad: namespace
 			-f $$TMPFQDN; \
 		rm -f $$TMPFQDN; \
 	fi; \
-	helm upgrade --install zammad-embed helm/zammad-embed/ \
-		-n $(NAMESPACE)
+	if [ "$(ZAMMAD_EMBED_ENABLED)" = "true" ]; then \
+		helm upgrade --install zammad-embed helm/zammad-embed/ \
+			-n $(NAMESPACE) \
+			--set enabled=true; \
+	else \
+		helm uninstall zammad-embed -n $(NAMESPACE) --ignore-not-found 2>/dev/null || true; \
+	fi
 	@echo "Waiting for Zammad bootstrap Job to complete..."
 	@kubectl wait job/zammad-bootstrap -n $(NAMESPACE) --for=condition=complete --timeout=10m 2>/dev/null \
 		&& echo "✅ Bootstrap complete." \
@@ -2198,11 +2214,17 @@ deploy-zammad: namespace
 	@echo ""
 	@echo "📋 Next steps:"
 	@ZAMMAD_ROUTE=$$(oc get route ssa-zammad -n $(NAMESPACE) -o jsonpath='{.spec.host}' 2>/dev/null); \
+	ZAMMAD_EMBED_ROUTE=$$(oc get route ssa-zammad-embed -n $(NAMESPACE) -o jsonpath='{.spec.host}' 2>/dev/null); \
 	if [ -z "$$ZAMMAD_ROUTE" ]; then ZAMMAD_ROUTE=$$(oc get route -n $(NAMESPACE) -l app.kubernetes.io/instance=zammad -o jsonpath='{.items[0].spec.host}' 2>/dev/null); fi; \
 	echo "  1. Zammad URLs:"; \
 	if [ -n "$$ZAMMAD_ROUTE" ]; then \
 		echo "     Web UI: https://$$ZAMMAD_ROUTE"; \
 		echo "     API:    https://$$ZAMMAD_ROUTE/api/v1"; \
+		if [ -n "$$ZAMMAD_EMBED_ROUTE" ]; then \
+			echo "     Embed:  https://$$ZAMMAD_EMBED_ROUTE (snippet + live preview page)"; \
+		else \
+			echo "     Embed:  (not installed) Optional — add with: make deploy-zammad NAMESPACE=$(NAMESPACE) ZAMMAD_EMBED_ENABLED=true"; \
+		fi; \
 	else \
 		echo "     No Route found - port-forward: kubectl port-forward -n $(NAMESPACE) svc/zammad-nginx 8080:8080"; \
 		echo "     Web UI / API: http://localhost:8080 (and /api/v1)"; \
@@ -2215,8 +2237,12 @@ deploy-zammad: namespace
 	echo "  3. HTTP API token for MCP: make zammad-bootstrap-token NAMESPACE=$(NAMESPACE)"; \
 	echo "     If you ran this deploy via make helm-install-ticketing, token bootstrap runs next in that recipe—skip if you see success below."; \
 	echo ""; \
-	echo "  4. Chat widget: Admin → Channels → Chat (agents must be available for the widget to appear)."; \
-	echo "  5. Main chart: zammad.enabled, zammad.url, credentials Secret (use helm-install-ticketing or manual Secret)."; \
+	n=4; \
+	if [ -n "$$ZAMMAD_EMBED_ROUTE" ]; then \
+		echo "  $$n. Chat widget (embed preview page): Admin → Channels → Chat (agents must be available for the widget to appear)."; \
+		n=$$(($$n+1)); \
+	fi; \
+	echo "  $$n. Main chart: zammad.enabled, zammad.url, credentials Secret (use helm-install-ticketing or manual Secret)."; \
 	echo ""; \
 	echo "  More: README.md, docs/HELM_EXPORT_ANSIBLE.md"
 	@echo ""
