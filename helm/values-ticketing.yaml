@@ -7,9 +7,10 @@ ticketingZammad:
   enabled: true
 
   # Subchart config — cluster-specific overrides (FQDN, OpenShift UID) injected by Makefile.
+  # Bootstrap image registry/repo/tag: defaults from helm/zammad/values.yaml (avoid duplicating here).
+  # Makefile overlay still sets ticketingZammad.bootstrap.* from REGISTRY/VERSION at helm-install-ticketing.
   # Bootstrap job: seeds users/groups and (with createToken=true) creates MCP agent token in-cluster.
   bootstrap:
-    image: "quay.io/rh-ai-quickstart/self-service-agent-zammad-bootstrap:latest"
     adminEmail: "admin@zammad.local"
     adminPassword: "ZammadR0cks!"
     autowizardToken: "ssa-zammad-autowizard-9f3a2b1c"

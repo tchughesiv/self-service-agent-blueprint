@@ -29,7 +29,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: zammad-bootstrap
-          image: {{ .Values.bootstrap.image | quote }}
+          image: "{{ .Values.bootstrap.imageRegistry }}/{{ .Values.bootstrap.imageRepository }}:{{ .Values.bootstrap.imageTag }}"
           imagePullPolicy: Always
           securityContext:
             allowPrivilegeEscalation: false

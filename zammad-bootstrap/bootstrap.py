@@ -311,7 +311,7 @@ _KUBE_NS = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
 
 
 def create_mcp_token_and_update_k8s():
-    """Create Zammad MCP agent API token, patch k8s secret, trigger deployment restarts."""
+    """Create Zammad MCP agent API token, update k8s secret (read+replace), restart deployments."""
     credentials_secret = os.environ["ZAMMAD_CREDENTIALS_SECRET"]
     mcp_deployment = os.environ.get("ZAMMAD_MCP_DEPLOYMENT", "")
     request_manager_deployment = os.environ.get("ZAMMAD_REQUEST_MANAGER_DEPLOYMENT", "")
@@ -343,21 +343,30 @@ def create_mcp_token_and_update_k8s():
     def _b64(s):
         return base64.b64encode(s.encode()).decode()
 
-    print(f"  Patching secret {credentials_secret} in namespace {namespace}...")
+    print(f"  Updating secret {credentials_secret} in namespace {namespace}...")
     try:
-        core_v1.patch_namespaced_secret(
+        # Use read + replace instead of PATCH: some clusters (notably OpenShift) return 401 or other
+        # failures on strategic-merge PATCH for Secrets even when RBAC allows patch/update.
+        existing = core_v1.read_namespaced_secret(
+            name=credentials_secret, namespace=namespace
+        )
+        data = dict(existing.data or {})
+        data["zammad-url"] = _b64(zammad_url)
+        data["zammad-api-url"] = _b64(f"{zammad_url}/api/v1")
+        data["zammad-http-token"] = _b64(token)
+        existing.data = data
+        core_v1.replace_namespaced_secret(
             name=credentials_secret,
             namespace=namespace,
-            body={
-                "data": {
-                    "zammad-url": _b64(zammad_url),
-                    "zammad-api-url": _b64(f"{zammad_url}/api/v1"),
-                    "zammad-http-token": _b64(token),
-                }
-            },
+            body=existing,
         )
     except k8s_client.ApiException as e:
-        print(f"  ERROR patching secret: {e.status} {e.reason}", file=sys.stderr)
+        detail = (e.body or "").strip()[:500]
+        extra = f" — {detail}" if detail else ""
+        print(
+            f"  ERROR updating secret: {e.status} {e.reason}{extra}",
+            file=sys.stderr,
+        )
         sys.exit(1)
     print("  Secret updated.")
 
