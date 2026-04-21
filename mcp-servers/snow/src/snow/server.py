@@ -5,21 +5,30 @@ ServiceNow laptop refresh tickets.
 """
 
 import os
+import re
 from contextlib import asynccontextmanager
-from typing import Any, AsyncGenerator, Literal
+from typing import Any, AsyncGenerator, Literal, cast
 
 from mcp.server.fastmcp import Context, FastMCP
+from mcp_common.headers import header_first
+from mcp_common.tracing import trace_mcp_tool
 from shared_models import configure_logging
-from snow.servicenow import headers
 from snow.servicenow.client import ServiceNowClient
 from snow.servicenow.models import OpenServiceNowLaptopRefreshRequestParams
-from snow.tracing import trace_mcp_tool
 from starlette.responses import JSONResponse
 from tracing_config.auto_tracing import run as auto_tracing_run
 
 SERVICE_NAME = "snow-mcp-server"
 logger = configure_logging(SERVICE_NAME)
 auto_tracing_run(SERVICE_NAME, logger)
+
+
+def _snow_authoritative_user_id_for_email(ctx: Context[Any, Any]) -> str | None:
+    """Email for ServiceNow lookup; strips ``-{digits}`` suffix from ticket flows."""
+    raw = header_first(ctx, "AUTHORITATIVE_USER_ID", "authoritative_user_id")
+    if raw is None:
+        return None
+    return re.sub(r"-\d+$", "", str(raw).strip())
 
 
 @asynccontextmanager
@@ -74,7 +83,10 @@ async def lifespan(app: FastMCP) -> AsyncGenerator[None, None]:
         logger.info("Shutting down ServiceNow MCP server")
 
 
-MCP_TRANSPORT: Literal["stdio", "sse", "streamable-http"] = os.environ.get("MCP_TRANSPORT", "sse")  # type: ignore[assignment]
+MCP_TRANSPORT: Literal["stdio", "sse", "streamable-http"] = cast(
+    Literal["stdio", "sse", "streamable-http"],
+    os.environ.get("MCP_TRANSPORT", "sse") or "sse",
+)
 MCP_PORT = int(
     os.environ.get("SELF_SERVICE_AGENT_SNOW_SERVER_SERVICE_PORT_HTTP", "8001")
 )
@@ -87,7 +99,7 @@ mcp = FastMCP(
 )
 
 
-@mcp.custom_route("/health", methods=["GET"])  # type: ignore
+@mcp.custom_route("/health", methods=["GET"])
 async def health(request: Any) -> JSONResponse:
     """Health check endpoint."""
     return JSONResponse({"status": "OK"})
@@ -126,8 +138,8 @@ def open_laptop_refresh_ticket(
                 "ServiceNow laptop code cannot be empty. Must be a valid ServiceNow laptop choice code like 'apple_mac_book_air_m_3'."
             )
 
-        authoritative_user_id = headers.extract_authoritative_user_id(ctx)
-        api_token = headers.extract_servicenow_token(ctx)
+        authoritative_user_id = _snow_authoritative_user_id_for_email(ctx)
+        api_token = header_first(ctx, "SERVICE_NOW_TOKEN")
 
         if not authoritative_user_id:
             raise ValueError(
@@ -243,9 +255,8 @@ def get_employee_laptop_info(
         # Returns laptop info for alice.johnson@company.com
     """
     try:
-        # Extract authoritative user ID from request headers - CENTRALIZED HANDLING
-        authoritative_user_id = headers.extract_authoritative_user_id(ctx)
-        api_token = headers.extract_servicenow_token(ctx)
+        authoritative_user_id = _snow_authoritative_user_id_for_email(ctx)
+        api_token = header_first(ctx, "SERVICE_NOW_TOKEN")
 
         if not authoritative_user_id:
             raise ValueError(
