@@ -1,4 +1,4 @@
-enabled: true
+enabled: false
 
 # publicUrl: Zammad base URL for the chat widget script src.
 # If not set, auto-detected from the ssa-zammad OpenShift Route via Helm lookup.
