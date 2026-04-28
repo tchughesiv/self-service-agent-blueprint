@@ -94,8 +94,8 @@ jobs:
           # Create and checkout new branch
           git checkout -b "$BRANCH_NAME"
 
-          # Stage and commit changes (paths must match scripts/bump-release.manifest.json)
-          git add Makefile helm/Chart.yaml helm/values.yaml helm/zammad/values.yaml
+          # Stage manifest paths (same set bump_release.py updates)
+          python3 scripts/bump_release.py --print-manifest-paths --null | xargs -0 git add --
           git commit -m "chore: increment dev version to $NEW_VERSION"
 
           # Push branch

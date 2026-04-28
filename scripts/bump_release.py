@@ -177,6 +177,18 @@ if set(EXTRACTORS.keys()) != set(RULES.keys()):
     )
 
 
+def manifest_rel_paths(data: dict) -> list[str]:
+    """Paths from the manifest in JSON order; each path appears once."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in data["replacements"]:
+        for p in item["paths"]:
+            if p not in seen:
+                seen.add(p)
+                out.append(p)
+    return out
+
+
 def load_manifest(path: pathlib.Path) -> dict:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -209,13 +221,25 @@ def load_manifest(path: pathlib.Path) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=__doc__,
-        usage="%(prog)s [--verify] [--git-ref REF] [--dry-run] [--manifest PATH] [<version>]",
+        usage="%(prog)s [--verify] [--print-manifest-paths [-0]] [--git-ref REF] [--dry-run] [--manifest PATH] [<version>]",
     )
     parser.add_argument(
         "--manifest",
         type=pathlib.Path,
         default=DEFAULT_MANIFEST,
         help=f"JSON manifest of files and rules (default: {DEFAULT_MANIFEST})",
+    )
+    parser.add_argument(
+        "--print-manifest-paths",
+        action="store_true",
+        help="Print manifest-relative paths (one per line, or use -0 for xargs -0 git add)",
+    )
+    parser.add_argument(
+        "-0",
+        "--null",
+        dest="paths_nul_terminated",
+        action="store_true",
+        help="With --print-manifest-paths: write paths separated by ASCII NUL (safe for xargs -0 git add --)",
     )
     parser.add_argument(
         "--verify",
@@ -237,7 +261,7 @@ def main() -> None:
         "version",
         nargs="?",
         default=None,
-        help="New release version (e.g. 0.0.14); required unless --verify",
+        help="New release version (e.g. 0.0.14); required unless --verify or --print-manifest-paths",
     )
     args = parser.parse_args()
 
@@ -245,12 +269,32 @@ def main() -> None:
     if not manifest_path.is_absolute():
         manifest_path = (ROOT / manifest_path).resolve()
 
+    if args.paths_nul_terminated and not args.print_manifest_paths:
+        parser.error("-0/--null is only valid with --print-manifest-paths")
+
+    if args.print_manifest_paths:
+        if args.verify:
+            parser.error("--print-manifest-paths cannot be combined with --verify")
+        if args.git_ref:
+            parser.error("--print-manifest-paths cannot be combined with --git-ref")
+        if args.version:
+            parser.error("version must not be given with --print-manifest-paths")
+        data = load_manifest(manifest_path)
+        paths = manifest_rel_paths(data)
+        if args.paths_nul_terminated:
+            if paths:
+                sys.stdout.buffer.write("\0".join(paths).encode("utf-8"))
+        else:
+            for rel in paths:
+                print(rel)
+        return
+
     if args.verify:
         verify_manifest_alignment(manifest_path, git_ref=args.git_ref, repo_root=ROOT)
         return
 
     if not args.version:
-        parser.error("version is required unless --verify")
+        parser.error("version is required unless --verify or --print-manifest-paths")
 
     data = load_manifest(manifest_path)
     new_ver = args.version.strip().strip('"').strip("'")

@@ -7,6 +7,7 @@
 #   ./scripts/bump-release.sh --dry-run <new-version>
 #   python3 scripts/bump_release.py --verify
 #   python3 scripts/bump_release.py --verify --git-ref <sha>   # CI (git show)
+#   python3 scripts/bump_release.py --print-manifest-paths --null | xargs -0 git add --
 #
 # Release checklist (also run CI / image builds as appropriate):
 #   [ ] ./scripts/bump-release.sh X.Y.Z
