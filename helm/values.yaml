@@ -17,7 +17,8 @@ image:
   # This sets the pull policy for images.
   pullPolicy: Always
   # Overrides the image tag whose default is the chart appVersion.
-  tag: "0.0.13"
+  # Anchor: bump once here; subchart defaults (e.g. mcp-servers Snow) alias this tag.
+  tag: &releaseImageTag "0.0.13"
 
 # Test Integration Configuration
 testIntegrationEnabled: false
@@ -249,7 +250,7 @@ mcp-servers:
       deploymentMode: deployment  # Use standard Deployment (no Toolhive)
       image:
         repository: quay.io/rh-ai-quickstart/self-service-agent-snow-mcp
-        tag: "0.0.13"
+        tag: *releaseImageTag
       port: 8000
       targetPort: 8000
       transport: streamable-http
@@ -275,7 +276,7 @@ mcp-servers:
       deploymentMode: deployment
       image:
         repository: quay.io/rh-ai-quickstart/self-service-agent-zammad-mcp
-        tag: "0.0.13"
+        tag: *releaseImageTag
       port: 8000
       targetPort: 8000
       transport: streamable-http

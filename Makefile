@@ -244,7 +244,7 @@ helm_demo_email_args = \
 # Ticketing: Zammad in-cluster URL and MCP secret wiring
 ZAMMAD_CREDENTIALS_SECRET ?= $(MAIN_CHART_NAME)-zammad-credentials
 ZAMMAD_URL ?= http://zammad-nginx.$(NAMESPACE).svc.cluster.local:8080
-# Temp overlay file for cluster-specific Zammad values (FQDN, OpenShift UID) written by helm-install-ticketing
+# Temp overlay file for cluster-specific Zammad Helm values (bootstrap image registry/tag, FQDN, OpenShift UID). Written by helm-install-ticketing.
 ZAMMAD_TICKETING_OVERLAY = /tmp/ssa-zammad-$(NAMESPACE)-overlay.yaml
 # Must match autoWizard.config in helm/values-ticketing.yaml (for UI login).
 ZAMMAD_ADMIN_EMAIL ?= admin@zammad.local
@@ -388,6 +388,7 @@ help:
 	@echo "Lockfile Management:"
 	@echo "  check-lockfiles                     - Check if all uv.lock files are up-to-date"
 	@echo "  check-requirements                  - Check if all requirements.txt files exist and are in sync with uv.lock"
+	@echo "  check-release-manifest              - Check Makefile BASE_VERSION vs scripts/bump-release.manifest.json"
 	@echo "  check-uv-version                    - Check if local uv version matches CI requirement ($(UV_VERSION))"
 	@echo "  update-lockfiles                    - Update all uv.lock files; export requirements.txt for dirs in REQUIREMENTS_DIRS"
 	@echo "  export-requirements                - Export requirements.txt for containerized services (REQUIREMENTS_DIRS only)"
@@ -447,7 +448,8 @@ help:
 	@echo "    INTEGRATION_DISPATCHER_IMG        - Full integration dispatcher image name (default: \$${REGISTRY}/self-service-agent-integration-dispatcher:\$${VERSION})"
 	@echo "    MCP_SNOW_IMG                      - Full snow MCP image name (default: \$${REGISTRY}/self-service-agent-snow-mcp:\$${VERSION})"
 	@echo "    MOCK_SERVICENOW_IMG               - Full mock ServiceNow image name (default: \$${REGISTRY}/self-service-agent-mock-servicenow:\$${VERSION})"
-	@echo "    ZAMMAD_BOOTSTRAP_IMG              - Full Zammad bootstrap image name (default: \$${REGISTRY}/self-service-agent-zammad-bootstrap:\$${VERSION})"
+	@echo "    ZAMMAD_BOOTSTRAP_IMG              - Full Zammad bootstrap image for build/push/retag (default: \$${REGISTRY}/self-service-agent-zammad-bootstrap:\$${VERSION})"
+	@echo "                                        same REGISTRY/VERSION as helm-install-ticketing bootstrap overlay (not via this var)"
 	@echo "    REQUEST_MGR_IMG                   - Full request manager image name (default: \$${REGISTRY}/self-service-agent-request-manager:\$${VERSION})"
 	@echo "    USE_PIP_INSTALL                   - Use pip install from requirements.txt instead of uv sync (default: false)"
 	@echo "                                        ⚠️  Troubleshooting: If you encounter QEMU segmentation faults when building"
@@ -1327,6 +1329,11 @@ export-requirements: check-uv-version
 	done
 	@echo "🎉 All requirements.txt files exported successfully!"
 
+.PHONY: check-release-manifest
+check-release-manifest:
+	@echo "🔍 Checking Makefile BASE_VERSION matches scripts/bump-release.manifest.json..."
+	@python3 scripts/bump_release.py --verify
+
 .PHONY: check-requirements
 check-requirements: check-uv-version
 	@echo "🔍 Checking requirements.txt files are in sync with uv.lock files..."
@@ -1706,7 +1713,9 @@ helm-install-ticketing: namespace helm-depend
 	{ \
 		printf 'ticketingZammad:\n'; \
 		printf '  bootstrap:\n'; \
-		printf '    image: "%s"\n' '$(ZAMMAD_BOOTSTRAP_IMG)'; \
+		printf '    imageRegistry: "%s"\n' '$(REGISTRY)'; \
+		printf '    imageRepository: "%s"\n' 'self-service-agent-zammad-bootstrap'; \
+		printf '    imageTag: "%s"\n' '$(VERSION)'; \
 		if [ -n "$$ZAMMAD_UID" ] || [ -n "$$ZAMMAD_FQDN" ]; then \
 			printf '  zammad:\n'; \
 			if [ -n "$$ZAMMAD_UID" ]; then \
