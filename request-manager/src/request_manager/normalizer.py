@@ -164,6 +164,8 @@ class RequestNormalizer:
         Routes to ticket-laptop-refresh (APPENG-4759). New tickets and follow-ups both
         reach the request manager; webhook may add ticket-type filters / metadata later.
         """
+        tt = getattr(request, "ticket_title", None)
+        ticket_title = (str(tt).strip() if tt else "") or None
         integration_context = {
             "ticket_id": request.ticket_id,
             "article_id": request.article_id,
@@ -171,6 +173,8 @@ class RequestNormalizer:
             "zammad_delivery_id": request.zammad_delivery_id,
             "platform": "zammad",
         }
+        if ticket_title:
+            integration_context["ticket_title"] = ticket_title
 
         # Zammad requests bypass routing; specialist handles ticket channel (see APPENG-4759)
         base_data["target_agent_id"] = "ticket-laptop-refresh"

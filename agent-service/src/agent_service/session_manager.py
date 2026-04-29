@@ -4,9 +4,9 @@ import logging
 import os
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Optional, cast
+from typing import Any, Dict, Optional, cast
 
-from shared_models import BaseSessionManager, configure_logging
+from shared_models import BaseSessionManager, configure_logging, get_enum_value
 from shared_models.models import RequestSession, SessionStatus
 from shared_models.user_utils import is_uuid
 from sqlalchemy import select, update
@@ -18,6 +18,62 @@ logger = configure_logging("agent-service")
 # Configure logging to suppress verbose output
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("langgraph").setLevel(logging.WARNING)
+
+# Session persistence for ticketing (sticky routing intent)
+STICKY_AGENT_LAPTOP = "ticket-laptop-refresh"
+STICKY_AGENT_GENERAL = "ticket-general-support"
+
+
+def _text_suggests_non_laptop_topic(text: str) -> bool:
+    """Heuristic: user is likely asking for a different IT track than laptop refresh."""
+    t = text.lower()
+    if "laptop" in t or "refresh" in t or "hardware" in t:
+        return False
+    blocked = (
+        "password",
+        "printer",
+        "vpn",
+        "outlook",
+        "email not",
+        "different issue",
+        "unrelated",
+        "not about laptop",
+        "new ticket",
+        "not laptop",
+    )
+    return any(b in t for b in blocked)
+
+
+def sticky_prefer_laptop_over_general(text: str) -> bool:
+    """When session sticky is laptop, keep laptop path for short/ambiguous follow-ups."""
+    t = text.strip().lower()
+    if not t:
+        return True
+    if t in {
+        "help",
+        "hi",
+        "hello",
+        "hey",
+        "thanks",
+        "thank you",
+        "ok",
+        "okay",
+        "yes",
+        "no",
+        "?",
+    }:
+        return True
+    if len(t) <= 50 and not _text_suggests_non_laptop_topic(t):
+        return True
+    if (
+        "laptop" in t or "refresh" in t or "hardware" in t
+    ) and not _text_suggests_non_laptop_topic(t):
+        return True
+    if len(t) > 120 and _text_suggests_non_laptop_topic(t):
+        return False
+    if len(t) <= 100:
+        return not _text_suggests_non_laptop_topic(t)
+    return False
 
 
 def get_session_token_context(session_id: str | None) -> str:
@@ -66,8 +122,14 @@ class ResponsesSessionManager(BaseSessionManager):
         self.agent_manager: Any | None = None
         self.agents: list[Any] = []
         self.request_manager_session_id: str | None = None
+        self._integration_context: dict[str, Any] = {}
+        # NormalizedRequest.integration_type for this turn (sticky/title are ZAMMAD-only)
+        self._integration_type_str: Optional[str] = None
 
         self._initialize_conversation_state()
+
+    def _is_zammad_integration(self) -> bool:
+        return (self._integration_type_str or "").upper() == "ZAMMAD"
 
     def _initialize_conversation_state(self) -> None:
         """Initialize conversation state for responses mode."""
@@ -104,6 +166,8 @@ class ResponsesSessionManager(BaseSessionManager):
         session_name: Optional[str] = None,
         target_agent_id: Optional[str] = None,
         requires_routing: bool = True,
+        integration_context: Optional[dict[str, Any]] = None,
+        integration_type: Any = None,
     ) -> str:
         """Handle a message in responses mode with full conversation management."""
         if not self.user_id:
@@ -114,9 +178,16 @@ class ResponsesSessionManager(BaseSessionManager):
             logger.error("Agent manager not initialized")
             return "Error: Agent manager not initialized"
 
+        self._integration_context = dict(integration_context or {})
+        if integration_type is not None:
+            self._integration_type_str = get_enum_value(integration_type)
+
         # Store the request manager session ID for database updates
         if request_manager_session_id:
             self.request_manager_session_id = request_manager_session_id
+
+        if self.request_manager_session_id and self._is_zammad_integration():
+            await self._persist_ticket_title_merge()
 
         logger.debug(
             "Handling responses message",
@@ -223,6 +294,8 @@ class ResponsesSessionManager(BaseSessionManager):
                     session_name,
                     target_agent_id=None,
                     requires_routing=True,
+                    integration_context=self._integration_context,
+                    integration_type=self._integration_type_str,
                 )
 
             # Intercept special commands before passing to conversation
@@ -251,9 +324,11 @@ class ResponsesSessionManager(BaseSessionManager):
                 logger.error("Conversation session not initialized")
                 return "Error: Conversation session not initialized"
 
+            state_patch = await self._build_langgraph_state_patch()
             response = await self.conversation_session.send_message(
                 text,
                 token_context=token_context,
+                state_patch=state_patch if state_patch else None,
             )
             processed_response = self._process_agent_response(response)
 
@@ -534,6 +609,98 @@ class ResponsesSessionManager(BaseSessionManager):
             )
             return False
 
+    async def _merge_conversation_context_keys(self, updates: dict[str, Any]) -> None:
+        """Merge keys into RequestSession.conversation_context (preserves sticky intent, etc.)."""
+        if not self.request_manager_session_id or not updates:
+            return
+        try:
+            stmt = select(RequestSession).where(
+                RequestSession.session_id == self.request_manager_session_id
+            )
+            result = await self.db_session.execute(stmt)
+            row = result.scalar_one_or_none()
+            if not row:
+                return
+            merged: dict[str, Any] = {
+                **cast(Dict[str, Any], row.conversation_context or {}),
+                **updates,
+            }
+            await self.db_session.execute(
+                update(RequestSession)
+                .where(RequestSession.session_id == self.request_manager_session_id)
+                .values(
+                    conversation_context=merged,
+                    updated_at=datetime.now(timezone.utc),
+                )
+            )
+            await self.db_session.commit()
+        except Exception as e:
+            logger.warning(
+                "Failed to merge conversation_context keys",
+                error=str(e),
+                user_id=self.user_id,
+            )
+
+    async def _persist_ticket_title_merge(self) -> None:
+        """Store latest Zammad ticket title on the session for prompts and history."""
+        title = (self._integration_context.get("ticket_title") or "").strip()
+        if not title:
+            return
+        await self._merge_conversation_context_keys({"last_ticket_title": title})
+
+    async def _get_sticky_routing_agent_from_db(self) -> Optional[str]:
+        if not self.request_manager_session_id:
+            return None
+        try:
+            stmt = select(RequestSession).where(
+                RequestSession.session_id == self.request_manager_session_id
+            )
+            result = await self.db_session.execute(stmt)
+            row = result.scalar_one_or_none()
+            if not row:
+                return None
+            raw = cast(Dict[str, Any], row.conversation_context or {}).get(
+                "sticky_routing_agent"
+            )
+            return str(raw) if raw else None
+        except Exception as e:
+            logger.debug(
+                "Could not read sticky_routing_agent",
+                error=str(e),
+                user_id=self.user_id,
+            )
+            return None
+
+    async def _build_langgraph_state_patch(self) -> dict[str, Any]:
+        """Fields merged into LangGraph state for ticket prompts (title, sticky routing)."""
+        if not self._is_zammad_integration():
+            return {}
+        patch: dict[str, Any] = {}
+        tt = (self._integration_context.get("ticket_title") or "").strip()
+        if not tt and self.request_manager_session_id:
+            try:
+                stmt = select(RequestSession).where(
+                    RequestSession.session_id == self.request_manager_session_id
+                )
+                result = await self.db_session.execute(stmt)
+                row = result.scalar_one_or_none()
+                if row:
+                    lt = (
+                        cast(Dict[str, Any], row.conversation_context or {}).get(
+                            "last_ticket_title"
+                        )
+                        or ""
+                    )
+                    tt = str(lt).strip()
+            except Exception:
+                tt = ""
+        if tt:
+            patch["ticket_title"] = tt
+        sticky = await self._get_sticky_routing_agent_from_db()
+        if sticky:
+            patch["sticky_routing_agent"] = sticky
+        return patch
+
     async def _handle_tokens_query(self) -> str:
         """Handle **tokens** command by querying database for session token counts."""
         try:
@@ -774,6 +941,22 @@ class ResponsesSessionManager(BaseSessionManager):
 
         logger.debug("Routing detection result", routed_agent=routed_agent)
 
+        # Zammad only: keep laptop path when the session was previously committed to laptop
+        # refresh and the user sends a short/ambiguous follow-up (e.g. "help") after reset.
+        if self._is_zammad_integration():
+            if (
+                routed_agent == STICKY_AGENT_GENERAL
+                and await self._get_sticky_routing_agent_from_db()
+                == STICKY_AGENT_LAPTOP
+                and sticky_prefer_laptop_over_general(text)
+            ):
+                routed_agent = STICKY_AGENT_LAPTOP
+                logger.info(
+                    "Sticky laptop intent override applied",
+                    user_id=self.user_id,
+                    message_preview=text[:120],
+                )
+
         if routed_agent:
             logger.info(
                 "Responses mode routing detected",
@@ -794,7 +977,11 @@ class ResponsesSessionManager(BaseSessionManager):
                     current_agent=self.current_agent_name,
                 )
                 await self._reset_conversation_state()
-                return await self.handle_responses_message("hi")
+                return await self.handle_responses_message(
+                    "hi",
+                    integration_context=self._integration_context,
+                    integration_type=self._integration_type_str,
+                )
 
             # Handle routing to specialist agents
             if routed_agent != self.ROUTING_AGENT_NAME and self._is_routing_session():
@@ -860,7 +1047,11 @@ class ResponsesSessionManager(BaseSessionManager):
                     # Send placeholder message - ConversationSession will override with routing agent's
                     # configured initial_user_message from YAML (routing.yaml: settings.initial_user_message)
                     return await self.handle_responses_message(
-                        "hi", self.request_manager_session_id, None
+                        "hi",
+                        self.request_manager_session_id,
+                        None,
+                        integration_context=self._integration_context,
+                        integration_type=self._integration_type_str,
                     )
 
         return processed_response
@@ -949,9 +1140,11 @@ class ResponsesSessionManager(BaseSessionManager):
             )
 
             token_context = get_session_token_context(self.request_manager_session_id)
+            state_patch = await self._build_langgraph_state_patch()
             response = await session.send_message(
                 text,
                 token_context=token_context,
+                state_patch=state_patch if state_patch else None,
             )
 
             logger.info(
@@ -1014,12 +1207,27 @@ class ResponsesSessionManager(BaseSessionManager):
                     current_agent_id=session.current_agent_id,
                 )
 
-                # Update the session with current agent and thread
-                conversation_context = {
-                    "agent_name": agent_name,
-                    "session_type": "responses_api",
-                    "last_updated": datetime.now(timezone.utc).isoformat(),
-                }
+                # Merge conversation_context so sticky routing / ticket metadata persist
+                merged_ctx: dict[str, Any] = dict(
+                    cast(Dict[str, Any], session.conversation_context or {})
+                )
+                merged_ctx.update(
+                    {
+                        "agent_name": agent_name,
+                        "session_type": "responses_api",
+                        "last_updated": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
+                if self._is_zammad_integration():
+                    if agent_name == STICKY_AGENT_LAPTOP:
+                        merged_ctx["sticky_routing_agent"] = STICKY_AGENT_LAPTOP
+                    elif agent_name == STICKY_AGENT_GENERAL:
+                        merged_ctx["sticky_routing_agent"] = STICKY_AGENT_GENERAL
+                    tt_merge = (
+                        self._integration_context.get("ticket_title") or ""
+                    ).strip()
+                    if tt_merge:
+                        merged_ctx["last_ticket_title"] = tt_merge
 
                 update_stmt = (
                     update(RequestSession)
@@ -1027,7 +1235,7 @@ class ResponsesSessionManager(BaseSessionManager):
                     .values(
                         current_agent_id=agent_name,
                         conversation_thread_id=thread_id,
-                        conversation_context=conversation_context,
+                        conversation_context=merged_ctx,
                         updated_at=datetime.now(timezone.utc),
                     )
                 )

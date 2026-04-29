@@ -84,6 +84,7 @@ class ZammadRequest(BaseRequest):
     owner_id: Optional[int] = Field(None, ge=0)
     created_by_id: int = Field(..., ge=0)
     zammad_delivery_id: str = Field(..., min_length=1, max_length=255)
+    ticket_title: Optional[str] = Field(None, max_length=500)
 
 
 # NormalizedRequest is now imported from shared_models.models

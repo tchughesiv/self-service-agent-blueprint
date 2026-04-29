@@ -854,6 +854,7 @@ async def _handle_request_created_event_from_data(
                 owner_id=request_data.get("owner_id"),
                 created_by_id=int(created_by_id),
                 zammad_delivery_id=str(zammad_delivery_id),
+                ticket_title=request_data.get("ticket_title"),
             )
         else:
             logger.warning(

@@ -49,6 +49,10 @@ state_schema:
       type: "string"
       description: "Terminal ticket action: escalated, closed, or complete"
       default: null
+    ticket_title:
+      type: "string"
+      description: "Zammad ticket subject line when provided"
+      default: ""
 
 # State definitions
 states:
@@ -65,6 +69,8 @@ states:
     allowed_tools: [ "get_employee_laptop_info" ]
     prompt: |
       You are a helpful laptop refresh assistant.
+
+      Ticket title from Zammad (may be empty): "{ticket_title}"
 
       CRITICAL: DO NOT announce what you are about to do (e.g., "I will look up your information", "Let me check the database"). Execute tool calls silently and present only the results to the user.
 

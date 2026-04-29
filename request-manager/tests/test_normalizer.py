@@ -143,6 +143,7 @@ class TestRequestNormalizer:
             owner_id=None,
             created_by_id=8,
             zammad_delivery_id="delivery-abc123",
+            ticket_title=None,
         )
 
         normalized = self.normalizer.normalize_request(zammad_request, self.session_id)
@@ -156,6 +157,27 @@ class TestRequestNormalizer:
         assert normalized.integration_context["article_id"] == 104
         assert normalized.integration_context["group_id"] == 3
         assert normalized.integration_context["zammad_delivery_id"] == "delivery-abc123"
+
+    def test_normalize_zammad_request_includes_ticket_title(self) -> None:
+        """Ticket title from Zammad is copied into integration_context for LangGraph."""
+        zammad_request = ZammadRequest(
+            user_id="zammad-8",
+            content="Body text",
+            ticket_id=81,
+            article_id=104,
+            group_id=3,
+            group_name="Support",
+            owner_id=None,
+            created_by_id=8,
+            zammad_delivery_id="delivery-abc123",
+            ticket_title="Need laptop refresh",
+        )
+
+        normalized = self.normalizer.normalize_request(zammad_request, self.session_id)
+
+        assert (
+            normalized.integration_context.get("ticket_title") == "Need laptop refresh"
+        )
 
     def test_normalize_tool_request(self) -> None:
         """Test tool request normalization."""

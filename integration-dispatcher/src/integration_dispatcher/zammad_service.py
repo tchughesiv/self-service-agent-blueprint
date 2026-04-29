@@ -431,6 +431,7 @@ class ZammadService:
                 "request_id": claim_id,
             }
 
+            ticket_title = str(ticket.get("title") or "").strip()
             event_data: Dict[str, Any] = {
                 "user_id": user_id,
                 "content": content,
@@ -445,6 +446,7 @@ class ZammadService:
                 "owner_id": ticket.get("owner_id"),
                 "created_by_id": created_by_id,
                 "zammad_delivery_id": delivery_id,
+                "ticket_title": ticket_title,
                 "metadata": metadata,
             }
 
