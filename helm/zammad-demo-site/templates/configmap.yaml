@@ -1,0 +1,40 @@
+{{- if .Values.enabled }}
+{{- $zammadUrl := .Values.publicUrl | default "" | trimSuffix "/" }}
+{{- if not $zammadUrl }}
+{{-   $host := include "zammad-demo-site.zammadHost" . | trim }}
+{{-   if $host }}
+{{-     $zammadUrl = printf "https://%s" $host }}
+{{-   else }}
+{{-     $zammadUrl = "https://YOUR-ZAMMAD-URL" }}
+{{-   end }}
+{{- end }}
+{{- $pp := include "zammad-demo-site.normalizePathPrefix" .Values.pathPrefix }}
+{{- $ppSlash := printf "%s/" (trimSuffix "/" $pp) }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: zammad-demo-site
+data:
+  index.html: |
+{{ include "zammad-demo-site.demoSiteIndex" (dict "zammadUrl" $zammadUrl "Values" .Values "Release" .Release) | nindent 4 }}
+  chat-embed.html: |
+{{ include "zammad-demo-site.chatSnippetPage" (dict "zammadUrl" $zammadUrl "Values" .Values) | nindent 4 }}
+  default.conf: |
+    server {
+        listen 8080;
+        server_name _;
+        location = {{ $pp }} {
+            return 301 {{ $ppSlash }};
+        }
+        location {{ $ppSlash }} {
+            alias /usr/share/nginx/html/;
+            index index.html;
+        }
+    }
+{{- end }}

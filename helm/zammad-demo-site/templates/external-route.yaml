@@ -1,16 +1,22 @@
 {{- if .Values.enabled }}
+{{- $host := include "zammad-demo-site.zammadHost" . | trim }}
+{{- if not $host }}
+{{- fail "zammad-demo-site: set zammadRouteHost or ensure Route ssa-zammad exists (host lookup failed)." }}
+{{- end }}
+{{- $pp := include "zammad-demo-site.normalizePathPrefix" .Values.pathPrefix }}
 ---
-# OpenShift Route for Zammad chat widget embed page (snippet + live preview)
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
-  name: ssa-zammad-embed
+  name: ssa-zammad-demo-site
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
     app.kubernetes.io/instance: {{ .Release.Name }}
-    app.kubernetes.io/component: zammad-embed
+    app.kubernetes.io/component: zammad-demo-site
 spec:
+  host: {{ $host | quote }}
+  path: {{ $pp | quote }}
   to:
     kind: Service
     name: {{ .Release.Name }}
