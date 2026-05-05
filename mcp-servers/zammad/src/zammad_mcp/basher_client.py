@@ -90,46 +90,6 @@ def _basher_json_object(raw: str, *, what: str) -> Dict[str, Any]:
     return obj
 
 
-def _basher_json_list_items(raw: str, *, what: str) -> list[Dict[str, Any]]:
-    """Parse Basher list tools: JSON object with ``items`` or a bare JSON array."""
-    s = raw.strip()
-    if not s:
-        raise ValueError(
-            f"Basher {what}: empty output (expected response_format=json)."
-        )
-    try:
-        obj = json.loads(s)
-    except json.JSONDecodeError as e:
-        raise ValueError(
-            f"Basher {what}: invalid JSON (expected response_format=json)."
-        ) from e
-    if isinstance(obj, list):
-        return [x for x in obj if isinstance(x, dict)]
-    if isinstance(obj, dict):
-        items = obj.get("items")
-        if isinstance(items, list):
-            return [x for x in items if isinstance(x, dict)]
-    raise ValueError(f"Basher {what}: expected JSON array or object with 'items' list.")
-
-
-def list_ticket_states_basher() -> list[Dict[str, Any]]:
-    """All ticket states via Basher ``zammad_list_ticket_states`` (JSON)."""
-    raw = call_basher_tool(
-        "zammad_list_ticket_states",
-        {"response_format": "json"},
-    )
-    return _basher_json_list_items(raw, what="zammad_list_ticket_states")
-
-
-def list_groups_basher() -> list[Dict[str, Any]]:
-    """All groups via Basher ``zammad_list_groups`` (JSON)."""
-    raw = call_basher_tool(
-        "zammad_list_groups",
-        {"response_format": "json"},
-    )
-    return _basher_json_list_items(raw, what="zammad_list_groups")
-
-
 def _zammad_api_v1_base() -> str:
     """REST base for ``/users``, ``/tickets``, etc. ``ZAMMAD_URL`` may be web origin or already ``.../api/v1``."""
     return normalize_zammad_rest_api_base(ZAMMAD_MCP_SETTINGS.zammad_rest_base_url)

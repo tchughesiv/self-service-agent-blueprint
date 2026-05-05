@@ -80,23 +80,3 @@ def test_fetch_zammad_customer_user_json(mock_basher: Mock) -> None:
         "zammad_get_user",
         {"user_id": 5, "response_format": "json"},
     )
-
-
-@patch("zammad_mcp.basher_client.call_basher_tool")
-def test_list_ticket_states_basher_import(mock_basher: Mock) -> None:
-    from zammad_mcp.basher_client import list_ticket_states_basher
-
-    mock_basher.return_value = json.dumps(
-        {"items": [{"id": 2, "name": "open"}], "count": 1}
-    )
-    rows = list_ticket_states_basher()
-    assert rows == [{"id": 2, "name": "open"}]
-
-
-@patch("zammad_mcp.basher_client.call_basher_tool")
-def test_list_groups_basher_accepts_bare_array(mock_basher: Mock) -> None:
-    from zammad_mcp.basher_client import list_groups_basher
-
-    mock_basher.return_value = json.dumps([{"id": 3, "name": "Support"}])
-    rows = list_groups_basher()
-    assert rows == [{"id": 3, "name": "Support"}]
