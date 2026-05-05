@@ -82,6 +82,7 @@ class ZammadRequest(BaseRequest):
     group_id: int = Field(..., ge=0)
     group_name: Optional[str] = Field(None, max_length=255)
     owner_id: Optional[int] = Field(None, ge=0)
+    owner_email: Optional[str] = Field(None, max_length=255)
     created_by_id: int = Field(..., ge=0)
     zammad_delivery_id: str = Field(..., min_length=1, max_length=255)
     ticket_title: Optional[str] = Field(None, max_length=500)

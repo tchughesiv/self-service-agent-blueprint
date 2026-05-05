@@ -140,7 +140,8 @@ class TestRequestNormalizer:
             article_id=104,
             group_id=3,
             group_name="Support",
-            owner_id=None,
+            owner_id=42,
+            owner_email="specialist@example.com",
             created_by_id=8,
             zammad_delivery_id="delivery-abc123",
             ticket_title=None,
@@ -157,6 +158,8 @@ class TestRequestNormalizer:
         assert normalized.integration_context["article_id"] == 104
         assert normalized.integration_context["group_id"] == 3
         assert normalized.integration_context["zammad_delivery_id"] == "delivery-abc123"
+        assert normalized.integration_context["owner_id"] == 42
+        assert normalized.integration_context["owner_email"] == "specialist@example.com"
 
     def test_normalize_zammad_request_includes_ticket_title(self) -> None:
         """Ticket title from Zammad is copied into integration_context for LangGraph."""
@@ -168,6 +171,7 @@ class TestRequestNormalizer:
             group_id=3,
             group_name="Support",
             owner_id=None,
+            owner_email=None,
             created_by_id=8,
             zammad_delivery_id="delivery-abc123",
             ticket_title="Need laptop refresh",

@@ -173,6 +173,11 @@ class RequestNormalizer:
             "zammad_delivery_id": request.zammad_delivery_id,
             "platform": "zammad",
         }
+        if request.owner_id is not None:
+            integration_context["owner_id"] = request.owner_id
+        owner_email = (request.owner_email or "").strip().lower()
+        if owner_email:
+            integration_context["owner_email"] = owner_email
         if ticket_title:
             integration_context["ticket_title"] = ticket_title
 

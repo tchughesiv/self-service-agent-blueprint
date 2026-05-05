@@ -106,6 +106,35 @@ def _zammad_customer_id_from_ticket(ticket: Dict[str, Any]) -> Optional[int]:
     return None
 
 
+def _zammad_owner_from_ticket(
+    ticket: Dict[str, Any],
+) -> tuple[Optional[int], Optional[str]]:
+    """Best-effort owner identity from ticket payload (owner_id + owner email/login)."""
+    owner_id: Optional[int] = None
+    raw_owner_id = ticket.get("owner_id")
+    if raw_owner_id is not None:
+        try:
+            owner_id = int(raw_owner_id)
+        except (TypeError, ValueError):
+            owner_id = None
+
+    owner_email: Optional[str] = None
+    owner = ticket.get("owner")
+    if isinstance(owner, dict):
+        for key in ("email", "login"):
+            value = owner.get(key)
+            if value:
+                owner_email = str(value).strip().lower()
+                break
+        if owner_id is None and owner.get("id") is not None:
+            try:
+                owner_id = int(owner["id"])
+            except (TypeError, ValueError):
+                owner_id = None
+
+    return owner_id, owner_email
+
+
 def canonical_ticket_customer_email(
     stored_email: Optional[str],
     stored_cid: Optional[int],
@@ -351,6 +380,7 @@ class ZammadService:
             return
 
         zammad_cid = _zammad_customer_id_from_ticket(ticket)
+        owner_id, owner_email = _zammad_owner_from_ticket(ticket)
         email_resolved = _customer_email_from_ticket(ticket)
         if not email_resolved:
             email_resolved = (
@@ -432,7 +462,8 @@ class ZammadService:
                 "article_id": article_id,
                 "group_id": group_id,
                 "group_name": _group_name_from_ticket(ticket),
-                "owner_id": ticket.get("owner_id"),
+                "owner_id": owner_id,
+                "owner_email": owner_email,
                 "created_by_id": created_by_id,
                 "zammad_delivery_id": delivery_id,
                 "ticket_title": ticket_title,

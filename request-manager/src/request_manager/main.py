@@ -852,6 +852,7 @@ async def _handle_request_created_event_from_data(
                 group_id=int(group_id),
                 group_name=request_data.get("group_name"),
                 owner_id=request_data.get("owner_id"),
+                owner_email=request_data.get("owner_email"),
                 created_by_id=int(created_by_id),
                 zammad_delivery_id=str(zammad_delivery_id),
                 ticket_title=request_data.get("ticket_title"),

@@ -7,15 +7,141 @@ import httpx
 from shared_clients.service_client import get_zammad_rest_service_client
 from shared_models import configure_logging
 from shared_models.models import DeliveryRequest, DeliveryStatus, UserIntegrationConfig
-from shared_models.utils import zammad_rest_json_headers
+from shared_models.utils import (
+    zammad_rest_authorization_headers,
+    zammad_rest_json_headers,
+)
 
 from .base import BaseIntegrationHandler, IntegrationResult
 
 logger = configure_logging("integration-dispatcher-zammad")
 
 
+def _env_truthy(key: str) -> bool:
+    return os.environ.get(key, "").strip().lower() in ("1", "true", "yes", "on")
+
+
 class ZammadIntegrationHandler(BaseIntegrationHandler):
-    """Posts pipeline reply body to Zammad; article is attributed to the API token user."""
+    """Posts pipeline reply body to Zammad, optionally on behalf of assigned owner."""
+
+    @staticmethod
+    def _is_valid_on_behalf_identity(value: str) -> bool:
+        v = value.strip()
+        if not v:
+            return False
+        if v in {"-", "n/a", "none", "null", "unknown"}:
+            return False
+        return True
+
+    async def _live_ticket_owner_email(
+        self,
+        *,
+        client: Any,
+        token: str,
+        ticket_id: int,
+    ) -> str:
+        """Current ticket owner from Zammad API (assignee may change after webhook snapshot)."""
+        if _env_truthy("ZAMMAD_SKIP_LIVE_TICKET_OWNER_LOOKUP"):
+            return ""
+        try:
+            response = await client.get(
+                f"/tickets/{ticket_id}",
+                params={"expand": "true"},
+                headers=zammad_rest_authorization_headers(token),
+            )
+            response.raise_for_status()
+            data = response.json()
+            if not isinstance(data, dict):
+                return ""
+
+            owner = data.get("owner")
+            if isinstance(owner, dict):
+                oid = owner.get("id")
+                try:
+                    if oid is not None and int(oid) <= 1:
+                        return ""
+                except (TypeError, ValueError):
+                    pass
+                for key in ("email", "login"):
+                    val = owner.get(key)
+                    if val and self._is_valid_on_behalf_identity(str(val)):
+                        return str(val).strip().lower()
+
+            raw_oid = data.get("owner_id")
+            try:
+                oid_int = int(raw_oid) if raw_oid is not None else 0
+            except (TypeError, ValueError):
+                oid_int = 0
+            if oid_int <= 1:
+                return ""
+
+            uresp = await client.get(
+                f"/users/{oid_int}",
+                headers=zammad_rest_authorization_headers(token),
+            )
+            uresp.raise_for_status()
+            user_data = uresp.json()
+            if isinstance(user_data, dict):
+                candidate = str(
+                    user_data.get("email") or user_data.get("login") or ""
+                ).strip()
+                if self._is_valid_on_behalf_identity(candidate):
+                    return candidate.lower()
+        except Exception as e:
+            logger.warning(
+                "Zammad live ticket owner lookup failed",
+                ticket_id=ticket_id,
+                error=str(e),
+            )
+        return ""
+
+    async def _resolve_on_behalf_of_email(
+        self,
+        *,
+        client: Any,
+        token: str,
+        integration_context: Dict[str, Any],
+        ticket_id: int,
+    ) -> str:
+        live = await self._live_ticket_owner_email(
+            client=client, token=token, ticket_id=ticket_id
+        )
+        if live:
+            return live
+
+        owner_email = str(integration_context.get("owner_email") or "").strip().lower()
+        if self._is_valid_on_behalf_identity(owner_email):
+            return owner_email
+
+        owner_raw = integration_context.get("owner_id")
+        try:
+            owner_id = int(owner_raw) if owner_raw is not None else 0
+        except (TypeError, ValueError):
+            owner_id = 0
+        if owner_id <= 1:
+            return ""
+
+        try:
+            response = await client.get(
+                f"/users/{owner_id}",
+                headers=zammad_rest_authorization_headers(token),
+            )
+            response.raise_for_status()
+            user_data = response.json() if response is not None else {}
+            if isinstance(user_data, dict):
+                candidate = str(
+                    user_data.get("email") or user_data.get("login") or ""
+                ).strip()
+                if self._is_valid_on_behalf_identity(candidate):
+                    return candidate.lower()
+        except Exception as e:
+            logger.warning(
+                "Zammad owner lookup failed; falling back to token identity",
+                ticket_id=ticket_id,
+                owner_id=owner_id,
+                error=str(e),
+            )
+        return ""
 
     async def deliver(
         self,
@@ -70,9 +196,6 @@ class ZammadIntegrationHandler(BaseIntegrationHandler):
                 metadata={},
             )
 
-        # Minimal POST: no origin_by_id / from — Zammad attributes the article to the token user
-        # (typically admin). Token should include ticket.agent or Zammad forces Customer sender.
-
         payload: Dict[str, Any] = {
             "ticket_id": ticket_id,
             "body": body,
@@ -90,11 +213,37 @@ class ZammadIntegrationHandler(BaseIntegrationHandler):
                     message="ZAMMAD_URL not configured for pooled REST client",
                     metadata={},
                 )
-            response = await client.post(
-                "/ticket_articles",
-                json=payload,
-                headers=zammad_rest_json_headers(token),
+            headers = zammad_rest_json_headers(token)
+            on_behalf_of = await self._resolve_on_behalf_of_email(
+                client=client,
+                token=token,
+                integration_context=ic,
+                ticket_id=ticket_id,
             )
+            if on_behalf_of:
+                # Zammad warns X-On-Behalf-Of is deprecated; use From.
+                headers["From"] = on_behalf_of
+            response = await client.post(
+                "/ticket_articles", json=payload, headers=headers
+            )
+            if (
+                response.status_code == 403
+                and on_behalf_of
+                and _env_truthy("ZAMMAD_TICKET_ARTICLE_FALLBACK_ON_FORBIDDEN")
+            ):
+                logger.warning(
+                    "Zammad rejected on-behalf article; retrying as token user "
+                    "(ZAMMAD_TICKET_ARTICLE_FALLBACK_ON_FORBIDDEN)",
+                    ticket_id=ticket_id,
+                    on_behalf_of=on_behalf_of,
+                )
+                fallback_headers = zammad_rest_json_headers(token)
+                response = await client.post(
+                    "/ticket_articles",
+                    json=payload,
+                    headers=fallback_headers,
+                )
+                on_behalf_of = ""
             response.raise_for_status()
             data = response.json()
         except httpx.HTTPStatusError as e:
@@ -138,6 +287,7 @@ class ZammadIntegrationHandler(BaseIntegrationHandler):
                 "zammad_article_id": article_id,
                 "ticket_id": ticket_id,
                 "responding_agent_id": request.agent_id,
+                "on_behalf_of": on_behalf_of or None,
             },
         )
 

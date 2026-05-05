@@ -22,6 +22,8 @@ Optional trigger narrowing (Zammad trigger conditions — preferred over dispatc
   ZAMMAD_TRIGGER_TAGS_ALL    Comma-separated tag names; ticket must contain all ("contains all"). Mutually exclusive with TAGS_ANY and TAGS_EXCLUDE.
   ZAMMAD_TRIGGER_TAGS_EXCLUDE  Comma-separated tag names; ticket must contain none of them. Uses "contains all not". Values are sent as one comma-separated string (Zammad Selector splits strings; JSON arrays make validation fail with 422). Do not use commas inside a tag name. Mutually exclusive with TAGS_ANY / TAGS_ALL.
 
+  Integration trigger always adds ticket.state_id "is any of" the **new** and **open** states (ids resolved from GET /api/v1/ticket_states at bootstrap time).
+
 Optional customer web UI (Zammad setting customer_ticket_create_group_ids — Admin describes "no selection means all groups"):
   ZAMMAD_SKIP_CUSTOMER_CREATE_GROUP_LIMIT  If true/1/yes: do not set this setting (customers may choose any group for new tickets — avoid with internal queues).
   ZAMMAD_CUSTOMER_TICKET_CREATE_GROUP_NAMES  Comma-separated group names allowed in the customer "new ticket" group picker. Default when unset: only the **Users** group (resolved via id from bootstrap).
@@ -422,6 +424,14 @@ def lookup_group_id_by_name(name: str) -> int | None:
     for g in api("GET", "groups"):
         if g.get("name") == name:
             return int(g["id"])
+    return None
+
+
+def lookup_ticket_state_id_by_name(name: str) -> int | None:
+    """Return Zammad ticket_states.id for an exact state name, or None."""
+    for s in api("GET", "ticket_states"):
+        if s.get("name") == name:
+            return int(s["id"])
     return None
 
 
@@ -855,13 +865,20 @@ def _env_truthy(key: str) -> bool:
 
 
 def _integration_trigger_condition(sender_id: int) -> tuple[dict, list[str]]:
-    """Build Zammad trigger ``condition`` dict (article create + customer sender + optional filters).
+    """Build trigger ``condition`` (article create + sender + customer + state + optional filters).
 
     Returns (condition, log_notes).
     """
     condition = {
         "article.action": {"operator": "is", "value": "create"},
         "article.sender_id": {"operator": "is", "value": sender_id},
+        # UI equivalent: Customer is current user
+        "ticket.customer_id": {
+            "operator": "is",
+            "pre_condition": "current_user.id",
+            "value": "",
+            "value_completion": "",
+        },
     }
     notes: list[str] = []
 
@@ -948,6 +965,25 @@ def _integration_trigger_condition(sender_id: int) -> tuple[dict, list[str]]:
             "value": _zammad_ticket_tags_value(tags_all),
         }
 
+    state_names = ("new", "open")
+    state_ids: list[int] = []
+    for sn in state_names:
+        sid = lookup_ticket_state_id_by_name(sn)
+        if sid is None:
+            print(
+                f"ERROR: integration trigger requires ticket states {list(state_names)!r}; "
+                f"no Zammad ticket_state named {sn!r} (GET /api/v1/ticket_states).",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        state_ids.append(sid)
+    condition["ticket.state_id"] = {
+        "operator": "is any of",
+        "value": state_ids,
+    }
+    notes.append("ticket.customer_id is current user")
+    notes.append(f"ticket.state_id is any of {list(state_names)} -> ids {state_ids}")
+
     return condition, notes
 
 
@@ -1001,6 +1037,10 @@ def ensure_integration_webhook_and_trigger():
         extra.append("ticket.group_id")
     if "ticket.tags" in trigger_condition:
         extra.append("ticket.tags")
+    if "ticket.customer_id" in trigger_condition:
+        extra.append("ticket.customer_id")
+    if "ticket.state_id" in trigger_condition:
+        extra.append("ticket.state_id")
     if extra:
         print(
             f"  Trigger conditions include: article create + customer sender + {', '.join(extra)}"
