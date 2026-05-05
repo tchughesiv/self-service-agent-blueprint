@@ -22,75 +22,7 @@ spec:
         app.kubernetes.io/component: zammad-bootstrap
     spec:
       restartPolicy: OnFailure
-{{- $wi := .Values.bootstrap.waitForZammadInitJob | default true }}
-{{- $waitApi := .Values.bootstrap.waitForZammadApi | default true }}
-{{- if or .Values.bootstrap.createToken $wi }}
       serviceAccountName: {{ .Release.Name }}-zammad-bootstrap
-{{- end }}
-{{- if or $wi $waitApi }}
-      initContainers:
-{{- if $wi }}
-        - name: wait-for-zammad-init-job
-          image: "{{ .Values.bootstrap.imageRegistry }}/{{ .Values.bootstrap.imageRepository }}:{{ .Values.bootstrap.imageTag }}"
-          imagePullPolicy: Always
-          securityContext:
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop:
-                - ALL
-            seccompProfile:
-              type: RuntimeDefault
-          command: ["python3", "/app/bootstrap.py"]
-          env:
-            - name: ZAMMAD_BOOTSTRAP_PHASE
-              value: wait-init-job-only
-            - name: ZAMMAD_WAIT_INIT_JOB
-              value: "true"
-            - name: ZAMMAD_HELM_INSTANCE_NAME
-              value: {{ .Release.Name | quote }}
-            - name: ZAMMAD_INIT_JOB_WAIT_TIMEOUT_SEC
-              value: {{ .Values.bootstrap.waitForZammadInitJobTimeoutSec | default 3600 | quote }}
-{{- end }}
-{{- if $waitApi }}
-        - name: wait-for-zammad-api
-          image: "{{ .Values.bootstrap.imageRegistry }}/{{ .Values.bootstrap.imageRepository }}:{{ .Values.bootstrap.imageTag }}"
-          imagePullPolicy: Always
-          securityContext:
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop:
-                - ALL
-            seccompProfile:
-              type: RuntimeDefault
-          command: ["python3", "-c"]
-          args:
-            - |
-              import os, sys, time, urllib.error, urllib.request
-              url = os.environ["ZAMMAD_WAIT_URL"]
-              mx = int(os.environ.get("ZAMMAD_WAIT_MAX", "180"))
-              sl = int(os.environ.get("ZAMMAD_WAIT_SLEEP", "5"))
-              print("Waiting for Zammad (GET %s)..." % (url,))
-              for i in range(1, mx + 1):
-                  try:
-                      with urllib.request.urlopen(url, timeout=15) as r:
-                          code = r.getcode()
-                          if 200 <= code < 300:
-                              print("Zammad API reachable (attempt %s)" % (i,))
-                              sys.exit(0)
-                  except (urllib.error.URLError, TimeoutError, OSError) as e:
-                      print("  not ready (%s/%s): %s" % (i, mx, e))
-                  time.sleep(sl)
-              print("Timed out waiting for Zammad nginx/upstream.")
-              sys.exit(1)
-          env:
-            - name: ZAMMAD_WAIT_URL
-              value: "http://{{ default .Release.Name .Values.zammad.fullnameOverride }}-nginx:8080/api/v1/getting_started"
-            - name: ZAMMAD_WAIT_MAX
-              value: {{ .Values.bootstrap.waitForZammadMaxAttempts | default 180 | quote }}
-            - name: ZAMMAD_WAIT_SLEEP
-              value: {{ .Values.bootstrap.waitForZammadIntervalSec | default 5 | quote }}
-{{- end }}
-{{- end }}
       securityContext:
         runAsNonRoot: true
         seccompProfile:
@@ -123,14 +55,10 @@ spec:
                 secretKeyRef:
                   name: {{ .Release.Name }}-admin-credentials
                   key: password
-            {{- if $wi }}
-            - name: ZAMMAD_WAIT_INIT_JOB
-              value: "true"
             - name: ZAMMAD_HELM_INSTANCE_NAME
               value: {{ .Release.Name | quote }}
             - name: ZAMMAD_INIT_JOB_WAIT_TIMEOUT_SEC
               value: {{ .Values.bootstrap.waitForZammadInitJobTimeoutSec | default 3600 | quote }}
-            {{- end }}
             {{- if .Values.bootstrap.createToken }}
             - name: ZAMMAD_CREATE_TOKEN
               value: "true"

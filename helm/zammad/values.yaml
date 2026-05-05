@@ -50,12 +50,7 @@ bootstrap:
     customerTicketCreateGroupNames: ""
     # If true, do not set that setting (Zammad default: all groups — usually wrong once internal queues exist).
     skipCustomerCreateGroupLimit: false
-    # Before bootstrap.py: init polls GET …/getting_started (same container image as bootstrap; stdlib urllib).
-    waitForZammadApi: true
-    waitForZammadMaxAttempts: 180
-    waitForZammadIntervalSec: 5
-    # Wait for zammad-helm zammad-init Job (DB migrations) before HTTP wait — requires RBAC (batch/jobs).
-    waitForZammadInitJob: true
+    # Timeout for polling the zammad-init Job until Complete (bootstrap.py).
     waitForZammadInitJobTimeoutSec: 3600
     # Comma-separated emails: extra synthetic customers (mock-employee-data TEST_USERS). Same idea as mockServiceNow.testUsers.
     testUsers: ""

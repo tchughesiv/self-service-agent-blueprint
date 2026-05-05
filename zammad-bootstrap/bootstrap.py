@@ -4,7 +4,7 @@
 Authenticates with admin basic auth to self-issue a temporary API token,
 so this script has no dependency on an externally provisioned token.
 
-Required env vars (full bootstrap main container — not required when ZAMMAD_BOOTSTRAP_PHASE=wait-init-job-only):
+Required env vars:
   ZAMMAD_BASE_URL       e.g. http://zammad-nginx:8080
   ZAMMAD_ADMIN_EMAIL    admin user created by autoWizard
   ZAMMAD_ADMIN_PASSWORD matching password
@@ -35,10 +35,10 @@ API resilience (nginx/Rails restarts, cold workers — avoids bootstrap failing 
   ZAMMAD_API_RETRY_ATTEMPTS     Max attempts per request (default 10).
   ZAMMAD_API_RETRY_INTERVAL_SEC Base delay before retry; scales linearly with attempt (default 2).
 
-Helm zammad-init Job (DB migrations / seeds — run before hitting the UI API when RBAC allows):
-  ZAMMAD_WAIT_INIT_JOB             If true/1: poll batch Jobs labeled app.kubernetes.io/component=zammad-init until Complete (requires in-cluster + RBAC).
-  ZAMMAD_HELM_INSTANCE_NAME        Must match Helm release/instance label on the init Job (same as app.kubernetes.io/instance).
-  ZAMMAD_INIT_JOB_WAIT_TIMEOUT_SEC Overall timeout (default 3600).
+Helm zammad-init Job (DB migrations / seeds — always awaited before HTTP bootstrap when in-cluster):
+  ZAMMAD_HELM_INSTANCE_NAME        Helm release/instance label on the zammad-init Job (app.kubernetes.io/instance).
+  ZAMMAD_INIT_JOB_WAIT_TIMEOUT_SEC Overall timeout in seconds (default 3600).
+  Without in-cluster Kubernetes or this name, the wait is skipped with a warning (local runs).
 
 Object manager migrations (POST …/object_manager_attributes_execute_migrations can run long; nginx may 502 if upstream is slow):
   ZAMMAD_OM_POST_COOLDOWN_SEC             Seconds to wait after creating custom field(s) before execute_migrations (default 20; set 0 to skip).
@@ -61,20 +61,11 @@ from kubernetes import client as k8s_client
 from kubernetes import config as k8s_config
 from mock_employee_data.data import get_employee_data
 
-_BOOTSTRAP_PHASE = os.environ.get("ZAMMAD_BOOTSTRAP_PHASE", "").strip()
-if _BOOTSTRAP_PHASE == "wait-init-job-only":
-    # Init container only waits for zammad-init Job; Helm does not pass ZAMMAD_BASE_URL here.
-    BASE_URL = ""
-    API_URL = ""
-    ADMIN_EMAIL = ""
-    ADMIN_PASSWORD = ""
-    AUTOWIZARD_TOKEN = ""
-else:
-    BASE_URL = os.environ["ZAMMAD_BASE_URL"].rstrip("/")
-    API_URL = f"{BASE_URL}/api/v1"
-    ADMIN_EMAIL = os.environ["ZAMMAD_ADMIN_EMAIL"]
-    ADMIN_PASSWORD = os.environ["ZAMMAD_ADMIN_PASSWORD"]
-    AUTOWIZARD_TOKEN = os.environ["ZAMMAD_AUTOWIZARD_TOKEN"]
+BASE_URL = os.environ["ZAMMAD_BASE_URL"].rstrip("/")
+API_URL = f"{BASE_URL}/api/v1"
+ADMIN_EMAIL = os.environ["ZAMMAD_ADMIN_EMAIL"]
+ADMIN_PASSWORD = os.environ["ZAMMAD_ADMIN_PASSWORD"]
+AUTOWIZARD_TOKEN = os.environ["ZAMMAD_AUTOWIZARD_TOKEN"]
 
 # Webhook + trigger (Manage → Webhooks + Triggers); see README.md § Integration with Zammad ticketing
 WEBHOOK_RECORD_NAME = "Self-Service Agent — Integration Webhook"
@@ -102,14 +93,10 @@ SESSION.headers.update({"Content-Type": "application/json"})
 
 def wait_for_zammad_init_job(timeout_sec=None, interval=5):
     """Wait for the chart-owned ``zammad-init`` Job to complete (same labels as zammad-helm)."""
-    raw = os.environ.get("ZAMMAD_WAIT_INIT_JOB", "").strip().lower()
-    if raw not in ("1", "true", "yes", "on"):
-        return
     instance = os.environ.get("ZAMMAD_HELM_INSTANCE_NAME", "").strip()
     if not instance:
         print(
-            "WARNING: ZAMMAD_WAIT_INIT_JOB set but ZAMMAD_HELM_INSTANCE_NAME unset; "
-            "skip zammad-init Job wait.",
+            "WARNING: ZAMMAD_HELM_INSTANCE_NAME unset; skip zammad-init Job wait.",
             file=sys.stderr,
         )
         return
@@ -182,7 +169,7 @@ def wait_for_zammad_init_job(timeout_sec=None, interval=5):
             if "403" in err or "Forbidden" in err:
                 print(
                     "WARNING: RBAC denied listing Jobs; grant batch/jobs get,list,watch to the "
-                    "bootstrap ServiceAccount or set ZAMMAD_WAIT_INIT_JOB=false.",
+                    "bootstrap ServiceAccount.",
                     file=sys.stderr,
                 )
                 return
@@ -1072,10 +1059,6 @@ def ensure_integration_webhook_and_trigger():
 
 
 def main():
-    if _BOOTSTRAP_PHASE == "wait-init-job-only":
-        wait_for_zammad_init_job()
-        return
-
     wait_for_zammad_init_job()
     wait_for_zammad()
     trigger_autowizard()
