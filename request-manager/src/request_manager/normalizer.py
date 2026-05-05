@@ -161,8 +161,11 @@ class RequestNormalizer:
     ) -> NormalizedRequest:
         """Normalize Zammad ticketing request.
 
-        Routes to ticket-laptop-refresh. New tickets and follow-ups both
-        reach the request manager; webhook may add ticket-type filters / metadata later.
+        Does not pin ``target_agent_id``: first agent comes from ``ZAMMAD_DEFAULT_AGENT_ID``
+        on the session row (Helm: ``agent.zammadDefaultAgentId``, typically
+        ``ticket-review-agent``), which classifies laptop vs general before specialists.
+        New tickets and follow-ups both reach the request manager; webhook may add
+        ticket-type filters / metadata later.
         """
         tt = getattr(request, "ticket_title", None)
         ticket_title = (str(tt).strip() if tt else "") or None
@@ -181,8 +184,8 @@ class RequestNormalizer:
         if ticket_title:
             integration_context["ticket_title"] = ticket_title
 
-        # Zammad requests bypass routing; specialist handles ticket channel
-        base_data["target_agent_id"] = "ticket-laptop-refresh"
+        # Keep base_data["target_agent_id"] None and requires_routing True so agent-service
+        # uses RequestSession.current_agent_id (ticket-review-agent) for first hop.
         # Keep base_data["session_id"] from create_or_get_session — it must match the
         # RequestSession row (RequestLog FK). Ticket/thread identity is in integration_context.
 
@@ -190,7 +193,7 @@ class RequestNormalizer:
             **base_data,
             integration_context=integration_context,
             user_context={"platform_user_id": str(request.created_by_id)},
-            requires_routing=False,
+            requires_routing=True,
         )
 
     def _normalize_tool_request(

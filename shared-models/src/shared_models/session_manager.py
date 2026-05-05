@@ -29,6 +29,8 @@ def initial_current_agent_id_for_integration(integration_type: Any) -> str:
         zammad_first = os.getenv("ZAMMAD_DEFAULT_AGENT_ID", "").strip()
         if zammad_first:
             return zammad_first
+        # Zammad never falls back to DEFAULT_AGENT_ID (routing-agent).
+        return "ticket-review-agent"
     default = os.getenv("DEFAULT_AGENT_ID", "routing-agent").strip()
     return default or "routing-agent"
 

@@ -569,8 +569,8 @@ requestManagement:
   agent:
     # First agent for most channels (Slack, web, email, …); see zammadDefaultAgentId for Zammad.
     defaultAgentId: "routing-agent"
-    # First agent for IntegrationType.ZAMMAD sessions (empty = use defaultAgentId only)
-    zammadDefaultAgentId: ""
+    # First agent for IntegrationType.ZAMMAD sessions (never falls back to defaultAgentId).
+    zammadDefaultAgentId: "ticket-review-agent"
     # State-machine id for "return to router" signals (keep stable)
     routingAgentId: "routing-agent"
     # Comma-separated ids that may dispatch to specialists (entry tier)

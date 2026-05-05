@@ -150,8 +150,8 @@ class TestRequestNormalizer:
         normalized = self.normalizer.normalize_request(zammad_request, self.session_id)
 
         assert normalized.integration_type == IntegrationType.ZAMMAD
-        assert normalized.target_agent_id == "ticket-laptop-refresh"
-        assert normalized.requires_routing is False
+        assert normalized.target_agent_id is None
+        assert normalized.requires_routing is True
         assert normalized.session_id == self.session_id
         assert normalized.integration_context["platform"] == "zammad"
         assert normalized.integration_context["ticket_id"] == 81
