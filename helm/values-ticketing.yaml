@@ -29,6 +29,7 @@ ticketingZammad:
     credentialsSecret: "self-service-agent-zammad-credentials"
     mcpDeployment: "mcp-zammad-mcp"
     integrationDispatcherDeployment: "self-service-agent-integration-dispatcher"
+    requestManagerDeployment: "self-service-agent-request-manager"
     # Comma-separated (optional): extra customer users — same as mockServiceNow / TEST_USERS + mock-employee-data. Makefile: export TEST_USERS=... for helm-install-ticketing.
     testUsers: ""
 

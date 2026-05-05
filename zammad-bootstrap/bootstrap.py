@@ -46,7 +46,7 @@ Object manager migrations (POST …/object_manager_attributes_execute_migrations
   ZAMMAD_OM_POST_MIGRATION_SETTLE_SEC    Seconds to wait after execute_migrations succeeds (default 8; nginx/Rails may briefly 502 — gives upstream time before next API call).
   ZAMMAD_POST_USER_CREATE_SETTLE_SEC     Seconds to sleep after each POST /users create (default 3; reduces 502 on the next GET /users used for idempotent lookups).
 
-Bootstrap does not restart zammad-railsserver (only MCP + integration-dispatcher when ZAMMAD_CREATE_TOKEN runs).
+Bootstrap does not restart zammad-railsserver (only MCP + integration-dispatcher + optional request-manager when ZAMMAD_CREATE_TOKEN runs).
 """
 
 import base64
@@ -689,12 +689,13 @@ _KUBE_NS = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
 
 
 def create_mcp_token_and_update_k8s():
-    """Create Zammad MCP agent API token, update k8s secret (read+replace), restart MCP + dispatcher only — never zammad-railsserver."""
+    """Create Zammad MCP agent API token, update k8s secret (read+replace), restart MCP + dispatcher (+ RM if set) — never zammad-railsserver."""
     credentials_secret = os.environ["ZAMMAD_CREDENTIALS_SECRET"]
     mcp_deployment = os.environ.get("ZAMMAD_MCP_DEPLOYMENT", "")
     integration_dispatcher_deployment = os.environ.get(
         "ZAMMAD_INTEGRATION_DISPATCHER_DEPLOYMENT", ""
     )
+    request_manager_deployment = os.environ.get("ZAMMAD_REQUEST_MANAGER_DEPLOYMENT", "")
     zammad_url = os.environ["ZAMMAD_BASE_URL"]
 
     with open(_KUBE_NS) as f:
@@ -760,7 +761,7 @@ def create_mcp_token_and_update_k8s():
     }
     for dep in filter(
         None,
-        [mcp_deployment, integration_dispatcher_deployment],
+        [mcp_deployment, integration_dispatcher_deployment, request_manager_deployment],
     ):
         print(f"  Restarting deployment {dep}...")
         try:

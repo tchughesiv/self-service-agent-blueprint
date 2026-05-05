@@ -1,7 +1,7 @@
 """Pydantic schemas for request/response validation."""
 
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, TypeAlias, Union
 
 from pydantic import BaseModel, Field, field_validator
 from shared_models.models import IntegrationType
@@ -86,6 +86,19 @@ class ZammadRequest(BaseRequest):
     created_by_id: int = Field(..., ge=0)
     zammad_delivery_id: str = Field(..., min_length=1, max_length=255)
     ticket_title: Optional[str] = Field(None, max_length=500)
+
+
+InboundRequest: TypeAlias = Union[
+    BaseRequest,
+    SlackRequest,
+    WebRequest,
+    CLIRequest,
+    EmailRequest,
+    ToolRequest,
+    ZammadRequest,
+]
+
+BrokerInboundRequest: TypeAlias = Union[SlackRequest, EmailRequest, ZammadRequest]
 
 
 # NormalizedRequest is now imported from shared_models.models

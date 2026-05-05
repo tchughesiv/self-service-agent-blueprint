@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional
 
 from shared_models import get_enum_value
 from shared_models.models import NormalizedRequest
@@ -11,6 +11,7 @@ from .schemas import (
     BaseRequest,
     CLIRequest,
     EmailRequest,
+    InboundRequest,
     SlackRequest,
     ToolRequest,
     WebRequest,
@@ -23,15 +24,7 @@ class RequestNormalizer:
 
     def normalize_request(
         self,
-        request: Union[
-            BaseRequest,
-            SlackRequest,
-            WebRequest,
-            CLIRequest,
-            EmailRequest,
-            ToolRequest,
-            ZammadRequest,
-        ],
+        request: InboundRequest,
         session_id: str,
         current_agent_id: Optional[str] = None,
     ) -> NormalizedRequest:

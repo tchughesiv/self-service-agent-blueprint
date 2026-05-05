@@ -18,6 +18,7 @@ from shared_models.models import IntegrationType, NormalizedRequest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .normalizer import RequestNormalizer
+from .schemas import InboundRequest
 
 logger = configure_logging("request-manager")
 
@@ -104,7 +105,7 @@ def resolve_response_future(request_id: str, response_data: Dict[str, Any]) -> b
 
 
 async def create_or_get_session_shared(
-    request: Any, db: AsyncSession
+    request: InboundRequest, db: AsyncSession
 ) -> Optional[SessionResponse]:
     """Shared session management logic for all communication strategies.
 
@@ -492,7 +493,7 @@ class CommunicationStrategy(ABC):
     """Abstract base class for communication strategies."""
 
     async def create_or_get_session(
-        self, request: Any, db: AsyncSession
+        self, request: InboundRequest, db: AsyncSession
     ) -> Optional[SessionResponse]:
         """Create or get session using shared session management logic.
 
@@ -757,7 +758,7 @@ class UnifiedRequestProcessor:
 
     async def process_request_sync(
         self,
-        request: Any,
+        request: InboundRequest,
         db: AsyncSession,
         timeout: int = int(os.getenv("AGENT_TIMEOUT", "120")),
     ) -> Dict[str, Any]:
@@ -800,7 +801,7 @@ class UnifiedRequestProcessor:
         return response
 
     async def _prepare_request(
-        self, request: Any, db: AsyncSession
+        self, request: InboundRequest, db: AsyncSession
     ) -> tuple[NormalizedRequest, str, str]:
         """Common request preparation logic: session management, normalization, and RequestLog creation.
 

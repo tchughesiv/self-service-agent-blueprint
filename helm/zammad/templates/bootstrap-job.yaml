@@ -68,6 +68,8 @@ spec:
               value: {{ .Values.bootstrap.mcpDeployment | quote }}
             - name: ZAMMAD_INTEGRATION_DISPATCHER_DEPLOYMENT
               value: {{ .Values.bootstrap.integrationDispatcherDeployment | quote }}
+            - name: ZAMMAD_REQUEST_MANAGER_DEPLOYMENT
+              value: {{ .Values.bootstrap.requestManagerDeployment | quote }}
             {{- end }}
 {{- $iw := .Values.bootstrap.integrationWebhook | default dict }}
 {{- if $iw.enabled }}

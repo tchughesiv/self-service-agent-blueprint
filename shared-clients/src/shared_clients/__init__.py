@@ -12,7 +12,10 @@ from shared_models.utils import (
     zammad_rest_json_headers,
 )
 
-from .request_manager_client import CLIChatClient, RequestManagerClient
+from .request_manager_client import (
+    CLIChatClient,
+    RequestManagerClient,
+)
 from .service_client import (
     IntegrationDispatcherClient,
     ServiceClient,

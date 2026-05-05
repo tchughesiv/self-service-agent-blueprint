@@ -226,7 +226,9 @@ class ZammadService:
 
     Customer-vs-agent gating belongs in **Zammad trigger conditions** (bootstrap
     ``article.sender_id`` / ``ZAMMAD_TRIGGER_*``). This service trusts the trigger and
-    only applies minimal hygiene (dedupe, signature, optional env filters below).
+    does **not** skip articles solely because ``article.internal`` is true (REST/API
+    harnesses may create customer-sender internal notes). Agent-only traffic should be
+    excluded via sender-based triggers, not dispatcher-side ``internal`` checks.
     """
 
     def __init__(self) -> None:
@@ -317,12 +319,6 @@ class ZammadService:
             logger.info(
                 "Zammad webhook: no article in payload — ignored",
                 ticket_id=ticket_id,
-            )
-            return
-
-        if article.get("internal"):
-            logger.info(
-                "Zammad webhook: skipping internal article", ticket_id=ticket_id
             )
             return
 

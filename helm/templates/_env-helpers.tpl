@@ -210,6 +210,19 @@ Generate Request Manager specific environment variables
   value: {{ if and (hasKey .Values.requestManagement "requestManager") (hasKey .Values.requestManagement.requestManager "sessionSerialization") (hasKey .Values.requestManagement.requestManager.sessionSerialization "reclaimAction") }}{{ .Values.requestManagement.requestManager.sessionSerialization.reclaimAction | quote }}{{ else }}"requeue"{{ end }}
 {{/* DB pool overrides are applied in dbEnvVarsNoStatementTimeout (single source to avoid duplicate env vars) */}}
 {{- include "self-service-agent.sessionAgentRoutingEnvVars" . }}
+{{/* Zammad REST: same credentials secret as integration-dispatcher/MCP (oc exec ticket harness, optional future RM features) */}}
+{{- if .Values.ticketingZammad.enabled }}
+- name: ZAMMAD_URL
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "self-service-agent.fullname" . }}-zammad-credentials
+      key: zammad-url
+- name: ZAMMAD_HTTP_TOKEN
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "self-service-agent.fullname" . }}-zammad-credentials
+      key: zammad-http-token
+{{- end }}
 {{- end }}
 
 {{/*

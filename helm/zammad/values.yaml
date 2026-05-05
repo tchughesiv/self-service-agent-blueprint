@@ -23,6 +23,7 @@ bootstrap:
   credentialsSecret: ""
   mcpDeployment: ""
   integrationDispatcherDeployment: ""
+  requestManagerDeployment: ""
   # Optional: Zammad REST API Webhook + Trigger → integration-dispatcher (see README.md § Integration with Zammad ticketing)
   integrationWebhook:
     enabled: false

@@ -6,7 +6,7 @@ import json
 # Configure structured logging
 import os
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 import jwt
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
@@ -43,9 +43,11 @@ from .normalizer import RequestNormalizer
 from .response_handler import UnifiedResponseHandler
 from .schemas import (
     BaseRequest,
+    BrokerInboundRequest,
     CLIRequest,
     EmailRequest,
     HealthCheck,
+    InboundRequest,
     SlackRequest,
     ToolRequest,
     WebRequest,
@@ -608,9 +610,7 @@ async def handle_cloudevent(
 
 
 async def _process_request_adaptive(
-    request: Union[
-        BaseRequest, SlackRequest, WebRequest, CLIRequest, EmailRequest, ToolRequest
-    ],
+    request: InboundRequest,
     db: AsyncSession,
     timeout: int = int(os.getenv("AGENT_TIMEOUT", "120")),
 ) -> Dict[str, Any]:
@@ -789,7 +789,7 @@ async def _handle_request_created_event_from_data(
         }
 
         # Create request object based on integration type
-        request: Union[SlackRequest, EmailRequest, ZammadRequest]
+        request: BrokerInboundRequest
         if integration_type == IntegrationType.SLACK:
             slack_user_id = request_data.get("slack_user_id") or user_id
             slack_team_id = request_data.get("slack_team_id", "")
