@@ -16,10 +16,9 @@ from zammad_mcp import settings as zammad_mcp_settings
 from zammad_mcp.basher_client import (
     assert_ticket_customer_matches_basher,
     call_basher_tool,
-    fetch_zammad_customer_user,
-    fetch_zammad_user_via_rest,
 )
 from zammad_mcp.zammad_auth_id import parse_email_and_ticket_id
+from zammad_mcp.zammad_rest_client import fetch_zammad_customer_user_rest
 
 SERVICE_NAME = "zammad-mcp-server"
 logger = configure_logging(SERVICE_NAME)
@@ -231,7 +230,7 @@ def escalate_for_human_review(ctx: Context[Any, Any], dummy_parameter: str = "")
 def send_to_manager_review(ctx: Context[Any, Any], dummy_parameter: str = "") -> str:
     """Assign this ticket to the customer's manager for approval."""
     _, ticket_id, cust_uid = _authorize_ticket(ctx)
-    customer_user = fetch_zammad_customer_user(cust_uid)
+    customer_user = fetch_zammad_customer_user_rest(cust_uid)
     field = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS.user_manager_field
     raw = customer_user.get(field)
     manager = (str(raw).strip() if raw is not None else "") or ""
@@ -313,7 +312,7 @@ def get_employee_laptop_info(
         - Laptop Warranty: Current warranty status (Active/Expired)
     """
     email, _ticket_id, cust_uid = _authorize_ticket(ctx)
-    user = fetch_zammad_customer_user(cust_uid)
+    user = fetch_zammad_customer_user_rest(cust_uid)
 
     logger.info(
         "Getting laptop info from Zammad user profile",
@@ -322,16 +321,8 @@ def get_employee_laptop_info(
     )
 
     current_laptop_raw = user.get("current_laptop")
-    if not (isinstance(current_laptop_raw, str) and current_laptop_raw.strip()):
-        # Basher ``zammad_get_user`` JSON often omits object-manager User fields; REST returns them.
-        logger.info(
-            "current_laptop missing from Basher user JSON; loading user via Zammad REST",
-            tool="get_employee_laptop_info",
-            customer_id=cust_uid,
-        )
-        user = fetch_zammad_user_via_rest(cust_uid)
-        current_laptop_raw = user.get("current_laptop")
-
+    if isinstance(current_laptop_raw, str):
+        current_laptop_raw = current_laptop_raw.strip() or None
     if not current_laptop_raw:
         raise ValueError(
             f"No laptop data found for user {email}. "

@@ -244,7 +244,7 @@ def test_escalate_for_human_review_sets_owner_when_env_configured(
 
 
 @patch("zammad_mcp.server.call_basher_tool")
-@patch("zammad_mcp.server.fetch_zammad_customer_user")
+@patch("zammad_mcp.server.fetch_zammad_customer_user_rest")
 @patch("zammad_mcp.server.assert_ticket_customer_matches_basher")
 def test_send_to_manager_review_requires_manager_env(
     mock_assert: Mock,
@@ -266,7 +266,7 @@ def test_send_to_manager_review_requires_manager_env(
 
 
 @patch("zammad_mcp.server.call_basher_tool")
-@patch("zammad_mcp.server.fetch_zammad_customer_user")
+@patch("zammad_mcp.server.fetch_zammad_customer_user_rest")
 @patch("zammad_mcp.server.assert_ticket_customer_matches_basher")
 def test_send_to_manager_review_ok(
     mock_assert: Mock,
@@ -304,7 +304,7 @@ def test_send_to_manager_review_ok(
 
 
 @patch("zammad_mcp.server.call_basher_tool")
-@patch("zammad_mcp.server.fetch_zammad_customer_user")
+@patch("zammad_mcp.server.fetch_zammad_customer_user_rest")
 @patch("zammad_mcp.server.assert_ticket_customer_matches_basher")
 def test_send_to_manager_review_optional_group(
     mock_assert: Mock,
@@ -341,7 +341,7 @@ def test_send_to_manager_review_optional_group(
 
 
 @patch("zammad_mcp.server.call_basher_tool")
-@patch("zammad_mcp.server.fetch_zammad_customer_user")
+@patch("zammad_mcp.server.fetch_zammad_customer_user_rest")
 @patch("zammad_mcp.server.assert_ticket_customer_matches_basher")
 def test_send_to_manager_review_uses_customer_manager_field(
     mock_assert: Mock,
@@ -413,17 +413,14 @@ def test_route_to_human_managed_queue_sets_owner_when_env_configured(
     }
 
 
-@patch("zammad_mcp.server.fetch_zammad_user_via_rest")
-@patch("zammad_mcp.server.fetch_zammad_customer_user")
+@patch("zammad_mcp.server.fetch_zammad_customer_user_rest")
 @patch("zammad_mcp.server.assert_ticket_customer_matches_basher")
-def test_get_employee_laptop_info_falls_back_to_rest_when_basher_omits_field(
+def test_get_employee_laptop_info_loads_user_via_rest(
     mock_assert: Mock,
-    mock_fetch_basher: Mock,
     mock_fetch_rest: Mock,
     auth_headers: dict[str, str],
 ) -> None:
     mock_assert.return_value = 100
-    mock_fetch_basher.return_value = {"email": "alice@company.com", "id": 100}
     laptop = {
         "name": "Alice Johnson",
         "location": "EMEA",
@@ -441,28 +438,3 @@ def test_get_employee_laptop_info_falls_back_to_rest_when_basher_omits_field(
     mock_fetch_rest.assert_called_once_with(100)
     assert "Employee Name: Alice Johnson" in out
     assert "ThinkPad X1" in out
-
-
-@patch("zammad_mcp.server.fetch_zammad_user_via_rest")
-@patch("zammad_mcp.server.fetch_zammad_customer_user")
-@patch("zammad_mcp.server.assert_ticket_customer_matches_basher")
-def test_get_employee_laptop_info_skips_rest_when_basher_has_current_laptop(
-    mock_assert: Mock,
-    mock_fetch_basher: Mock,
-    mock_fetch_rest: Mock,
-    auth_headers: dict[str, str],
-) -> None:
-    mock_assert.return_value = 100
-    laptop = {
-        "name": "Alice Johnson",
-        "location": "EMEA",
-        "laptop_model": "ThinkPad X1",
-        "serial_number": "SN-001",
-        "purchase_date": "2020-06-15",
-        "warranty_expiry": "2030-06-15",
-    }
-    mock_fetch_basher.return_value = {"current_laptop": json.dumps(laptop)}
-    ctx = MockContext(auth_headers)
-    out = get_employee_laptop_info(ctx)
-    mock_fetch_rest.assert_not_called()
-    assert "Employee Name: Alice Johnson" in out

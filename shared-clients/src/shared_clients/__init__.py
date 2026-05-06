@@ -6,12 +6,6 @@ components of the self-service agent system, including the Request Manager,
 Agent Service, and other services.
 """
 
-from shared_models.utils import (
-    normalize_zammad_rest_api_base,
-    zammad_rest_authorization_headers,
-    zammad_rest_json_headers,
-)
-
 from .request_manager_client import (
     CLIChatClient,
     RequestManagerClient,
@@ -38,7 +32,4 @@ __all__ = [
     "cleanup_service_clients",
     "get_zammad_rest_service_client",
     "close_zammad_rest_service_client",
-    "normalize_zammad_rest_api_base",
-    "zammad_rest_authorization_headers",
-    "zammad_rest_json_headers",
 ]

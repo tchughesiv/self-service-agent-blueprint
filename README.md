@@ -25,7 +25,6 @@ Transform IT service delivery using AI to lower support effort, improve complian
   - [Interact with the CLI](#interact-with-the-cli)
   - [Integration with Slack (optional)](#integration-with-slack-optional)
   - [Integration with real ServiceNow (optional)](#integration-with-real-servicenow-optional)
-  - [Integration with Zammad ticketing (optional)](#integration-with-zammad-ticketing-optional)
   - [Integration with email (optional)](#integration-with-email-optional)
   - [Run evaluations](#run-evaluations)
   - [Follow the flow with tracing](#follow-the-flow-with-tracing)
@@ -113,7 +112,6 @@ By the end of this quickstart, you will have:
 - (Optional) Slack integration for real-time user conversations
 - (Optional) Email integration for asynchronous notifications
 - (Optional) ServiceNow integration for real ticket creation
-- (Optional) Zammad ticketing channel (webhook ingress, customer-visible replies, Zammad MCP)
 - (Optional) Experience with different prompt configurations (big vs. multi-part prompts)
 - (Optional) PromptGuard for prompt injection protection
 - (Optional) Safety shields for content moderation
@@ -185,7 +183,6 @@ The repository is organized into the following key directories:
 
 **MCP Servers:**
 - **`mcp-servers/snow/`** - ServiceNow integration MCP server
-- **`mcp-servers/zammad/`** - Zammad ticket operations MCP server (used with the optional ticketing channel)
 
 **Mock Services & Test Data:**
 - **`mock-service-now/`** - Mock ServiceNow REST API server for testing without real ServiceNow instance
@@ -782,22 +779,6 @@ Log into your ServiceNow instance and:
 - ✓ Create real tickets from agent conversations
 - ✓ Test end-to-end integration with backend systems
 - ✓ Validate data accuracy in ServiceNow
-
----
-
-### Integration with Zammad ticketing (optional)
-
-You can run the quickstart with **Zammad** as an ITSM channel so agents can work laptop-refresh (and related) flows from tickets. Incoming ticket activity uses Zammad **Triggers** that POST to **Integration Dispatcher** at **`POST /zammad/webhook`** (see [`docs/API_REFERENCE.md`](docs/API_REFERENCE.md#post-zammadwebhook)). Outbound, customer-visible replies are delivered by **Integration Dispatcher** to Zammad via REST; the **Zammad MCP** server exposes ticket actions (tags, escalation, and similar)—see [`mcp-servers/zammad/README.md`](mcp-servers/zammad/README.md).
-
-#### Deploy with ticketing
-
-Use the Makefile target that applies the ticketing Helm overlay (Zammad subchart, bootstrap Job, MCP wiring):
-
-```bash
-make helm-install-ticketing NAMESPACE=$NAMESPACE
-```
-
-Admin defaults and extra environment variables are documented in the Makefile output and [`helm/values-ticketing.yaml`](helm/values-ticketing.yaml).
 
 ---
 

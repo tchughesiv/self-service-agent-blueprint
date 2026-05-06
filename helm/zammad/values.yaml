@@ -24,6 +24,14 @@ bootstrap:
   mcpDeployment: ""
   integrationDispatcherDeployment: ""
   requestManagerDeployment: ""
+  # Customer web "new ticket" group picker (Zammad setting customer_ticket_create_group_ids). Omit = bootstrap defaults to Users only.
+  customerTicketCreateGroupNames: ""
+  # If true, do not set that setting (Zammad default: all groups — usually wrong once internal queues exist).
+  skipCustomerCreateGroupLimit: false
+  # Timeout for polling the zammad-init Job until Complete (bootstrap.py).
+  waitForZammadInitJobTimeoutSec: 3600
+  # Comma-separated emails: extra synthetic customers (mock-employee-data TEST_USERS). Same idea as mockServiceNow.testUsers.
+  testUsers: ""
   # Optional: Zammad REST API Webhook + Trigger → integration-dispatcher (see README.md § Integration with Zammad ticketing)
   integrationWebhook:
     enabled: false
@@ -47,11 +55,3 @@ bootstrap:
     triggerTagsExclude: ""
     # Optional override for integration trigger article.sender_id (default in bootstrap: 2 = Customer per Zammad seeds).
     customerSenderId: ""
-    # Customer web "new ticket" group picker (Zammad setting customer_ticket_create_group_ids). Omit = bootstrap defaults to Users only.
-    customerTicketCreateGroupNames: ""
-    # If true, do not set that setting (Zammad default: all groups — usually wrong once internal queues exist).
-    skipCustomerCreateGroupLimit: false
-    # Timeout for polling the zammad-init Job until Complete (bootstrap.py).
-    waitForZammadInitJobTimeoutSec: 3600
-    # Comma-separated emails: extra synthetic customers (mock-employee-data TEST_USERS). Same idea as mockServiceNow.testUsers.
-    testUsers: ""

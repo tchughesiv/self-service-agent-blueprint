@@ -97,6 +97,8 @@ make ansible-apply-demo NAMESPACE=your-namespace
 
 The MCP server entry under **`mcp-servers.mcp-servers`** must use the key **`zammad-mcp`**, not **`zammad`**. The Zammad Helm subchart already labels its pods with `app.kubernetes.io/name: zammad`. The upstream `mcp-servers` chart derives labels from the YAML key; using `zammad` made Service **`mcp-zammad`** select **all** Zammad workload pods (nginx, railsserver, etc.), so traffic to `:8000` often hit pods that are not the MCP server (`connection refused`). With **`zammad-mcp`**, the MCP Service is **`mcp-zammad-mcp`** and only targets the MCP deployment. Agent MCP URIs use **`http://mcp-zammad-mcp:8000/mcp`**. See the comment above `zammad-mcp` in `helm/values.yaml` and `mcp-servers/zammad/README.md`.
 
+In **agent** YAML (`config/agents/*.yaml`, `mcp_servers[].name`), use the label **`zammad`** for the MCP server (tracing / `server_label`); that is unrelated to the Helm values key **`zammad-mcp`**.
+
 **Zammad webhooks:** `POST /zammad/webhook` on integration-dispatcher **always** verifies **`X-Hub-Signature`** against **`ZAMMAD_WEBHOOK_SECRET`** (set via `ticketingZammad.webhookSecret` / Helm secrets). An empty secret yields **401** — there is no “skip verification” mode. Customer-visible replies are posted by **`ZammadIntegrationHandler`** to Zammad REST using a pooled HTTP client from **shared-clients**; optional **`ZAMMAD_AI_AGENT_USER_ID`** drops webhook feedback from the API user that posts those articles. Use **`shared_models.utils`** (`normalize_zammad_rest_api_base`, **`zammad_rest_json_headers`**, **`zammad_rest_authorization_headers`**) for any other Zammad REST calls so URL and auth headers stay consistent.
 
 ## Architecture
@@ -106,7 +108,7 @@ The MCP server entry under **`mcp-servers.mcp-servers`** must use the key **`zam
 1. **Agent Service**: Processes AI requests via LlamaStack, handles streaming responses, manages knowledge bases and session management
 2. **Request Manager**: Routes requests, unified communication processing with strategy pattern
 3. **Integration Dispatcher**: Delivers responses to multiple channels (Slack, Email, etc.)
-4. **MCP Servers**: External tool integration (ServiceNow)
+4. **MCP Servers**: External tool integration (ServiceNow MCP, Zammad MCP for ticketing actions)
 5. **Mock Eventing Service**: Lightweight service that mimics Knative broker behavior for testing
 6. **Shared Database**: PostgreSQL with Alembic migrations for session/request persistence
 
@@ -199,6 +201,7 @@ make helm-install-test NAMESPACE=dev
 ### Component Documentation
 - **`agent-service/`**: Agent service with knowledge base management and LangGraph
 - **`mcp-servers/snow/README.md`**: ServiceNow integration documentation
+- **`mcp-servers/zammad/README.md`**: Zammad MCP (ticket tools; customer replies go through Integration Dispatcher)
 
 ### Unified Architecture
 The system uses eventing-based communication with the following core components:

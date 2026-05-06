@@ -18,13 +18,13 @@ Example: `alice@company.com-42`
 
 ## Token
 
-**`ZAMMAD_HTTP_TOKEN`** (and **`ZAMMAD_URL`**) must be set for **Basher** on this pod; Basher holds the Zammad API token. This wrapper only talks to **Basher MCP** — no direct REST from Python.
+**`ZAMMAD_HTTP_TOKEN`** (and **`ZAMMAD_URL`**) must be set on this pod: Basher MCP uses them for ticket operations, and this server also calls Zammad **REST** `GET /api/v1/users/{id}` for user profile fields (object-manager / custom attributes) that Basher’s `zammad_get_user` JSON does not reliably return.
 
 ## Ticket updates (Basher MCP only)
 
 Ticket **writes** use **`zammad_update_ticket`**. Basher’s Pydantic **`TicketUpdateParams`** (see [basher83/Zammad-MCP](https://github.com/basher83/Zammad-MCP) `models.py`) accept **`state`**, **`owner`**, and **`group`** as **human-readable names / email** — not **`state_id`** / **`owner_id`** / **`group_id`**. This wrapper passes those string fields so Basher validation succeeds.
 
-**Reads:** **`zammad_get_user`** (JSON) supplies customer custom fields (e.g. manager, laptop) where Basher exposes them. **`zammad_search_users`** remains used inside **`assert_ticket_customer_matches_basher`** for customer checks.
+**Reads:** Customer profile fields for **`send_to_manager_review`** and **`get_employee_laptop_info`** come from **Zammad REST** (`GET /users/{id}` via `zammad_rest_client`). **`zammad_search_users`** (Basher) is still used inside **`assert_ticket_customer_matches_basher`** for customer authorization checks.
 
 ## Environment
 
@@ -45,6 +45,7 @@ Ticket **writes** use **`zammad_update_ticket`**. Basher’s Pydantic **`TicketU
 | `ZAMMAD_TAG_MANAGER_REVIEW` | Tag for `send_to_manager_review` (default `pending-manager-review`). |
 | `ZAMMAD_GROUP_MANAGER_REVIEW` | Optional group **name** when sending to manager (empty skips). **`send_to_manager_review`** sets Basher **`owner`** to the manager email (customer field / `ZAMMAD_MANAGER_EMAIL`). Pair trigger narrowing with **`ZAMMAD_TRIGGER_TAGS_EXCLUDE`**. |
 | `ZAMMAD_GROUP_HUMAN_MANAGED` | Group for `route_to_human_managed_queue` (default `human_managed_tickets`). |
+| `ZAMMAD_OWNER_HUMAN_MANAGED` | Optional assignee email for that tool (default unset — group-only routing). |
 | `ZAMMAD_USER_MANAGER_FIELD` | Customer user field for manager (default `manager_email`). |
 | `ZAMMAD_MANAGER_EMAIL` | Fallback manager when that field is empty (default in Helm matches bootstrap). |
 
@@ -58,8 +59,12 @@ Used by the ticket laptop refresh flow (`allowed_tools` in agent config).
 | `close` | Basher `zammad_update_ticket` with **`state`** = `ZAMMAD_STATE_CLOSED` name. |
 | `escalate_for_human_review` | Tag; optional **`group`** / **`owner`** strings if env set. |
 | `send_to_manager_review` | Tag; `owner` from customer field or `ZAMMAD_MANAGER_EMAIL`; optional group via `ZAMMAD_GROUP_MANAGER_REVIEW`. |
-| `route_to_human_managed_queue` | Group change when configured. |
-| *(removed)* | Customer-visible ticket replies are posted by **Integration Dispatcher** (canonical pipeline `content` → Zammad REST `ticket_articles`). This MCP server exposes ticket **actions** only (tags, state, escalate, close, etc.). |
+| `route_to_human_managed_queue` | Escalation tag + `ZAMMAD_GROUP_HUMAN_MANAGED`; optional `owner` only if `ZAMMAD_OWNER_HUMAN_MANAGED` is set. |
+| `get_employee_laptop_info` | Reads `current_laptop` JSON via Zammad REST; returns a fixed multi-line block (see below). |
+
+**`get_employee_laptop_info` output lines:** Employee Name, Employee Location, Laptop Model, Laptop Serial Number, Laptop Purchase Date, Laptop Age (derived), Laptop Warranty Expiry Date, Laptop Warranty (Active/Expired/Unknown).
+
+Customer-visible ticket replies are **not** MCP tools: **Integration Dispatcher** posts them to Zammad REST (`ticket_articles`). This server exposes ticket **actions** only (tags, state, escalate, close, etc.).
 
 ## Run locally
 
