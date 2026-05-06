@@ -16,6 +16,9 @@ ticket customer (integration trigger: ``ticket.customer_id`` = current user).
 Set ``ZAMMAD_CUSTOMER_PASSWORD`` to empty to disable (legacy: agent token for customer articles).
 
 For generic CLI RM without Zammad, use chat-responses-request-mgr.py instead.
+
+The ``**tokens**`` command is sent to Request Manager only (same as chat-responses-request-mgr.py /
+``CLIChatClient``); it does not create a Zammad article.
 """
 
 import argparse
@@ -26,8 +29,11 @@ import time
 from collections.abc import Awaitable, Callable
 
 import httpx
-from shared_clients import RequestManagerClient
+from shared_clients import CLIChatClient, RequestManagerClient
 from shared_models.utils import normalize_zammad_rest_api_base, zammad_rest_json_headers
+
+_HTTP_TIMEOUT = 10
+_HTTP_TIMEOUT_CREATE_TICKET = 30
 
 TRIGGER_POLL_TIMEOUT = float(os.environ.get("TRIGGER_POLL_TIMEOUT", "180"))
 TRIGGER_POLL_INTERVAL = float(os.environ.get("TRIGGER_POLL_INTERVAL", "1.0"))
@@ -41,6 +47,25 @@ ZAMMAD_HTTP_TOKEN = os.environ.get("ZAMMAD_HTTP_TOKEN", None)
 
 # Seeded Zammad users from zammad-bootstrap get_or_create_user (must stay in sync with bootstrap.py).
 _BOOTSTRAP_DEFAULT_CUSTOMER_PASSWORD = "ChangeMe123!"
+
+_ZAMMAD_JSON_CLIENT_HEADERS = {
+    "Content-Type": "application/json",
+    "Accept": "application/json",
+}
+
+DEFAULT_TICKET_TITLE = "Laptop refresh help request"
+
+# RM polling: limit 1 / latest session slice used by snapshot + agent_reply poll.
+_RM_CONVERSATIONS_KW = {"limit": 1, "offset": 0, "include_messages": True}
+
+_ZAMMAD_STATE_MAP = {
+    "new": "new",
+    "open": "being processed by agent",
+    "pending reminder": "escalated",
+    "pending close": "escalated",
+    "closed": "closed",
+    "merged": "closed",
+}
 
 
 def _customer_password_effective(cli_password: str | None) -> str | None:
@@ -60,15 +85,18 @@ def _customer_password_effective(cli_password: str | None) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+def _api_v1(base_url: str) -> str:
+    return normalize_zammad_rest_api_base(base_url)
+
+
 def _zammad_get_state_map(base_url: str, token: str) -> dict[int, str]:
     """Return a mapping of state_id -> state name from Zammad."""
-    url = f"{normalize_zammad_rest_api_base(base_url)}/ticket_states"
-    response = httpx.get(url, headers=zammad_rest_json_headers(token), timeout=10)
+    url = f"{_api_v1(base_url)}/ticket_states"
+    response = httpx.get(
+        url, headers=zammad_rest_json_headers(token), timeout=_HTTP_TIMEOUT
+    )
     response.raise_for_status()
     return {s["id"]: s["name"] for s in response.json()}
-
-
-DEFAULT_TICKET_TITLE = "Laptop refresh help request"
 
 
 def _zammad_create_ticket(
@@ -78,37 +106,32 @@ def _zammad_create_ticket(
     title: str = DEFAULT_TICKET_TITLE,
 ) -> tuple[int, str]:
     """Create a Zammad ticket and return (ticket_id, ticket_number)."""
-    url = f"{normalize_zammad_rest_api_base(base_url)}/tickets"
+    url = f"{_api_v1(base_url)}/tickets"
     payload: dict[str, str | object] = {
         "title": title,
         "group": "Users",
         "customer": customer_email,
     }
     response = httpx.post(
-        url, json=payload, headers=zammad_rest_json_headers(token), timeout=30
+        url,
+        json=payload,
+        headers=zammad_rest_json_headers(token),
+        timeout=_HTTP_TIMEOUT_CREATE_TICKET,
     )
     response.raise_for_status()
     data = response.json()
     return data["id"], str(data["number"])
 
 
-_ZAMMAD_STATE_MAP = {
-    "new": "new",
-    "open": "being processed by agent",
-    "pending reminder": "escalated",
-    "pending close": "escalated",
-    "closed": "closed",
-    "merged": "closed",
-}
-
-
 def _zammad_get_ticket_status(
     base_url: str, token: str, ticket_id: int, state_map: dict[int, str]
 ) -> tuple[str, str, str]:
     """Return (state, owner, group) for the ticket."""
-    url = f"{normalize_zammad_rest_api_base(base_url)}/tickets/{ticket_id}?expand=true"
+    url = f"{_api_v1(base_url)}/tickets/{ticket_id}?expand=true"
     try:
-        response = httpx.get(url, headers=zammad_rest_json_headers(token), timeout=10)
+        response = httpx.get(
+            url, headers=zammad_rest_json_headers(token), timeout=_HTTP_TIMEOUT
+        )
         response.raise_for_status()
         data = response.json()
         state_id = data.get("state_id")
@@ -129,88 +152,47 @@ def _zammad_get_ticket_status(
         return "unknown", "unknown", "unknown"
 
 
-def _zammad_get_ticket_owner(
-    base_url: str, token: str, ticket_id: int
-) -> tuple[str | None, int | None]:
-    """Return (owner_email, owner_id) for the ticket's current assigned owner."""
-    try:
-        url = f"{normalize_zammad_rest_api_base(base_url)}/tickets/{ticket_id}"
-        response = httpx.get(url, headers=zammad_rest_json_headers(token), timeout=10)
-        response.raise_for_status()
-        owner_id = response.json().get("owner_id")
-        if not owner_id:
-            return None, None
-        user_url = f"{normalize_zammad_rest_api_base(base_url)}/users/{owner_id}"
-        user_response = httpx.get(
-            user_url, headers=zammad_rest_json_headers(token), timeout=10
-        )
-        user_response.raise_for_status()
-        user_data = user_response.json()
-        return user_data.get("email") or None, owner_id
-    except Exception:
-        return None, None
-
-
-def _zammad_add_article(
+def _zammad_add_customer_article(
     base_url: str,
     ticket_id: int,
     body: str,
     *,
     from_email: str,
-    sender: str,
     agent_token: str,
     customer_basic: tuple[str, str] | None,
-    origin_by_id: int | None = None,
+    verbose: bool = False,
 ) -> int | None:
-    """Add an article (message) to a Zammad ticket; return new article id if successful.
-
-    Args:
-        sender: "Customer" for user messages, "Agent" for agent responses.
-        from_email: email address shown as the sender of the article.
-        agent_token: Agent/service token for Agent articles (and fallback if no customer basic auth).
-        customer_basic: (email, password) HTTP Basic auth for Customer articles.
-        origin_by_id: Zammad user ID to set as the article originator,
-            overriding the authenticated token owner.
-    """
-    url = f"{normalize_zammad_rest_api_base(base_url)}/ticket_articles"
-    # Zammad integration trigger (bootstrap) matches customer web channel: article.sender_id
-    # for "Customer" on public articles. Internal API notes do not always match the same
-    # trigger path as real browser "web" messages — use type=web for harness turns.
-    is_customer = (sender or "").strip().lower() == "customer"
+    """POST a customer (web) article — inbound harness traffic only; agent replies use dispatcher."""
+    url = f"{_api_v1(base_url)}/ticket_articles"
     payload = {
         "ticket_id": ticket_id,
         "body": body,
-        "type": "web" if is_customer else "note",
-        "internal": not is_customer,
-        "sender": sender,
+        "type": "web",
+        "internal": False,
+        "sender": "Customer",
         "from": from_email,
     }
-    if origin_by_id is not None:
-        payload["origin_by_id"] = origin_by_id
     try:
-        if is_customer and customer_basic is not None:
+        if customer_basic is not None:
             response = httpx.post(
                 url,
                 json=payload,
                 auth=customer_basic,
-                headers={
-                    "Content-Type": "application/json",
-                    "Accept": "application/json",
-                },
-                timeout=10,
+                headers=_ZAMMAD_JSON_CLIENT_HEADERS,
+                timeout=_HTTP_TIMEOUT,
             )
         else:
-            if is_customer and customer_basic is None:
+            if verbose:
                 print(
-                    "[zammad] warning: no customer password — Customer article posted with "
-                    "agent token; Zammad trigger (ticket.customer_id = current user) may not fire.",
+                    "[zammad] warning: no customer password — posting with agent token; "
+                    "Zammad trigger (ticket.customer_id = current user) may not fire.",
                     file=sys.stderr,
                 )
             response = httpx.post(
                 url,
                 json=payload,
                 headers=zammad_rest_json_headers(agent_token),
-                timeout=10,
+                timeout=_HTTP_TIMEOUT,
             )
         response.raise_for_status()
         data = response.json()
@@ -223,8 +205,66 @@ def _zammad_add_article(
 
 def _zammad_delete_ticket(base_url: str, token: str, ticket_id: int) -> None:
     """Delete a Zammad ticket."""
-    url = f"{normalize_zammad_rest_api_base(base_url)}/tickets/{ticket_id}"
-    httpx.delete(url, headers=zammad_rest_json_headers(token), timeout=10)
+    url = f"{_api_v1(base_url)}/tickets/{ticket_id}"
+    httpx.delete(url, headers=zammad_rest_json_headers(token), timeout=_HTTP_TIMEOUT)
+
+
+def _conversation_entries_first_session(data: dict) -> list:
+    """First session's ``conversation`` list from GET /conversations-style payload."""
+    sessions = data.get("sessions")
+    if not isinstance(sessions, list) or not sessions:
+        return []
+    first = sessions[0]
+    if not isinstance(first, dict):
+        return []
+    conv = first.get("conversation")
+    return conv if isinstance(conv, list) else []
+
+
+def _zammad_verify_ticket_number_logged(
+    api_base: str,
+    token: str,
+    ticket_id: int,
+    ticket_number: str,
+    *,
+    verbose: bool = False,
+) -> None:
+    """GET /tickets/{id} and log mismatch vs create response (wrong env / proxy)."""
+    try:
+        vurl = f"{api_base}/tickets/{ticket_id}"
+        vresp = httpx.get(
+            vurl, headers=zammad_rest_json_headers(token), timeout=_HTTP_TIMEOUT
+        )
+        vresp.raise_for_status()
+        vdata = vresp.json()
+        vnum = vdata.get("number")
+        if str(vnum) != str(ticket_number):
+            print(
+                f"[zammad] warning: create said number={ticket_number!r} "
+                f"but GET /tickets/{ticket_id} number={vnum!r}",
+                file=sys.stderr,
+            )
+        elif verbose:
+            print(
+                f"[zammad] verified GET /tickets/{ticket_id} number={vnum!r} "
+                f"title={vdata.get('title')!r}",
+                file=sys.stderr,
+            )
+    except Exception as ex:
+        print(
+            f"[zammad] warning: could not verify ticket via GET: {ex}", file=sys.stderr
+        )
+
+
+def _request_ids_from_conversation(conv: list) -> set[str]:
+    out: set[str] = set()
+    for entry in conv:
+        if not isinstance(entry, dict):
+            continue
+        rid = entry.get("request_id")
+        if rid is not None:
+            out.add(str(rid))
+    return out
 
 
 async def _conversation_request_ids_snapshot(
@@ -239,22 +279,13 @@ async def _conversation_request_ids_snapshot(
     try:
         data = await rm_client.get_conversations(
             session_id=session_id,
-            limit=1,
-            offset=0,
-            include_messages=True,
+            **_RM_CONVERSATIONS_KW,
         )
     except Exception:
         return set()
-    sessions = data.get("sessions") if isinstance(data, dict) else None
-    if not sessions:
+    if not isinstance(data, dict):
         return set()
-    conv = sessions[0].get("conversation") or []
-    out: set[str] = set()
-    for entry in conv:
-        rid = entry.get("request_id")
-        if rid is not None:
-            out.add(str(rid))
-    return out
+    return _request_ids_from_conversation(_conversation_entries_first_session(data))
 
 
 async def _poll_conversation_for_agent_reply(
@@ -279,9 +310,7 @@ async def _poll_conversation_for_agent_reply(
         try:
             data = await rm_client.get_conversations(
                 session_id=session_id,
-                limit=1,
-                offset=0,
-                include_messages=True,
+                **_RM_CONVERSATIONS_KW,
             )
         except Exception as ex:
             print(
@@ -291,13 +320,18 @@ async def _poll_conversation_for_agent_reply(
             await asyncio.sleep(interval)
             continue
 
-        sessions = data.get("sessions") if isinstance(data, dict) else None
-        if not sessions:
+        if not isinstance(data, dict):
             await asyncio.sleep(interval)
             continue
 
-        conv = sessions[0].get("conversation") or []
+        conv = _conversation_entries_first_session(data)
+        if not conv:
+            await asyncio.sleep(interval)
+            continue
+
         for entry in reversed(conv):
+            if not isinstance(entry, dict):
+                continue
             um = (entry.get("user_message") or "").strip()
             if um != target:
                 continue
@@ -317,19 +351,28 @@ async def _poll_conversation_for_agent_reply(
     )
 
 
+async def _rm_tokens_cli_style(cli: CLIChatClient) -> None:
+    """POST ``**tokens**`` to RM generic (CLI) and print summary — same as CLIChatClient chat loop."""
+    agent_response = await cli.send_message("**tokens**")
+    if isinstance(agent_response, dict):
+        response_content = agent_response.get("content", str(agent_response))
+    else:
+        response_content = agent_response
+    cli._handle_tokens_command(response_content)
+
+
 # ---------------------------------------------------------------------------
 # Chat loop with ticket status
 # ---------------------------------------------------------------------------
 
 
 async def _chat_loop_with_status(
-    rm_client: RequestManagerClient,
+    rm_client: CLIChatClient,
     send_to_agent: Callable[[str], Awaitable[str]],
     *,
     initial_message: str | None,
     ticket_id: int,
     ticket_number: str,
-    customer_email: str | None,
     zammad_base_url: str,
     zammad_token: str,
     state_map: dict[int, str],
@@ -337,33 +380,12 @@ async def _chat_loop_with_status(
     test_mode: bool,
 ) -> None:
     """
-    Chat loop that records each user message and agent response as Zammad ticket
-    articles and emits a TICKET_STATUS line after each agent response.
+    Chat loop: poll-print agent replies (Zammad delivery via integration-dispatcher only).
 
     The TICKET_STATUS line format is:
         TICKET_STATUS:{ticket_number}:{state}:owner={owner}:group={group}
     It is printed to stdout so callers can strip it before saving conversations.
     """
-
-    def add_agent_article(message: str) -> None:
-        if ticket_id and zammad_base_url and zammad_token:
-            owner_email, owner_id = _zammad_get_ticket_owner(
-                zammad_base_url, zammad_token, ticket_id
-            )
-            print(
-                f"[article] ticket={ticket_id} owner={owner_email!r} id={owner_id}",
-                file=sys.stderr,
-            )
-            _zammad_add_article(
-                zammad_base_url,
-                ticket_id,
-                body=message,
-                from_email=owner_email or "",
-                sender="Agent",
-                agent_token=zammad_token,
-                customer_basic=None,
-                origin_by_id=owner_id,
-            )
 
     def emit_status() -> None:
         if show_ticket_status and ticket_id and zammad_base_url and zammad_token:
@@ -386,7 +408,6 @@ async def _chat_loop_with_status(
             print(AGENT_MESSAGE_TERMINATOR)
         else:
             agent_response = await send_to_agent(initial_message)
-            add_agent_article(str(agent_response))
             print(f"agent: {agent_response}")
 
     if test_mode:
@@ -397,14 +418,14 @@ async def _chat_loop_with_status(
                     continue
                 if message.lower() in ["quit", "exit"]:
                     break
-                # Skip adding token summary messages and their responses to the ticket
                 if message.lower() == "**tokens**":
-                    agent_response = await send_to_agent(message)
-                    print(f"agent: {agent_response}")
+                    # Harness (OpenShiftChatClient) waits for `agent:` before accepting the
+                    # terminator; token formatting has no agent prefix unless we add this line.
+                    print("agent: ")
+                    await _rm_tokens_cli_style(rm_client)
                     print(AGENT_MESSAGE_TERMINATOR)
                     continue
                 agent_response = await send_to_agent(message)
-                add_agent_article(str(agent_response))
                 print(f"agent: {agent_response}")
                 print(AGENT_MESSAGE_TERMINATOR)
                 emit_status()
@@ -418,11 +439,9 @@ async def _chat_loop_with_status(
                     break
                 if message.strip():
                     if message.lower() == "**tokens**":
-                        agent_response = await send_to_agent(message)
-                        print(f"agent: {agent_response}")
+                        await _rm_tokens_cli_style(rm_client)
                         continue
                     agent_response = await send_to_agent(message)
-                    add_agent_article(str(agent_response))
                     print(f"agent: {agent_response}")
                     emit_status()
             except KeyboardInterrupt:
@@ -436,7 +455,7 @@ async def _chat_loop_with_status(
 # ---------------------------------------------------------------------------
 
 
-async def main() -> None:
+def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Zammad ticket chat: customer articles → webhook pipeline → poll conversations for replies "
@@ -492,7 +511,17 @@ async def main() -> None:
             f"(default {TRIGGER_POLL_INTERVAL}; env TRIGGER_POLL_INTERVAL)."
         ),
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Print Zammad diagnostic messages on stderr (REST URL hints, verify success, etc.).",
+    )
+    return parser
+
+
+async def main() -> None:
+    args = _build_arg_parser().parse_args()
 
     base_user_id = args.user_id or USER_ID or AUTHORITATIVE_USER_ID
     request_manager_url = args.request_manager_url or REQUEST_MANAGER_URL
@@ -516,22 +545,23 @@ async def main() -> None:
         )
         sys.exit(2)
 
-    api_base = normalize_zammad_rest_api_base(zammad_base_url)
-    print(
-        f"[zammad] ZAMMAD_URL={zammad_base_url!r} -> REST {api_base}",
-        file=sys.stderr,
-    )
-    print(
-        "[zammad] Compare the host above to the Zammad UI you open; they must be the same "
-        "instance (or the same cluster entrypoint) or ticket numbers will not match the UI.",
-        file=sys.stderr,
-    )
+    api_base = _api_v1(zammad_base_url)
+    if args.verbose:
+        print(
+            f"[zammad] ZAMMAD_URL={zammad_base_url!r} -> REST {api_base}",
+            file=sys.stderr,
+        )
+        print(
+            "[zammad] Compare the host above to the Zammad UI you open; they must be the same "
+            "instance (or the same cluster entrypoint) or ticket numbers will not match the UI.",
+            file=sys.stderr,
+        )
 
     customer_pw = _customer_password_effective(args.customer_password)
     customer_basic: tuple[str, str] | None = (
         (base_user_id, customer_pw) if customer_pw else None
     )
-    if customer_basic:
+    if args.verbose and customer_basic:
         print(
             "[zammad] Customer articles: HTTP Basic as ticket customer (webhook trigger path).",
             file=sys.stderr,
@@ -546,35 +576,18 @@ async def main() -> None:
             title=args.ticket_title,
         )
         print(f"Created Zammad ticket #{ticket_number} (id={ticket_id})")
-        print(
-            "[zammad] Expect webhook→dispatcher→RM; replies from polling conversations API.",
-            file=sys.stderr,
-        )
-        # Re-read ticket so logs prove which Zammad returned id/number (catches wrong env / proxy).
-        try:
-            vurl = f"{api_base}/tickets/{ticket_id}"
-            vresp = httpx.get(
-                vurl, headers=zammad_rest_json_headers(zammad_token), timeout=10
-            )
-            vresp.raise_for_status()
-            vdata = vresp.json()
-            vnum = vdata.get("number")
-            if str(vnum) != str(ticket_number):
-                print(
-                    f"[zammad] warning: create said number={ticket_number!r} "
-                    f"but GET /tickets/{ticket_id} number={vnum!r}",
-                    file=sys.stderr,
-                )
-            else:
-                print(
-                    f"[zammad] verified GET /tickets/{ticket_id} number={vnum!r} title={vdata.get('title')!r}",
-                    file=sys.stderr,
-                )
-        except Exception as ex:
+        if args.verbose:
             print(
-                f"[zammad] warning: could not verify ticket via GET: {ex}",
+                "[zammad] Expect webhook→dispatcher→RM; replies from polling conversations API.",
                 file=sys.stderr,
             )
+        _zammad_verify_ticket_number_logged(
+            api_base,
+            zammad_token,
+            ticket_id,
+            ticket_number,
+            verbose=args.verbose,
+        )
     except Exception as e:
         print(f"error: could not create Zammad ticket: {e}", file=sys.stderr)
         sys.exit(2)
@@ -583,29 +596,24 @@ async def main() -> None:
     # The Zammad MCP server expects the internal id from /api/v1/tickets/{id}, not the display number
     user_id = f"{base_user_id}-{ticket_id}"
 
-    rm = RequestManagerClient(
+    rm = CLIChatClient(
         request_manager_url=request_manager_url,
         user_id=user_id,
     )
 
-    tid = ticket_id
-    zb = zammad_base_url
-    ztok = zammad_token
-    ce = base_user_id
-
     async def send_to_agent(msg: str) -> str:
-        session_sid = f"zammad-{tid}"
+        session_sid = f"zammad-{ticket_id}"
         baseline_ids = await _conversation_request_ids_snapshot(
             rm, session_id=session_sid
         )
-        article_id = _zammad_add_article(
-            zb,
-            tid,
+        article_id = _zammad_add_customer_article(
+            zammad_base_url,
+            ticket_id,
             body=msg,
-            from_email=ce,
-            sender="Customer",
-            agent_token=ztok,
+            from_email=base_user_id,
+            agent_token=zammad_token,
             customer_basic=customer_basic,
+            verbose=args.verbose,
         )
         if article_id is None:
             return "Error: could not create customer article in Zammad"
@@ -618,8 +626,6 @@ async def main() -> None:
             poll_interval_s=args.poll_interval,
         )
 
-    rm_client: RequestManagerClient = rm
-
     print(f"Using user ID: {user_id}")
     print(
         "Request Manager: poll GET /api/v1/conversations for replies (webhook-driven ingest)"
@@ -628,12 +634,11 @@ async def main() -> None:
 
     try:
         await _chat_loop_with_status(
-            rm_client,
+            rm,
             send_to_agent,
             initial_message=initial_message,
             ticket_id=ticket_id,
             ticket_number=ticket_number,
-            customer_email=base_user_id,
             zammad_base_url=zammad_base_url,
             zammad_token=zammad_token,
             state_map=state_map,

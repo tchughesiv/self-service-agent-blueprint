@@ -71,8 +71,6 @@ export LLM_API_TOKEN=your-api-token
 export LLM_URL=https://your-llm-endpoint/v1
 # Optional: export LLM_MAX_TOKENS=2048   # max output tokens (default); keeps input+output within context
 export LG_PROMPT_LAPTOP_REFRESH=/app/agent-service/config/lg-prompts/lg-prompt-small-scout.yaml
-# Optional — ticketing (Zammad): same Scout tuning for the ticket laptop specialist
-# export LG_PROMPT_TICKET_LAPTOP_REFRESH=/app/agent-service/config/lg-prompts/ticket-laptop-refresh-lg-prompt-small-scout.yaml
 
 # Set hugging face token, set to 1234 as not needed unless
 # you want to use locally hosted LLM
