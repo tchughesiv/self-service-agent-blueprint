@@ -67,16 +67,25 @@ if __name__ == "__main__":
             flow_module, "DEFAULT_RESET_CONVERSATION", False
         )
         reset_conversation = args.reset_conversation or default_reset_conversation
+        flow_initial_message = getattr(flow_module, "DEFAULT_INITIAL_MESSAGE", None)
+        flow_skip_initial = getattr(flow_module, "DEFAULT_SKIP_INITIAL_MESSAGE", False)
+        flow_ticket_title = getattr(flow_module, "DEFAULT_TICKET_TITLE", None)
     else:
         # Default mode: existing behavior
         conversations_dir = "conversations_config/conversations"
         output_dir = "results/conversation_results"
         test_script = args.test_script or "chat-responses-request-mgr.py"
         reset_conversation = args.reset_conversation
+        flow_initial_message = None
+        flow_skip_initial = False
+        flow_ticket_title = None
 
     tester = ConversationFlowTester(
         test_script=test_script,
         reset_conversation=reset_conversation,
+        initial_message=flow_initial_message,
+        skip_initial_message=flow_skip_initial,
         message_timeout=args.message_timeout,
+        ticket_title=flow_ticket_title,
     )
     tester.run_flows(conversations_dir, output_dir)

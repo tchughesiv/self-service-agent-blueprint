@@ -231,6 +231,16 @@ async def create_or_get_session_shared(
         where_conditions.append(
             RequestSession.integration_type == request.integration_type
         )
+    elif (
+        req_integration is not None
+        and get_enum_value(req_integration) != IntegrationType.ZAMMAD.value
+    ):
+        # Unified-session mode (SESSION_PER_INTEGRATION_TYPE=false): do not attach CLI/WEB/etc.
+        # traffic to Zammad ticket sessions—otherwise generic RM calls reuse ``zammad-{id}`` rows
+        # and pollute portal tickets. Explicit ``metadata.session_id`` still pins to a ticket above.
+        where_conditions.append(
+            RequestSession.integration_type != IntegrationType.ZAMMAD
+        )
 
     # Use SELECT FOR UPDATE SKIP LOCKED to prevent race conditions
     # SKIP LOCKED allows other transactions to proceed if row is locked

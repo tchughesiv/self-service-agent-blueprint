@@ -545,7 +545,7 @@ Receives Zammad **Trigger → Webhook** POSTs so ticket creates and updates can 
 }
 ```
 
-**Errors**: **401** `"Invalid signature"`; **400** missing `X-Zammad-Delivery` or invalid JSON; **500** on unexpected server errors.
+**Errors**: **401** with `detail` **Invalid signature** (bad/missing HMAC, or unset/empty webhook secret); **400** missing `X-Zammad-Delivery` or invalid JSON (`detail` as returned by the handler); **500** on unexpected failures (`detail` **Internal server error**).
 
 ### Delivery Endpoints
 

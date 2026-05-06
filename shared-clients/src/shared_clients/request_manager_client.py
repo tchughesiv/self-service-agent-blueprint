@@ -225,6 +225,7 @@ class CLIChatClient(RequestManagerClient):
         request_manager_session_id: Optional[str] = None,
         user_email: Optional[str] = None,
         session_name: Optional[str] = None,
+        rm_session_id: Optional[str] = None,
     ) -> Union[str, Dict[str, Any]]:
         """
         Send a message to the agent via Request Manager.
@@ -232,9 +233,14 @@ class CLIChatClient(RequestManagerClient):
         Args:
             message: The message to send
             command_context: CLI command context (default: {"command": "chat", "args": []})
-            request_manager_session_id: Session ID (auto-generated if not provided)
+            request_manager_session_id: Opaque id stored as metadata["request_manager_session_id"]
+                (default: new UUID). Used by the CLI harness / conversation tooling—not the Request Manager
+                ``RequestSession.session_id`` row (e.g. ``zammad-9``).
             user_email: User email
             session_name: Session name
+            rm_session_id: If set, stored as metadata["session_id"]. Request Manager uses this key to
+                attach the request to an existing RM session row (e.g. ``zammad-123``). Unrelated to
+                ``request_manager_session_id`` above (different metadata field and semantics).
 
         Returns:
             Agent response content string
@@ -254,6 +260,8 @@ class CLIChatClient(RequestManagerClient):
             "user_email": user_email or "",
             "session_name": session_name or "",
         }
+        if rm_session_id:
+            metadata["session_id"] = rm_session_id
 
         request_url = f"{self.request_manager_url}/api/v1/requests/generic"
         logger.debug(

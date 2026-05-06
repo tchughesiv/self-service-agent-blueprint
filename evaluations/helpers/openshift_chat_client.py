@@ -30,6 +30,7 @@ class OpenShiftChatClient:
 
         Args:
             authoritative_user_id: Required user ID to set as AUTHORITATIVE_USER_ID environment variable
+                (typically the tester email).
             deployment_name: Name of the OpenShift deployment to connect to
             test_script: Name of the test script to execute (default: "chat-responses-request-mgr.py")
             reset_conversation: If True, send "reset" message after initialization

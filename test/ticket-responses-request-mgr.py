@@ -351,9 +351,9 @@ async def _poll_conversation_for_agent_reply(
     )
 
 
-async def _rm_tokens_cli_style(cli: CLIChatClient) -> None:
-    """POST ``**tokens**`` to RM generic (CLI) and print summary — same as CLIChatClient chat loop."""
-    agent_response = await cli.send_message("**tokens**")
+async def _rm_tokens_cli_style(cli: CLIChatClient, *, rm_session_id: str) -> None:
+    """POST ``**tokens**`` to RM generic (CLI) pinned to this ticket's RM session."""
+    agent_response = await cli.send_message("**tokens**", rm_session_id=rm_session_id)
     if isinstance(agent_response, dict):
         response_content = agent_response.get("content", str(agent_response))
     else:
@@ -422,7 +422,9 @@ async def _chat_loop_with_status(
                     # Harness (OpenShiftChatClient) waits for `agent:` before accepting the
                     # terminator; token formatting has no agent prefix unless we add this line.
                     print("agent: ")
-                    await _rm_tokens_cli_style(rm_client)
+                    await _rm_tokens_cli_style(
+                        rm_client, rm_session_id=f"zammad-{ticket_id}"
+                    )
                     print(AGENT_MESSAGE_TERMINATOR)
                     continue
                 agent_response = await send_to_agent(message)
@@ -439,7 +441,9 @@ async def _chat_loop_with_status(
                     break
                 if message.strip():
                     if message.lower() == "**tokens**":
-                        await _rm_tokens_cli_style(rm_client)
+                        await _rm_tokens_cli_style(
+                            rm_client, rm_session_id=f"zammad-{ticket_id}"
+                        )
                         continue
                     agent_response = await send_to_agent(message)
                     print(f"agent: {agent_response}")

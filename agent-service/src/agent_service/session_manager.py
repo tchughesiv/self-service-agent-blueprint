@@ -19,67 +19,36 @@ logger = configure_logging("agent-service")
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("langgraph").setLevel(logging.WARNING)
 
-# Session persistence for ticketing (sticky routing intent)
+# Zammad ticket routing:
+# ``sticky_routing_agent`` is persisted when a ticket specialist is first assigned (laptop vs
+# general). Product policy: that decision is final for this ticket — LangGraph must not steer the
+# session to another specialist or back to the routing agent; changing track requires a new Zammad
+# ticket / RM session. Enforcement lives in ``_zammad_apply_sticky_ticket_track`` and specialist
+# lock / no-router handling below.
 STICKY_AGENT_LAPTOP = "ticket-laptop-refresh"
 STICKY_AGENT_GENERAL = "ticket-general-support"
 
 
-def _text_suggests_non_laptop_topic(text: str) -> bool:
-    """Heuristic: user is likely asking for a different IT track than laptop refresh."""
-    t = text.lower()
-    if "laptop" in t or "refresh" in t or "hardware" in t:
-        return False
-    blocked = (
-        "password",
-        "printer",
-        "vpn",
-        "outlook",
-        "email not",
-        "different issue",
-        "unrelated",
-        "not about laptop",
-        "new ticket",
-        "not laptop",
-    )
-    return any(b in t for b in blocked)
+def _zammad_apply_sticky_ticket_track(
+    routed_agent: Optional[str],
+    sticky: Optional[str],
+    *,
+    routing_agent_name: str,
+) -> Optional[str]:
+    """Apply persisted ticket specialist choice; overrides conflicting routing_decision values."""
+    if not sticky or not routed_agent:
+        return routed_agent
+    if routed_agent == sticky:
+        return routed_agent
+    if routed_agent == routing_agent_name:
+        return None
+    return sticky
 
 
 def _entry_tier_agent_ids() -> frozenset[str]:
     """Agent ids that may hand off to specialists (routing + ticket intake)."""
     raw = os.getenv("ENTRY_AGENT_IDS", "routing-agent,ticket-review-agent")
     return frozenset(x.strip() for x in raw.split(",") if x.strip())
-
-
-def sticky_prefer_laptop_over_general(text: str) -> bool:
-    """When session sticky is laptop, keep laptop path for short/ambiguous follow-ups."""
-    t = text.strip().lower()
-    if not t:
-        return True
-    if t in {
-        "help",
-        "hi",
-        "hello",
-        "hey",
-        "thanks",
-        "thank you",
-        "ok",
-        "okay",
-        "yes",
-        "no",
-        "?",
-    }:
-        return True
-    if len(t) <= 50 and not _text_suggests_non_laptop_topic(t):
-        return True
-    if (
-        "laptop" in t or "refresh" in t or "hardware" in t
-    ) and not _text_suggests_non_laptop_topic(t):
-        return True
-    if len(t) > 120 and _text_suggests_non_laptop_topic(t):
-        return False
-    if len(t) <= 100:
-        return not _text_suggests_non_laptop_topic(t)
-    return False
 
 
 def get_session_token_context(session_id: str | None) -> str:
@@ -287,23 +256,30 @@ class ResponsesSessionManager(BaseSessionManager):
                     )
 
             if should_reset:
-                logger.info(
-                    "Specialist task complete, returning to routing agent",
-                    user_id=self.user_id,
-                    current_agent=self.current_agent_name,
-                )
-                await self._reset_conversation_state()
-                # Recursively call with the actual user message to create new routing session
-                # Return to routing agent - pass None/True to create routing session
-                return await self.handle_responses_message(
-                    text,
-                    request_manager_session_id,
-                    session_name,
-                    target_agent_id=None,
-                    requires_routing=True,
-                    integration_context=self._integration_context,
-                    integration_type=self._integration_type_str,
-                )
+                if self._is_zammad_integration() and self._is_specialist_session():
+                    logger.info(
+                        "Zammad: ignoring _should_return_to_routing — staying on specialist",
+                        user_id=self.user_id,
+                        current_agent=self.current_agent_name,
+                    )
+                else:
+                    logger.info(
+                        "Specialist task complete, returning to routing agent",
+                        user_id=self.user_id,
+                        current_agent=self.current_agent_name,
+                    )
+                    await self._reset_conversation_state()
+                    # Recursively call with the actual user message to create new routing session
+                    # Return to routing agent - pass None/True to create routing session
+                    return await self.handle_responses_message(
+                        text,
+                        request_manager_session_id,
+                        session_name,
+                        target_agent_id=None,
+                        requires_routing=True,
+                        integration_context=self._integration_context,
+                        integration_type=self._integration_type_str,
+                    )
 
             # Intercept special commands before passing to conversation
             if text.strip().lower() == "**tokens**":
@@ -619,16 +595,24 @@ class ResponsesSessionManager(BaseSessionManager):
                         self._is_specialist_session()
                         and session.state_machine.is_terminal_state(current_state)
                     ):
-                        logger.info(
-                            "Resumed specialist session is in terminal state - resetting to routing agent",
-                            request_manager_session_id=request_manager_session_id,
-                            current_agent_id=current_agent_id,
-                            current_state=current_state,
-                        )
-                        # Reset the conversation state
-                        await self._reset_conversation_state()
-                        # Return False so a new routing session gets created
-                        return False
+                        if self._is_zammad_integration():
+                            logger.info(
+                                "Resumed specialist session is terminal (Zammad) — not resetting to router",
+                                request_manager_session_id=request_manager_session_id,
+                                current_agent_id=current_agent_id,
+                                current_state=current_state,
+                            )
+                        else:
+                            logger.info(
+                                "Resumed specialist session is in terminal state - resetting to routing agent",
+                                request_manager_session_id=request_manager_session_id,
+                                current_agent_id=current_agent_id,
+                                current_state=current_state,
+                            )
+                            # Reset the conversation state
+                            await self._reset_conversation_state()
+                            # Return False so a new routing session gets created
+                            return False
             except Exception as e:
                 logger.debug(
                     "Could not check conversation state when resuming session",
@@ -991,21 +975,52 @@ class ResponsesSessionManager(BaseSessionManager):
 
         logger.debug("Routing detection result", routed_agent=routed_agent)
 
-        # Zammad only: keep laptop path when the session was previously committed to laptop
-        # refresh and the user sends a short/ambiguous follow-up (e.g. "help") after reset.
+        # Zammad: once sticky_routing_agent is stored, bind routing_decision to that specialist.
         if self._is_zammad_integration():
-            if (
-                routed_agent == STICKY_AGENT_GENERAL
-                and await self._get_sticky_routing_agent_from_db()
-                == STICKY_AGENT_LAPTOP
-                and sticky_prefer_laptop_over_general(text)
-            ):
-                routed_agent = STICKY_AGENT_LAPTOP
-                logger.info(
-                    "Sticky laptop intent override applied",
-                    user_id=self.user_id,
-                    message_preview=text[:120],
+            sticky = await self._get_sticky_routing_agent_from_db()
+            if sticky:
+                prev = routed_agent
+                routed_agent = _zammad_apply_sticky_ticket_track(
+                    routed_agent,
+                    sticky,
+                    routing_agent_name=self.ROUTING_AGENT_NAME,
                 )
+                if prev != routed_agent:
+                    logger.info(
+                        "Zammad ticket track locked (sticky_routing_agent)",
+                        sticky=sticky,
+                        previous_routed=prev,
+                        applied_routed=routed_agent,
+                        user_id=self.user_id,
+                    )
+
+        # Specialist lock: on a leaf specialist, ignore routing_decision that would leave the
+        # current specialist — except non-Zammad may still return to routing-agent when the graph
+        # says so. Zammad ticket sessions never auto-return to router (new ticket for a new track).
+        if (
+            routed_agent
+            and self._is_specialist_session()
+            and self.current_agent_name
+            and routed_agent != self.current_agent_name
+        ):
+            allow_return_to_router = (
+                routed_agent == self.ROUTING_AGENT_NAME
+                and not self._is_zammad_integration()
+            )
+            if not allow_return_to_router:
+                logger.info(
+                    "Specialist lock: ignoring routing_decision"
+                    + (
+                        " (Zammad: no auto return-to-router)"
+                        if self._is_zammad_integration()
+                        and routed_agent == self.ROUTING_AGENT_NAME
+                        else "; open a new ticket/session to change specialist track"
+                    ),
+                    user_id=self.user_id,
+                    ignored_target=routed_agent,
+                    current_agent=self.current_agent_name,
+                )
+                routed_agent = None
 
         if routed_agent:
             logger.info(
@@ -1016,10 +1031,11 @@ class ResponsesSessionManager(BaseSessionManager):
                 current_agent=self.current_agent_name,
             )
 
-            # Handle task completion - return to router
+            # Handle task completion - return to router (not for Zammad ticket specialists)
             if (
                 routed_agent == self.ROUTING_AGENT_NAME
                 and self._is_specialist_session()
+                and not self._is_zammad_integration()
             ):
                 logger.info(
                     "Specialist task complete, returning to routing agent",
@@ -1090,7 +1106,14 @@ class ResponsesSessionManager(BaseSessionManager):
                     )
                     return cleaned_response
                 else:
-                    # Response was only termination markers - reset immediately and return to router
+                    # Response was only termination markers — normally reset to router; Zammad stays on specialist.
+                    if self._is_zammad_integration():
+                        logger.info(
+                            "Zammad: response was only termination markers — not resetting to router",
+                            user_id=self.user_id,
+                            current_agent=self.current_agent_name,
+                        )
+                        return ""
                     logger.info(
                         "Response contains only termination markers - resetting and routing to router",
                         user_id=self.user_id,

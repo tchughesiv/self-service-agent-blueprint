@@ -22,6 +22,7 @@ class ConversationFlowTester:
         initial_message: Optional[str] = None,
         skip_initial_message: bool = False,
         message_timeout: int = 60,
+        ticket_title: Optional[str] = None,
     ) -> None:
         """
         Initialize the ConversationFlowTester.
@@ -34,12 +35,15 @@ class ConversationFlowTester:
             skip_initial_message: If True, skip sending any initial message after reset, allowing
                                   the first question to serve as the opening message.
             message_timeout: Timeout in seconds for individual message send/response operations (default: 60)
+            ticket_title: Passed to ticket-responses-request-mgr.py as ``--ticket-title`` when set
+                (Zammad subject). Should match the evaluation flow (laptop vs unrelated).
         """
         self.test_script = test_script
         self.reset_conversation = reset_conversation
         self.initial_message = initial_message
         self.skip_initial_message = skip_initial_message
         self.message_timeout = message_timeout
+        self.ticket_title = ticket_title
         self.conversation_history: list[Any] = []
         self.total_app_tokens = {"input": 0, "output": 0, "total": 0, "calls": 0}
 
@@ -75,6 +79,7 @@ class ConversationFlowTester:
             initial_message=initial_message or self.initial_message,
             skip_initial_message=self.skip_initial_message,
             message_timeout=self.message_timeout,
+            ticket_title=self.ticket_title,
         )
 
         try:

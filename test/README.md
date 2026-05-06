@@ -58,5 +58,3 @@ ZAMMAD_HTTP_TOKEN=… \
 USER_ID=user@example.com \
 python test/ticket-responses-request-mgr.py
 ```
-
-**If the UI shows a different ticket number than the script (e.g. `61016` vs `640…`) or you cannot find the ticket:** the pod’s **`ZAMMAD_URL`** (from the **`zammad-url`** key in **`…-zammad-credentials`**) must target the **same Zammad** you browse. Bootstrap often sets that to the **in-cluster** URL (`http://…-nginx:8080`); the OpenShift Route should still be the **same app and database**, but a typo, old secret, or second Zammad install in another namespace will diverge. The script prints **`[zammad] ZAMMAD_URL=…`** and a **`verified GET /tickets/<id>`** line on **stderr** — use that host and ticket **number** / **id** when searching the UI (clear filters; search by number). Articles are created as **internal** notes; the ticket row should still appear for agents with access to group **Users**.
