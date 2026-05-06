@@ -77,7 +77,6 @@ include = [
 # Development tool configurations
 [tool.pytest.ini_options]
 minversion = "8.0"
-pythonpath = ["../shared-models/src", "../shared-clients/src"]
 addopts = [
     "-ra",
     "--strict-markers",
