@@ -323,15 +323,8 @@ mcp-servers:
         ZAMMAD_MCP_TIMEOUT_SECONDS: "120"
         ZAMMAD_GROUP_HUMAN_MANAGED: "human_managed_tickets"
         ZAMMAD_GROUP_ESCALATED_LAPTOP: "escalated_laptop_refresh_tickets"
-        # Optional: assignee on escalation (omit or empty = do not set owner).
-        # ZAMMAD_OWNER_ESCALATED_LAPTOP: "escalated_laptop_refresh_handler1@example.com"
-        # ZAMMAD_OWNER_HUMAN_MANAGED: "someone@example.com"  # general agent route_to_human_managed_queue
-        # Optional: move ticket out of Users when awaiting manager (matches bootstrap triggerTagsExclude + triggerGroupNames).
-        ZAMMAD_GROUP_MANAGER_REVIEW: "human_managed_tickets"
         ZAMMAD_LAPTOP_SPECIALIST_OWNER: "agent.laptop-specialist@example.com"
         ZAMMAD_SPECIALIST_OWNER: "agent.general@example.com"
-        # Laptop + general routing: leave unset or empty to skip state change (tickets stay "new").
-        ZAMMAD_STATE_IN_PROGRESS: "open"
         ZAMMAD_USER_MANAGER_FIELD: "manager_email"
         # Fallback owner for send_to_manager_review when customer has no manager_email (bootstrap agents below).
         ZAMMAD_MANAGER_EMAIL: "manager1@example.com"

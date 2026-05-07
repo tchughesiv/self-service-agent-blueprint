@@ -24,6 +24,8 @@ SERVICE_NAME = "zammad-mcp-server"
 logger = configure_logging(SERVICE_NAME)
 auto_tracing_run(SERVICE_NAME, logger)
 
+STATE_AFTER_SPECIALIST_TAG = "open"
+
 
 def _calculate_laptop_age(purchase_date_str: str) -> str:
     """Calculate laptop age in years and months from a YYYY-MM-DD purchase date."""
@@ -132,25 +134,21 @@ def mark_as_agent_managed_laptop_refresh(
 ) -> str:
     """Tag this ticket for agent-managed laptop refresh."""
     _, ticket_id, _ = _authorize_ticket(ctx)
-    s = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS
-    tag = s.agent_managed_tag
+    tag = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS.agent_managed_tag
     call_basher_tool("zammad_add_ticket_tag", {"ticket_id": ticket_id, "tag": tag})
 
-    owner = s.laptop_specialist_owner
-    state_ip = s.state_in_progress
-    payload: dict[str, Any] = {}
+    owner = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS.laptop_specialist_owner
+    payload: dict[str, Any] = {"state": STATE_AFTER_SPECIALIST_TAG}
     if owner:
         payload["owner"] = owner.strip()
-    if state_ip:
-        payload["state"] = state_ip.strip()
-    if payload:
-        call_basher_tool("zammad_update_ticket", {"ticket_id": ticket_id, **payload})
+    call_basher_tool("zammad_update_ticket", {"ticket_id": ticket_id, **payload})
 
-    parts = [f"Ticket {ticket_id} tagged as {tag!r}"]
+    parts = [
+        f"Ticket {ticket_id} tagged as {tag!r}",
+        f"state set to {STATE_AFTER_SPECIALIST_TAG!r}",
+    ]
     if owner:
         parts.append(f"owner set to {owner!r}")
-    if state_ip:
-        parts.append(f"state set to {state_ip!r}")
     return ", ".join(parts) + "."
 
 
@@ -162,25 +160,21 @@ def mark_as_general_agent_managed(
 ) -> str:
     """Tag this ticket for agent-managed general support."""
     _, ticket_id, _ = _authorize_ticket(ctx)
-    s = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS
-    tag = s.general_agent_managed_tag
+    tag = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS.general_agent_managed_tag
     call_basher_tool("zammad_add_ticket_tag", {"ticket_id": ticket_id, "tag": tag})
 
-    owner = s.general_specialist_owner
-    state_ip = s.state_in_progress
-    payload: dict[str, Any] = {}
+    owner = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS.general_specialist_owner
+    payload: dict[str, Any] = {"state": STATE_AFTER_SPECIALIST_TAG}
     if owner:
         payload["owner"] = owner.strip()
-    if state_ip:
-        payload["state"] = state_ip.strip()
-    if payload:
-        call_basher_tool("zammad_update_ticket", {"ticket_id": ticket_id, **payload})
+    call_basher_tool("zammad_update_ticket", {"ticket_id": ticket_id, **payload})
 
-    parts = [f"Ticket {ticket_id} tagged as {tag!r}"]
+    parts = [
+        f"Ticket {ticket_id} tagged as {tag!r}",
+        f"state set to {STATE_AFTER_SPECIALIST_TAG!r}",
+    ]
     if owner:
         parts.append(f"owner set to {owner!r}")
-    if state_ip:
-        parts.append(f"state set to {state_ip!r}")
     return ", ".join(parts) + "."
 
 
@@ -209,18 +203,14 @@ def escalate_for_human_review(ctx: Context[Any, Any], dummy_parameter: str = "")
 
     gname = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS.group_escalated_laptop
     gstrip = gname.strip()
-    owner_mail = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS.owner_escalated_laptop.strip()
-    update: dict[str, Any] = {}
     if gstrip:
-        update["group"] = gstrip
-    if owner_mail:
-        update["owner"] = owner_mail
-    if update:
-        call_basher_tool("zammad_update_ticket", {"ticket_id": ticket_id, **update})
+        call_basher_tool(
+            "zammad_update_ticket",
+            {"ticket_id": ticket_id, "group": gstrip},
+        )
 
     gmsg = f", group {gname!r}" if gstrip else ""
-    omsg = f", owner {update['owner']!r}" if owner_mail and "owner" in update else ""
-    return f"Ticket {ticket_id} tagged {tag!r}{gmsg}{omsg}."
+    return f"Ticket {ticket_id} tagged {tag!r}{gmsg}."
 
 
 @mcp.tool()
@@ -243,13 +233,11 @@ def send_to_manager_review(ctx: Context[Any, Any], dummy_parameter: str = "") ->
     tag = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS.tag_manager_review
     call_basher_tool("zammad_add_ticket_tag", {"ticket_id": ticket_id, "tag": tag})
 
-    gname = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS.group_manager_review
-    payload: dict[str, Any] = {"owner": manager.strip()}
-    if gname.strip():
-        payload["group"] = gname.strip()
-    call_basher_tool("zammad_update_ticket", {"ticket_id": ticket_id, **payload})
-    gmsg = f", group {gname!r}" if gname.strip() else ""
-    return f"Ticket {ticket_id} assigned to {manager!r}, tag {tag!r}{gmsg}."
+    call_basher_tool(
+        "zammad_update_ticket",
+        {"ticket_id": ticket_id, "owner": manager.strip()},
+    )
+    return f"Ticket {ticket_id} assigned to {manager!r}, tag {tag!r}."
 
 
 @mcp.tool()
@@ -260,24 +248,19 @@ def route_to_human_managed_queue(
 ) -> str:
     """Route this ticket to the human-managed queue."""
     _, ticket_id, _ = _authorize_ticket(ctx)
-    s = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS
-    tag = s.tag_escalate_human
+    tag = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS.tag_escalate_human
     call_basher_tool("zammad_add_ticket_tag", {"ticket_id": ticket_id, "tag": tag})
 
-    gname = s.group_human_managed
+    gname = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS.group_human_managed
     gstrip = gname.strip()
-    owner_mail = s.owner_human_managed.strip()
-    update: dict[str, Any] = {}
     if gstrip:
-        update["group"] = gstrip
-    if owner_mail:
-        update["owner"] = owner_mail
-    if update:
-        call_basher_tool("zammad_update_ticket", {"ticket_id": ticket_id, **update})
+        call_basher_tool(
+            "zammad_update_ticket",
+            {"ticket_id": ticket_id, "group": gstrip},
+        )
 
     gmsg = f", group {gname!r}" if gstrip else ""
-    omsg = f", owner {update['owner']!r}" if owner_mail and "owner" in update else ""
-    return f"Ticket {ticket_id} tagged {tag!r}{gmsg}{omsg}."
+    return f"Ticket {ticket_id} tagged {tag!r}{gmsg}."
 
 
 @mcp.tool()

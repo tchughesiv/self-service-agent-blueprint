@@ -28,13 +28,9 @@ class ZammadMcpSettings:
 
     agent_managed_tag: str
     state_closed: str
-    state_in_progress: str
     tag_escalate_human: str
     group_escalated_laptop: str
-    owner_escalated_laptop: str
-    owner_human_managed: str
     tag_manager_review: str
-    group_manager_review: str
     group_human_managed: str
     user_manager_field: str
     default_manager_email: str
@@ -103,23 +99,15 @@ def load_zammad_mcp_settings() -> ZammadMcpSettings:
             "ZAMMAD_AGENT_MANAGED_TAG", "agent-managed-laptop-refresh"
         ),
         state_closed=_str_env("ZAMMAD_STATE_CLOSED", "closed"),
-        # mark_as_agent_managed_laptop_refresh / mark_as_general_agent_managed: set ticket state
-        # (e.g. "open"). Unset in env = skip (conservative); Helm sets open by default.
-        state_in_progress=_group_env("ZAMMAD_STATE_IN_PROGRESS", ""),
         tag_escalate_human=_str_env(
             "ZAMMAD_TAG_ESCALATE_HUMAN", "escalated-human-review"
         ),
         group_escalated_laptop=_group_env(
             "ZAMMAD_GROUP_ESCALATED_LAPTOP", "escalated_laptop_refresh_tickets"
         ),
-        # Opt-in: set to a Zammad user email to assign on escalation; default empty (pool / round-robin can own triage).
-        owner_escalated_laptop=_group_env("ZAMMAD_OWNER_ESCALATED_LAPTOP", ""),
-        # Opt-in: assignee when general agent routes to human_managed_tickets (route_to_human_managed_queue).
-        owner_human_managed=_group_env("ZAMMAD_OWNER_HUMAN_MANAGED", ""),
         tag_manager_review=_str_env(
             "ZAMMAD_TAG_MANAGER_REVIEW", "pending-manager-review"
         ),
-        group_manager_review=_group_env("ZAMMAD_GROUP_MANAGER_REVIEW", ""),
         group_human_managed=_group_env(
             "ZAMMAD_GROUP_HUMAN_MANAGED", "human_managed_tickets"
         ),

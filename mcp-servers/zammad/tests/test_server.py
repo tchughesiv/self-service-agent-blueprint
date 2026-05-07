@@ -62,9 +62,7 @@ def test_mark_as_agent_managed(
     mock_assert.return_value = 100
     ctx = MockContext(auth_headers)
 
-    no_state = replace(load_zammad_mcp_settings(), state_in_progress="")
-    with patch("zammad_mcp.server.zammad_mcp_settings.ZAMMAD_MCP_SETTINGS", no_state):
-        result = mark_as_agent_managed_laptop_refresh(ctx)
+    result = mark_as_agent_managed_laptop_refresh(ctx)
 
     mock_assert.assert_called_once()
     names = [c[0][0] for c in mock_basher.call_args_list]
@@ -79,45 +77,24 @@ def test_mark_as_agent_managed(
     assert mock_basher.call_args_list[1][0][1] == {
         "ticket_id": 100,
         "owner": "agent.laptop-specialist@example.com",
+        "state": "open",
     }
     assert "tagged" in result.lower() or "Ticket 100" in result
 
 
 @patch("zammad_mcp.server.call_basher_tool")
 @patch("zammad_mcp.server.assert_ticket_customer_matches_basher")
-def test_mark_as_agent_managed_merges_state_with_owner(
+def test_mark_as_agent_managed_state_only_when_owner_empty(
     mock_assert: Mock,
     mock_basher: Mock,
     auth_headers: dict[str, str],
 ) -> None:
-    mock_assert.return_value = 100
-    ctx = MockContext(auth_headers)
-    merged = replace(load_zammad_mcp_settings(), state_in_progress="open")
-    with patch("zammad_mcp.server.zammad_mcp_settings.ZAMMAD_MCP_SETTINGS", merged):
-        mark_as_agent_managed_laptop_refresh(ctx)
-
-    upd = mock_basher.call_args_list[1][0][1]
-    assert upd == {
-        "ticket_id": 100,
-        "owner": "agent.laptop-specialist@example.com",
-        "state": "open",
-    }
-
-
-@patch("zammad_mcp.server.call_basher_tool")
-@patch("zammad_mcp.server.assert_ticket_customer_matches_basher")
-def test_mark_as_agent_managed_state_only_skips_owner_resolution(
-    mock_assert: Mock,
-    mock_basher: Mock,
-    auth_headers: dict[str, str],
-) -> None:
-    """When owner is empty but ZAMMAD_STATE_IN_PROGRESS is set, update state only."""
+    """When laptop specialist owner is empty, update state to open only."""
     mock_assert.return_value = 100
     ctx = MockContext(auth_headers)
     merged = replace(
         load_zammad_mcp_settings(),
         laptop_specialist_owner="",
-        state_in_progress="open",
     )
     with patch("zammad_mcp.server.zammad_mcp_settings.ZAMMAD_MCP_SETTINGS", merged):
         mark_as_agent_managed_laptop_refresh(ctx)
@@ -139,9 +116,7 @@ def test_mark_as_general_agent_managed_merges_state_with_owner(
 ) -> None:
     mock_assert.return_value = 100
     ctx = MockContext(auth_headers)
-    merged = replace(load_zammad_mcp_settings(), state_in_progress="open")
-    with patch("zammad_mcp.server.zammad_mcp_settings.ZAMMAD_MCP_SETTINGS", merged):
-        mark_as_general_agent_managed(ctx)
+    mark_as_general_agent_managed(ctx)
 
     assert mock_basher.call_args_list[0][0][1] == {
         "ticket_id": 100,
@@ -222,28 +197,6 @@ def test_escalate_for_human_review(
 
 
 @patch("zammad_mcp.server.call_basher_tool")
-@patch("zammad_mcp.server.assert_ticket_customer_matches_basher")
-def test_escalate_for_human_review_sets_owner_when_env_configured(
-    mock_assert: Mock,
-    mock_basher: Mock,
-    auth_headers: dict[str, str],
-) -> None:
-    mock_assert.return_value = 100
-    ctx = MockContext(auth_headers)
-    merged = replace(
-        load_zammad_mcp_settings(),
-        owner_escalated_laptop="escalated_laptop_refresh_handler1@example.com",
-    )
-    with patch("zammad_mcp.server.zammad_mcp_settings.ZAMMAD_MCP_SETTINGS", merged):
-        result = escalate_for_human_review(ctx)
-
-    upd = mock_basher.call_args_list[1][0][1]
-    assert upd["group"] == "escalated_laptop_refresh_tickets"
-    assert upd["owner"] == "escalated_laptop_refresh_handler1@example.com"
-    assert "100" in result
-
-
-@patch("zammad_mcp.server.call_basher_tool")
 @patch("zammad_mcp.server.fetch_zammad_customer_user_rest")
 @patch("zammad_mcp.server.assert_ticket_customer_matches_basher")
 def test_send_to_manager_review_requires_manager_env(
@@ -306,43 +259,6 @@ def test_send_to_manager_review_ok(
 @patch("zammad_mcp.server.call_basher_tool")
 @patch("zammad_mcp.server.fetch_zammad_customer_user_rest")
 @patch("zammad_mcp.server.assert_ticket_customer_matches_basher")
-def test_send_to_manager_review_optional_group(
-    mock_assert: Mock,
-    mock_fetch: Mock,
-    mock_basher: Mock,
-    auth_headers: dict[str, str],
-) -> None:
-    mock_assert.return_value = 100
-    mock_fetch.return_value = {"email": "alice@company.com", "manager_email": ""}
-    mock_basher.return_value = "ok"
-    ctx = MockContext(auth_headers)
-    with (
-        patch.dict(
-            os.environ,
-            {
-                "ZAMMAD_MANAGER_EMAIL": "mgr@company.com",
-                "ZAMMAD_URL": "https://zammad.example.com",
-                "ZAMMAD_GROUP_MANAGER_REVIEW": "human_managed_tickets",
-            },
-        ),
-        patch(
-            "zammad_mcp.settings.ZAMMAD_MCP_SETTINGS",
-            load_zammad_mcp_settings(),
-        ),
-    ):
-        result = send_to_manager_review(ctx)
-
-    upd = next(
-        c[0][1] for c in mock_basher.call_args_list if c[0][0] == "zammad_update_ticket"
-    )
-    assert upd["owner"] == "mgr@company.com"
-    assert upd["group"] == "human_managed_tickets"
-    assert "human_managed_tickets" in result
-
-
-@patch("zammad_mcp.server.call_basher_tool")
-@patch("zammad_mcp.server.fetch_zammad_customer_user_rest")
-@patch("zammad_mcp.server.assert_ticket_customer_matches_basher")
 def test_send_to_manager_review_uses_customer_manager_field(
     mock_assert: Mock,
     mock_fetch: Mock,
@@ -387,30 +303,6 @@ def test_route_to_human_managed_queue(
     upd = mock_basher.call_args_list[1][0][1]
     assert upd == {"ticket_id": 100, "group": "human_managed_tickets"}
     assert "100" in result
-
-
-@patch("zammad_mcp.server.call_basher_tool")
-@patch("zammad_mcp.server.assert_ticket_customer_matches_basher")
-def test_route_to_human_managed_queue_sets_owner_when_env_configured(
-    mock_assert: Mock,
-    mock_basher: Mock,
-    auth_headers: dict[str, str],
-) -> None:
-    mock_assert.return_value = 100
-    ctx = MockContext(auth_headers)
-    merged = replace(
-        load_zammad_mcp_settings(),
-        owner_human_managed="tier1@example.com",
-    )
-    with patch("zammad_mcp.server.zammad_mcp_settings.ZAMMAD_MCP_SETTINGS", merged):
-        route_to_human_managed_queue(ctx)
-
-    upd = mock_basher.call_args_list[1][0][1]
-    assert upd == {
-        "ticket_id": 100,
-        "group": "human_managed_tickets",
-        "owner": "tier1@example.com",
-    }
 
 
 @patch("zammad_mcp.server.fetch_zammad_customer_user_rest")
