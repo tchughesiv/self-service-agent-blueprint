@@ -10,10 +10,9 @@ Conversation rows are matched by ``session_id`` ``zammad-{ticket_id}`` plus **ne
 Requires Zammad REST (ZAMMAD_URL, ZAMMAD_HTTP_TOKEN), Request Manager (REQUEST_MANAGER_URL),
 and ``USER_ID`` (customer email).
 
-Customer turns use ``--customer-password`` or env ``ZAMMAD_CUSTOMER_PASSWORD`` (default ``ChangeMe123!``,
-same as ``zammad-bootstrap`` ``DEFAULT_PASSWORD``) so ``POST /ticket_articles`` uses HTTP Basic as the
-ticket customer (integration trigger: ``ticket.customer_id`` = current user).
-Set ``ZAMMAD_CUSTOMER_PASSWORD`` to empty to disable (legacy: agent token for customer articles).
+Customer turns use ``--customer-password`` or env ``ZAMMAD_CUSTOMER_PASSWORD`` (default ``ChangeMe123!`` if
+unset or blank — same as ``zammad-bootstrap`` ``DEFAULT_PASSWORD``) so ``POST /ticket_articles`` always uses
+HTTP Basic as the ticket customer (integration trigger: ``ticket.customer_id`` = current user).
 
 For generic CLI RM without Zammad, use chat-responses-request-mgr.py instead.
 
@@ -68,16 +67,17 @@ _ZAMMAD_STATE_MAP = {
 }
 
 
-def _customer_password_effective(cli_password: str | None) -> str | None:
-    """Return HTTP Basic password for posting customer ticket articles, or None to post as the REST token user only."""
+def _customer_password_effective(cli_password: str | None) -> str:
+    """HTTP Basic password for customer ``POST /ticket_articles`` (bootstrap default when unset/blank)."""
     if cli_password is not None:
         stripped = cli_password.strip()
-        return stripped if stripped else None
+        if stripped:
+            return stripped
     raw = os.environ.get("ZAMMAD_CUSTOMER_PASSWORD")
     if raw is None:
         return _BOOTSTRAP_DEFAULT_CUSTOMER_PASSWORD
     stripped = raw.strip()
-    return stripped if stripped else None
+    return stripped if stripped else _BOOTSTRAP_DEFAULT_CUSTOMER_PASSWORD
 
 
 # ---------------------------------------------------------------------------
@@ -158,9 +158,7 @@ def _zammad_add_customer_article(
     body: str,
     *,
     from_email: str,
-    agent_token: str,
-    customer_basic: tuple[str, str] | None,
-    verbose: bool = False,
+    customer_basic: tuple[str, str],
 ) -> int | None:
     """POST a customer (web) article — inbound harness traffic only; agent replies use dispatcher."""
     url = f"{_api_v1(base_url)}/ticket_articles"
@@ -173,27 +171,13 @@ def _zammad_add_customer_article(
         "from": from_email,
     }
     try:
-        if customer_basic is not None:
-            response = httpx.post(
-                url,
-                json=payload,
-                auth=customer_basic,
-                headers=_ZAMMAD_JSON_CLIENT_HEADERS,
-                timeout=_HTTP_TIMEOUT,
-            )
-        else:
-            if verbose:
-                print(
-                    "[zammad] warning: no customer password — posting with agent token; "
-                    "Zammad trigger (ticket.customer_id = current user) may not fire.",
-                    file=sys.stderr,
-                )
-            response = httpx.post(
-                url,
-                json=payload,
-                headers=zammad_rest_json_headers(agent_token),
-                timeout=_HTTP_TIMEOUT,
-            )
+        response = httpx.post(
+            url,
+            json=payload,
+            auth=customer_basic,
+            headers=_ZAMMAD_JSON_CLIENT_HEADERS,
+            timeout=_HTTP_TIMEOUT,
+        )
         response.raise_for_status()
         data = response.json()
         aid = data.get("id")
@@ -490,9 +474,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--customer-password",
         default=None,
         help=(
-            "Customer Zammad login password for Customer articles (HTTP Basic). "
-            "Uses env ZAMMAD_CUSTOMER_PASSWORD when omitted; default ChangeMe123! if env unset. "
-            "Pass empty to use agent token for customer turns (trigger may not fire)."
+            "Customer Zammad login password for customer articles (HTTP Basic). "
+            "Uses env ZAMMAD_CUSTOMER_PASSWORD when omitted; default ChangeMe123! if env unset or blank."
         ),
     )
     parser.add_argument(
@@ -562,10 +545,8 @@ async def main() -> None:
         )
 
     customer_pw = _customer_password_effective(args.customer_password)
-    customer_basic: tuple[str, str] | None = (
-        (base_user_id, customer_pw) if customer_pw else None
-    )
-    if args.verbose and customer_basic:
+    customer_basic: tuple[str, str] = (base_user_id, customer_pw)
+    if args.verbose:
         print(
             "[zammad] Customer articles: HTTP Basic as ticket customer (webhook trigger path).",
             file=sys.stderr,
@@ -615,9 +596,7 @@ async def main() -> None:
             ticket_id,
             body=msg,
             from_email=base_user_id,
-            agent_token=zammad_token,
             customer_basic=customer_basic,
-            verbose=args.verbose,
         )
         if article_id is None:
             return "Error: could not create customer article in Zammad"
