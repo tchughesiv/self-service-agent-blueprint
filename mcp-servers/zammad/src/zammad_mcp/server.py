@@ -138,7 +138,6 @@ def mark_as_agent_managed_laptop_refresh(
 
     owner = s.laptop_specialist_owner
     state_ip = s.state_in_progress
-    # Basher ``TicketUpdateParams`` accepts ``state``, ``owner``, ``group`` as names/emails — not ``*_id``.
     payload: dict[str, Any] = {}
     if owner:
         payload["owner"] = owner.strip()
@@ -259,11 +258,7 @@ def send_to_manager_review(ctx: Context[Any, Any], dummy_parameter: str = "") ->
 def route_to_human_managed_queue(
     ctx: Context[Any, Any], dummy_parameter: str = ""
 ) -> str:
-    """Route this ticket to the human-managed queue (general-agent escalation).
-
-    Matches laptop ``escalate_for_human_review`` semantics: adds the human-escalation tag,
-    then updates group (and optional owner when ``ZAMMAD_OWNER_HUMAN_MANAGED`` is set).
-    """
+    """Route this ticket to the human-managed queue."""
     _, ticket_id, _ = _authorize_ticket(ctx)
     s = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS
     tag = s.tag_escalate_human
