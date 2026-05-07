@@ -69,92 +69,13 @@ ticketingZammad:
       initContainers:
         volumePermissions:
           enabled: false
-      # Reduce CrashLoopBackOff while Rails boots / runs migrations (defaults are tight on tcp timeout).
       nginx:
         trustedProxies:
           - 10.0.0.0/8
           - 172.16.0.0/12
           - 192.168.0.0/16
-        startupProbe:
-          tcpSocket:
-            port: 8080
-          periodSeconds: 5
-          timeoutSeconds: 5
-          failureThreshold: 60
-        livenessProbe:
-          tcpSocket:
-            port: 8080
-          initialDelaySeconds: 30
-          periodSeconds: 15
-          timeoutSeconds: 10
-          failureThreshold: 8
-        readinessProbe:
-          httpGet:
-            path: /
-            port: 8080
-          initialDelaySeconds: 10
-          periodSeconds: 10
-          timeoutSeconds: 10
-          failureThreshold: 8
       railsserver:
         trustedProxies: "['127.0.0.1', '::1', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16']"
-        startupProbe:
-          tcpSocket:
-            port: 3000
-          periodSeconds: 5
-          timeoutSeconds: 5
-          failureThreshold: 60
-        livenessProbe:
-          tcpSocket:
-            port: 3000
-          initialDelaySeconds: 120
-          periodSeconds: 15
-          timeoutSeconds: 10
-          failureThreshold: 8
-        readinessProbe:
-          httpGet:
-            path: /
-            port: 3000
-          initialDelaySeconds: 15
-          periodSeconds: 10
-          timeoutSeconds: 10
-          failureThreshold: 8
-        resources:
-          requests:
-            cpu: 250m
-            memory: 768Mi
-          limits:
-            cpu: "2"
-            memory: 2Gi
-      websocket:
-        startupProbe:
-          tcpSocket:
-            port: 6042
-          periodSeconds: 5
-          timeoutSeconds: 5
-          failureThreshold: 60
-        livenessProbe:
-          tcpSocket:
-            port: 6042
-          initialDelaySeconds: 60
-          periodSeconds: 15
-          timeoutSeconds: 10
-          failureThreshold: 10
-        readinessProbe:
-          tcpSocket:
-            port: 6042
-          initialDelaySeconds: 15
-          periodSeconds: 10
-          timeoutSeconds: 10
-          failureThreshold: 8
-      scheduler:
-        resources:
-          requests:
-            cpu: 100m
-            memory: 256Mi
-          limits:
-            cpu: "1"
-            memory: 1Gi
 
     postgresql:
       volumePermissions:
@@ -173,10 +94,6 @@ ticketingZammad:
         compatibility:
           openshift:
             adaptSecurityContext: force
-
-agent:
-  defaultAgentId: "routing-agent"
-  zammadDefaultAgentId: "ticket-review-agent"
 
 requestManagement:
   agentService:

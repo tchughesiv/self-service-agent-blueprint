@@ -29,6 +29,17 @@ STICKY_AGENT_LAPTOP = "ticket-laptop-refresh"
 STICKY_AGENT_GENERAL = "ticket-general-support"
 
 
+def _default_agent_id_resolved() -> str:
+    """``DEFAULT_AGENT_ID`` — non-Zammad session bootstrap; LangGraph router identity (see ``ROUTING_AGENT_NAME``)."""
+    return os.getenv("DEFAULT_AGENT_ID", "routing-agent").strip() or "routing-agent"
+
+
+def _zammad_default_agent_id_resolved() -> str:
+    """Align with ``shared_models.session_manager.initial_current_agent_id_for_integration`` for ZAMMAD."""
+    z = os.getenv("ZAMMAD_DEFAULT_AGENT_ID", "").strip()
+    return z if z else "ticket-review-agent"
+
+
 def _zammad_apply_sticky_ticket_track(
     routed_agent: Optional[str],
     sticky: Optional[str],
@@ -46,9 +57,10 @@ def _zammad_apply_sticky_ticket_track(
 
 
 def _entry_tier_agent_ids() -> frozenset[str]:
-    """Agent ids that may hand off to specialists (routing + ticket intake)."""
-    raw = os.getenv("ENTRY_AGENT_IDS", "routing-agent,ticket-review-agent")
-    return frozenset(x.strip() for x in raw.split(",") if x.strip())
+    """Agent ids that may hand off to specialists (``DEFAULT_AGENT_ID`` ∪ ``ZAMMAD_DEFAULT_AGENT_ID``)."""
+    return frozenset(
+        {_default_agent_id_resolved(), _zammad_default_agent_id_resolved()}
+    )
 
 
 def get_session_token_context(session_id: str | None) -> str:
@@ -77,8 +89,10 @@ class ResponsesSessionManager(BaseSessionManager):
     Used by Responses API for full conversation state management.
     """
 
-    # Canonical id used in state-machine signals (e.g. return-to-router); not the Slack default first agent.
-    ROUTING_AGENT_NAME = os.environ.get("ROUTING_AGENT_ID", "routing-agent")
+    # LangGraph id for the *router* on Zammad flows: sticky routing compares the proposed next agent
+    # to this value (``_zammad_apply_sticky_ticket_track``). Must match ``DEFAULT_AGENT_ID`` — same
+    # agent id as non-Zammad first hop; Helm no longer sets a separate ROUTING_AGENT_ID.
+    ROUTING_AGENT_NAME = _default_agent_id_resolved()
 
     def __init__(
         self,

@@ -557,10 +557,6 @@ requestManagement:
     defaultAgentId: "routing-agent"
     # First agent for IntegrationType.ZAMMAD sessions (never falls back to defaultAgentId).
     zammadDefaultAgentId: "ticket-review-agent"
-    # State-machine id for "return to router" signals (keep stable)
-    routingAgentId: "routing-agent"
-    # Comma-separated ids that may dispatch to specialists (entry tier)
-    entryAgentIds: "routing-agent,ticket-review-agent"
     # Agent response timeout in seconds
     timeout: 180
     # Always refresh agent mapping from LlamaStack on each request

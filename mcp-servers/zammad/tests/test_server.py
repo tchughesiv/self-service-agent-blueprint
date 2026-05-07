@@ -69,6 +69,7 @@ def test_mark_as_agent_managed(
     assert names == [
         "zammad_add_ticket_tag",
         "zammad_update_ticket",
+        "zammad_update_ticket",
     ]
     assert mock_basher.call_args_list[0][0][1] == {
         "ticket_id": 100,
@@ -76,8 +77,11 @@ def test_mark_as_agent_managed(
     }
     assert mock_basher.call_args_list[1][0][1] == {
         "ticket_id": 100,
-        "owner": "agent.laptop-specialist@example.com",
         "state": "open",
+    }
+    assert mock_basher.call_args_list[2][0][1] == {
+        "ticket_id": 100,
+        "owner": "agent.laptop-specialist@example.com",
     }
     assert "tagged" in result.lower() or "Ticket 100" in result
 
@@ -109,7 +113,7 @@ def test_mark_as_agent_managed_state_only_when_owner_empty(
 
 @patch("zammad_mcp.server.call_basher_tool")
 @patch("zammad_mcp.server.assert_ticket_customer_matches_basher")
-def test_mark_as_general_agent_managed_merges_state_with_owner(
+def test_mark_as_general_agent_managed_splits_state_then_owner(
     mock_assert: Mock,
     mock_basher: Mock,
     auth_headers: dict[str, str],
@@ -118,15 +122,23 @@ def test_mark_as_general_agent_managed_merges_state_with_owner(
     ctx = MockContext(auth_headers)
     mark_as_general_agent_managed(ctx)
 
+    names = [c[0][0] for c in mock_basher.call_args_list]
+    assert names == [
+        "zammad_add_ticket_tag",
+        "zammad_update_ticket",
+        "zammad_update_ticket",
+    ]
     assert mock_basher.call_args_list[0][0][1] == {
         "ticket_id": 100,
         "tag": "agent-managed-general-support",
     }
-    upd = mock_basher.call_args_list[1][0][1]
-    assert upd == {
+    assert mock_basher.call_args_list[1][0][1] == {
+        "ticket_id": 100,
+        "state": "open",
+    }
+    assert mock_basher.call_args_list[2][0][1] == {
         "ticket_id": 100,
         "owner": "agent.general@example.com",
-        "state": "open",
     }
 
 

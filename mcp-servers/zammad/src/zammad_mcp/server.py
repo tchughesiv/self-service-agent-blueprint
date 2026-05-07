@@ -24,6 +24,7 @@ SERVICE_NAME = "zammad-mcp-server"
 logger = configure_logging(SERVICE_NAME)
 auto_tracing_run(SERVICE_NAME, logger)
 
+# Specialist assign flows always transition to Zammad's default "open" state first (separate from owner).
 STATE_AFTER_SPECIALIST_TAG = "open"
 
 
@@ -137,11 +138,17 @@ def mark_as_agent_managed_laptop_refresh(
     tag = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS.agent_managed_tag
     call_basher_tool("zammad_add_ticket_tag", {"ticket_id": ticket_id, "tag": tag})
 
+    call_basher_tool(
+        "zammad_update_ticket",
+        {"ticket_id": ticket_id, "state": STATE_AFTER_SPECIALIST_TAG},
+    )
+
     owner = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS.laptop_specialist_owner
-    payload: dict[str, Any] = {"state": STATE_AFTER_SPECIALIST_TAG}
-    if owner:
-        payload["owner"] = owner.strip()
-    call_basher_tool("zammad_update_ticket", {"ticket_id": ticket_id, **payload})
+    if owner and owner.strip():
+        call_basher_tool(
+            "zammad_update_ticket",
+            {"ticket_id": ticket_id, "owner": owner.strip()},
+        )
 
     parts = [
         f"Ticket {ticket_id} tagged as {tag!r}",
@@ -163,11 +170,17 @@ def mark_as_general_agent_managed(
     tag = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS.general_agent_managed_tag
     call_basher_tool("zammad_add_ticket_tag", {"ticket_id": ticket_id, "tag": tag})
 
+    call_basher_tool(
+        "zammad_update_ticket",
+        {"ticket_id": ticket_id, "state": STATE_AFTER_SPECIALIST_TAG},
+    )
+
     owner = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS.general_specialist_owner
-    payload: dict[str, Any] = {"state": STATE_AFTER_SPECIALIST_TAG}
-    if owner:
-        payload["owner"] = owner.strip()
-    call_basher_tool("zammad_update_ticket", {"ticket_id": ticket_id, **payload})
+    if owner and owner.strip():
+        call_basher_tool(
+            "zammad_update_ticket",
+            {"ticket_id": ticket_id, "owner": owner.strip()},
+        )
 
     parts = [
         f"Ticket {ticket_id} tagged as {tag!r}",

@@ -37,8 +37,8 @@ Ticket **writes** use **`zammad_update_ticket`**. Basher’s Pydantic **`TicketU
 | `ZAMMAD_MCP_TIMEOUT_SECONDS` | Timeout (seconds) for Basher MCP calls from this wrapper (default **`120`**; invalid value raises **`ValueError`**; values below **`1`** are clamped to **`1`**). |
 | `ZAMMAD_AGENT_MANAGED_TAG` | Tag for `mark_as_agent_managed_laptop_refresh` (default `agent-managed-laptop-refresh`). |
 | `ZAMMAD_GENERAL_AGENT_MANAGED_TAG` | Tag for `mark_as_general_agent_managed` (default `agent-managed-general-support`). |
-| `ZAMMAD_LAPTOP_SPECIALIST_OWNER` | Optional owner email for `mark_as_agent_managed_laptop_refresh` (default `agent.laptop-specialist@example.com`; empty skips **`owner`** on the update). State is always set to **`open`** after the tag (not configurable). |
-| `ZAMMAD_SPECIALIST_OWNER` | Optional owner email for `mark_as_general_agent_managed` (default `agent.general@example.com`; empty skips **`owner`**). State is always **`open`** after the tag. |
+| `ZAMMAD_LAPTOP_SPECIALIST_OWNER` | Optional owner email for `mark_as_agent_managed_laptop_refresh` (default `agent.laptop-specialist@example.com`; empty skips **`owner`**). Sent in a **second** `zammad_update_ticket` after **`state`** = **`open`** (hard-coded). |
+| `ZAMMAD_SPECIALIST_OWNER` | Optional owner email for `mark_as_general_agent_managed` (default `agent.general@example.com`; empty skips **`owner`**). Second update after **`open`**. |
 | `ZAMMAD_STATE_CLOSED` | State name for `close` (default `closed`; must exist in your Zammad). |
 | `ZAMMAD_TAG_ESCALATE_HUMAN` | Tag for `escalate_for_human_review` and `route_to_human_managed_queue` (default `escalated-human-review`). |
 | `ZAMMAD_GROUP_ESCALATED_LAPTOP` | Optional group for `escalate_for_human_review` (default `escalated_laptop_refresh_tickets`; empty skips group change). **`owner` is never set** — pooled queue. |

@@ -225,19 +225,13 @@ Generate Request Manager specific environment variables
 {{- end }}
 {{- end }}
 
-{{/*
-DEFAULT_AGENT_ID / ZAMMAD_DEFAULT_AGENT_ID / routing entry tier — Request Manager + Agent Service
-*/}}
+{{/* DEFAULT_AGENT_ID / ZAMMAD_DEFAULT_AGENT_ID — session first-agent routing */}}
 {{- define "self-service-agent.sessionAgentRoutingEnvVars" -}}
 {{- $agent := .Values.agent | default dict }}
 - name: DEFAULT_AGENT_ID
   value: {{ $agent.defaultAgentId | default "routing-agent" | quote }}
 - name: ZAMMAD_DEFAULT_AGENT_ID
   value: {{ $agent.zammadDefaultAgentId | default "ticket-review-agent" | quote }}
-- name: ROUTING_AGENT_ID
-  value: {{ $agent.routingAgentId | default "routing-agent" | quote }}
-- name: ENTRY_AGENT_IDS
-  value: {{ $agent.entryAgentIds | default "routing-agent,ticket-review-agent" | quote }}
 {{- end }}
 
 {{/*
