@@ -425,7 +425,7 @@ class IntegrationDefaultsService:
                 "config": {},
             },
             "ZAMMAD": {
-                "enabled": False,  # Updated by health check (ZAMMAD_URL + ZAMMAD_HTTP_TOKEN)
+                "enabled": False,
                 "priority": 6,
                 "retry_count": 3,
                 "retry_delay_seconds": 60,
