@@ -288,9 +288,6 @@ mcp-servers:
       transport: streamable-http
       imagePullPolicy: Always
       extraContainers:
-        # basher83/Zammad-MCP ``TicketUpdateParams`` (through at least 1.1.0 / main) only allow
-        # ``state``, ``owner``, ``group`` as human-readable names — not ``state_id`` / ``owner_id`` / ``group_id``.
-        # The blueprint wrapper sends those string fields. Pin a digest or bump after upstream adds id fields.
         - name: basher-zammad-mcp
           image: ghcr.io/basher83/zammad-mcp:1.1.0
           imagePullPolicy: IfNotPresent
