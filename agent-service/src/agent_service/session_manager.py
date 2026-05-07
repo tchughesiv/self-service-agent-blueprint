@@ -19,15 +19,6 @@ logger = configure_logging("agent-service")
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("langgraph").setLevel(logging.WARNING)
 
-# Zammad ticket routing:
-# ``sticky_routing_agent`` is persisted when a ticket specialist is first assigned (laptop vs
-# general). Product policy: that decision is final for this ticket — LangGraph must not steer the
-# session to another specialist or back to the routing agent; changing track requires a new Zammad
-# ticket / RM session. Enforcement lives in ``_zammad_apply_sticky_ticket_track`` and specialist
-# lock / no-router handling below.
-STICKY_AGENT_LAPTOP = "ticket-laptop-refresh"
-STICKY_AGENT_GENERAL = "ticket-general-support"
-
 
 def _default_agent_id_resolved() -> str:
     """``DEFAULT_AGENT_ID`` — non-Zammad session bootstrap; LangGraph router identity (see ``ROUTING_AGENT_NAME``)."""
@@ -38,22 +29,6 @@ def _zammad_default_agent_id_resolved() -> str:
     """Align with ``shared_models.session_manager.initial_current_agent_id_for_integration`` for ZAMMAD."""
     z = os.getenv("ZAMMAD_DEFAULT_AGENT_ID", "").strip()
     return z if z else "ticket-review-agent"
-
-
-def _zammad_apply_sticky_ticket_track(
-    routed_agent: Optional[str],
-    sticky: Optional[str],
-    *,
-    routing_agent_name: str,
-) -> Optional[str]:
-    """Apply persisted ticket specialist choice; overrides conflicting routing_decision values."""
-    if not sticky or not routed_agent:
-        return routed_agent
-    if routed_agent == sticky:
-        return routed_agent
-    if routed_agent == routing_agent_name:
-        return None
-    return sticky
 
 
 def _entry_tier_agent_ids() -> frozenset[str]:
@@ -89,9 +64,7 @@ class ResponsesSessionManager(BaseSessionManager):
     Used by Responses API for full conversation state management.
     """
 
-    # LangGraph id for the *router* on Zammad flows: sticky routing compares the proposed next agent
-    # to this value (``_zammad_apply_sticky_ticket_track``). Must match ``DEFAULT_AGENT_ID`` — same
-    # agent id as non-Zammad first hop; Helm no longer sets a separate ROUTING_AGENT_ID.
+    # LangGraph id for the *router*; specialist lock compares proposed handoffs to this value.
     ROUTING_AGENT_NAME = _default_agent_id_resolved()
 
     def __init__(
@@ -113,7 +86,7 @@ class ResponsesSessionManager(BaseSessionManager):
         self.agents: list[Any] = []
         self.request_manager_session_id: str | None = None
         self._integration_context: dict[str, Any] = {}
-        # NormalizedRequest.integration_type for this turn (sticky/title are ZAMMAD-only)
+        # NormalizedRequest.integration_type for this turn (title is ZAMMAD-only)
         self._integration_type_str: Optional[str] = None
 
         self._initialize_conversation_state()
@@ -656,7 +629,7 @@ class ResponsesSessionManager(BaseSessionManager):
             return False
 
     async def _merge_conversation_context_keys(self, updates: dict[str, Any]) -> None:
-        """Merge keys into RequestSession.conversation_context (preserves sticky intent, etc.)."""
+        """Merge keys into RequestSession.conversation_context."""
         if not self.request_manager_session_id or not updates:
             return
         try:
@@ -694,31 +667,8 @@ class ResponsesSessionManager(BaseSessionManager):
             return
         await self._merge_conversation_context_keys({"last_ticket_title": title})
 
-    async def _get_sticky_routing_agent_from_db(self) -> Optional[str]:
-        if not self.request_manager_session_id:
-            return None
-        try:
-            stmt = select(RequestSession).where(
-                RequestSession.session_id == self.request_manager_session_id
-            )
-            result = await self.db_session.execute(stmt)
-            row = result.scalar_one_or_none()
-            if not row:
-                return None
-            raw = cast(Dict[str, Any], row.conversation_context or {}).get(
-                "sticky_routing_agent"
-            )
-            return str(raw) if raw else None
-        except Exception as e:
-            logger.debug(
-                "Could not read sticky_routing_agent",
-                error=str(e),
-                user_id=self.user_id,
-            )
-            return None
-
     async def _build_langgraph_state_patch(self) -> dict[str, Any]:
-        """Fields merged into LangGraph state for ticket prompts (title, sticky routing)."""
+        """Fields merged into LangGraph state for ticket prompts (e.g. ticket title)."""
         if not self._is_zammad_integration():
             return {}
         patch: dict[str, Any] = {}
@@ -742,9 +692,6 @@ class ResponsesSessionManager(BaseSessionManager):
                 tt = ""
         if tt:
             patch["ticket_title"] = tt
-        sticky = await self._get_sticky_routing_agent_from_db()
-        if sticky:
-            patch["sticky_routing_agent"] = sticky
         return patch
 
     async def _handle_tokens_query(self) -> str:
@@ -988,25 +935,6 @@ class ResponsesSessionManager(BaseSessionManager):
                     break
 
         logger.debug("Routing detection result", routed_agent=routed_agent)
-
-        # Zammad: once sticky_routing_agent is stored, bind routing_decision to that specialist.
-        if self._is_zammad_integration():
-            sticky = await self._get_sticky_routing_agent_from_db()
-            if sticky:
-                prev = routed_agent
-                routed_agent = _zammad_apply_sticky_ticket_track(
-                    routed_agent,
-                    sticky,
-                    routing_agent_name=self.ROUTING_AGENT_NAME,
-                )
-                if prev != routed_agent:
-                    logger.info(
-                        "Zammad ticket track locked (sticky_routing_agent)",
-                        sticky=sticky,
-                        previous_routed=prev,
-                        applied_routed=routed_agent,
-                        user_id=self.user_id,
-                    )
 
         # Specialist lock: on a leaf specialist, ignore routing_decision that would leave the
         # current specialist — except non-Zammad may still return to routing-agent when the graph
@@ -1297,7 +1225,7 @@ class ResponsesSessionManager(BaseSessionManager):
                     current_agent_id=session.current_agent_id,
                 )
 
-                # Merge conversation_context so sticky routing / ticket metadata persist
+                # Merge conversation_context so ticket metadata persists
                 merged_ctx: dict[str, Any] = dict(
                     cast(Dict[str, Any], session.conversation_context or {})
                 )
@@ -1309,10 +1237,6 @@ class ResponsesSessionManager(BaseSessionManager):
                     }
                 )
                 if self._is_zammad_integration():
-                    if agent_name == STICKY_AGENT_LAPTOP:
-                        merged_ctx["sticky_routing_agent"] = STICKY_AGENT_LAPTOP
-                    elif agent_name == STICKY_AGENT_GENERAL:
-                        merged_ctx["sticky_routing_agent"] = STICKY_AGENT_GENERAL
                     tt_merge = (
                         self._integration_context.get("ticket_title") or ""
                     ).strip()

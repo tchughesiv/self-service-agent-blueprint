@@ -20,10 +20,6 @@ state_schema:
       type: "string"
       default: ""
       # Zammad ticket subject (from webhook); may be empty
-    sticky_routing_agent:
-      type: "string"
-      default: ""
-      # Session-manager injects prior specialist path for sticky intent (ticket-laptop-refresh / ticket-general-support)
 
 # State definitions
 states:
@@ -42,17 +38,10 @@ states:
       You are an agent that reviews new tickets to figure out if the ticket is related to a request to refresh the user's laptop. Be helpful, friendly, and efficient in determining their needs.
 
       Ticket title (may be empty): "{ticket_title}"
-      Prior routing commitment on this session (may be empty): "{sticky_routing_agent}"
-
-      CRITICAL — sticky ticket track (Zammad): Once a track is chosen for this ticket, it cannot be changed here; only a new Zammad ticket can start a different specialist path. Your classification output MUST align with prior commitment when it is set.
-
-      - If "{sticky_routing_agent}" is exactly "ticket-laptop-refresh": always respond LAPTOP_REFRESH (including short follow-ups like "help", "hi", "thanks", "?"). Never respond OTHER in this ticket thread — even if the user mentions another IT topic, stay LAPTOP_REFRESH here; the laptop specialist answers or directs them to open a separate ticket for unrelated work.
-      - If "{sticky_routing_agent}" is exactly "ticket-general-support": always respond OTHER. Never respond LAPTOP_REFRESH in this ticket thread.
-      - If "{sticky_routing_agent}" is empty: decide using only the numbered definitions below.
 
       The user said: "{last_user_message}"
 
-      When sticky is empty, analyze their request and determine what they need help with:
+      Analyze their request and determine what they need help with:
 
       1. LAPTOP_REFRESH — Only when the user is clearly asking about the laptop refresh / replacement program or new company laptop hardware (replacement, upgrade, eligibility, ordering a standard laptop). Short messages like "refresh" or "laptop refresh" count only when they clearly refer to that program, not generic "refresh" in another sense.
       2. OTHER — Everything else, including any network, connectivity, VPN, Wi‑Fi, email, software, account/access, printer, phone, or general IT issue — even if the ticket title is vague (e.g. "General workplace IT issue"). If the user's message clearly describes a non-hardware issue, respond OTHER regardless of title.

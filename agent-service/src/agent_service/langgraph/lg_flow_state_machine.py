@@ -1436,7 +1436,7 @@ class ConversationSession:
         Args:
             message: The user message to send to the agent
             token_context: Optional context for token counting (e.g., "session_123")
-            state_patch: Optional dict merged into graph state (e.g. ticket_title, sticky_routing_agent)
+            state_patch: Optional dict merged into graph state (e.g. ticket_title)
 
         Returns:
             The agent's response message as a string
