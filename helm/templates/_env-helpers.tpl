@@ -383,21 +383,6 @@ Generate Integration Dispatcher specific environment variables
 - name: ZAMMAD_AI_AGENT_USER_ID
   value: {{ $aiAgent | quote }}
 {{- end }}
-{{- $zgroups := $tz.allowedGroups | default $lz.allowedGroups | default list }}
-{{- if $zgroups }}
-- name: ZAMMAD_ALLOWED_GROUP_IDS
-  value: {{ join "," $zgroups | quote }}
-{{- end }}
-{{- $zblocked := $tz.webhookBlockedStateNames | default $lz.webhookBlockedStateNames | default list }}
-{{- if $zblocked }}
-- name: ZAMMAD_BLOCKED_STATE_NAMES
-  value: {{ join "," $zblocked | quote }}
-{{- end }}
-{{- $ztags := $tz.webhookRequireAnyTags | default $lz.webhookRequireAnyTags | default list }}
-{{- if $ztags }}
-- name: ZAMMAD_REQUIRE_ANY_TAG
-  value: {{ join "," $ztags | quote }}
-{{- end }}
 {{/* SMTP Configuration */}}
 - name: SMTP_HOST
   valueFrom:

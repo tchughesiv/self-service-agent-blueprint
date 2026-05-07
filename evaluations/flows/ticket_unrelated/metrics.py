@@ -20,6 +20,7 @@ def get_metrics(
             model=custom_model,
             evaluation_params=[TurnParams.CONTENT, TurnParams.ROLE],
             evaluation_steps=[
+                "IMPORTANT: Zammad ticket channel — the ticket already exists; omitting 'return to routing agent' in favor of directing unrelated issues to a new ticket is CORRECT.",
                 "Evaluate whether the agent makes a genuine attempt to help the user with their IT question before any escalation or closure.",
                 "The agent is a general support agent with no specialist tools — it answers based on general IT knowledge.",
                 "PASS if the agent engages with the user's question and provides relevant information or guidance at any point in the conversation.",

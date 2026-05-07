@@ -331,7 +331,7 @@ mcp-servers:
 
 # Zammad ticketing channel (optional). Deploys Zammad as a subchart and injects credentials into pods.
 # Configured by values-ticketing.yaml.
-# Webhook HMAC + dispatcher filter envs: set webhookSecret / filters here (also accepts legacy top-level zammad.*).
+# Webhook HMAC: set webhookSecret here (also accepts legacy top-level zammad.*). Group/state/tag routing is configured in Zammad triggers only, not in the dispatcher.
 # webhookSecret: When ticketingZammad.enabled is true and this is empty, the chart uses default *ssa-zammad-webhook-default*
 # (see secrets.yaml). Override in production. When ticketing is disabled, zammad-webhook-secret is omitted.
 ticketingZammad:
@@ -340,13 +340,9 @@ ticketingZammad:
   webhookSecret: ""
   # Optional: Zammad users.id for the API user that posts dispatcher replies — webhook ignores articles they author (feedback loop).
   aiAgentUserId: ""
-  # Webhook filters (optional). State/tag names are matched case-insensitively.
-  webhookBlockedStateNames: []
-  webhookRequireAnyTags: []
-  allowedGroups: []
-  # Specialist owner emails for Zammad MCP tools: set on mcp-servers.mcp-servers.zammad-mcp.env
-  # (ZAMMAD_LAPTOP_SPECIALIST_OWNER / ZAMMAD_SPECIALIST_OWNER), not here — integration-dispatcher
-  # posts replies with the API token user only.
+  # Specialist owner emails apply to Zammad MCP tools only — set on mcp-servers.mcp-servers.zammad-mcp.env
+  # (ZAMMAD_LAPTOP_SPECIALIST_OWNER / ZAMMAD_SPECIALIST_OWNER). Customer-visible replies are POSTed by
+  # integration-dispatcher via REST ticket_articles (not MCP tools); From is the assignee when Zammad allows it.
   mcp:
     enabled: false
     uri: "http://mcp-zammad-mcp:8000/mcp"

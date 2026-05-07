@@ -8,7 +8,7 @@ import json
 import os
 import re
 import uuid
-from typing import Any, Dict, Optional, Set
+from typing import Any, Dict, Optional
 
 from shared_models import (
     SOURCE_SERVICE_INTEGRATION_DISPATCHER,
@@ -201,34 +201,15 @@ async def apply_zammad_ticket_customer_anchor(
     return str(row.email_normalized)
 
 
-def _ticket_state_name(ticket: Dict[str, Any]) -> str:
-    s = ticket.get("state")
-    if isinstance(s, dict):
-        return str(s.get("name") or s.get("state") or "").strip().lower()
-    return str(s or "").strip().lower()
-
-
-def _ticket_tag_set(ticket: Dict[str, Any]) -> Set[str]:
-    raw = ticket.get("tags")
-    if raw is None:
-        return set()
-    if isinstance(raw, str):
-        return {raw.strip().lower()} if raw.strip() else set()
-    out: Set[str] = set()
-    for t in raw:
-        if t is not None:
-            out.add(str(t).strip().lower())
-    return out
-
-
 class ZammadService:
     """Handle Zammad Manage → Triggers → Webhook POST payloads.
 
-    Customer-vs-agent gating belongs in **Zammad trigger conditions** (bootstrap
-    ``article.sender_id`` / ``ZAMMAD_TRIGGER_*``). This service trusts the trigger and
-    does **not** skip articles solely because ``article.internal`` is true (REST/API
-    harnesses may create customer-sender internal notes). Agent-only traffic should be
-    excluded via sender-based triggers, not dispatcher-side ``internal`` checks.
+    Customer-vs-agent gating, group/state/tag routing, etc. belong in **Zammad trigger
+    conditions** (bootstrap ``article.sender_id`` / ``ZAMMAD_TRIGGER_*``). This service
+    trusts the trigger and does **not** duplicate those filters here. It does **not**
+    skip articles solely because ``article.internal`` is true (REST/API harnesses may
+    create customer-sender internal notes). Agent-only traffic should be excluded via
+    sender-based triggers, not dispatcher-side ``internal`` checks.
     """
 
     def __init__(self) -> None:
@@ -240,28 +221,6 @@ class ZammadService:
             )
         self.cloudevent_sender = CloudEventSender(
             self.broker_url, "integration-dispatcher"
-        )
-        self.allowed_group_ids: Optional[Set[int]] = None
-        ag = os.getenv("ZAMMAD_ALLOWED_GROUP_IDS", "").strip()
-        if ag:
-            self.allowed_group_ids = set()
-            for part in ag.split(","):
-                part = part.strip()
-                if part.isdigit():
-                    self.allowed_group_ids.add(int(part))
-
-        blocked = os.getenv("ZAMMAD_BLOCKED_STATE_NAMES", "").strip()
-        self.blocked_state_names: Set[str] = (
-            {x.strip().lower() for x in blocked.split(",") if x.strip()}
-            if blocked
-            else set()
-        )
-
-        req_tags = os.getenv("ZAMMAD_REQUIRE_ANY_TAG", "").strip()
-        self.require_any_tags: Set[str] = (
-            {x.strip().lower() for x in req_tags.split(",") if x.strip()}
-            if req_tags
-            else set()
         )
         if not self.webhook_secret:
             logger.warning(
@@ -332,36 +291,6 @@ class ZammadService:
             )
             return
         group_id = int(group_id)
-
-        if (
-            self.allowed_group_ids is not None
-            and group_id not in self.allowed_group_ids
-        ):
-            logger.info(
-                "Zammad webhook: group not allowed",
-                ticket_id=ticket_id,
-                group_id=group_id,
-            )
-            return
-
-        state_name = _ticket_state_name(ticket)
-        if self.blocked_state_names and state_name in self.blocked_state_names:
-            logger.info(
-                "Zammad webhook: ticket state blocked",
-                ticket_id=ticket_id,
-                state=state_name,
-            )
-            return
-
-        tags = _ticket_tag_set(ticket)
-        if self.require_any_tags and not (tags & self.require_any_tags):
-            logger.info(
-                "Zammad webhook: ticket missing required tag",
-                ticket_id=ticket_id,
-                tags=tags,
-                required=self.require_any_tags,
-            )
-            return
 
         article_id = article.get("id")
         if article_id is None:

@@ -117,6 +117,7 @@ def get_metrics(
             evaluation_params=[TurnParams.CONTENT, TurnParams.ROLE],
             evaluation_steps=[
                 "IMPORTANT: Ignore any agent responses that come after a user message containing 'DONEDONEDONE'. This is a test marker, not real user input, and any agent responses to it should not be evaluated.",
+                "IMPORTANT: Zammad ticket channel — the support ticket already exists. Do not penalize omitting 'return to routing agent' language; directing the user to open a new ticket for a different issue is CORRECT.",
                 "Evaluate if the conversation addresses all of the user's intentions and requests.",
                 "CRITICAL: When evaluating out-of-scope questions:",
                 "  - If user asks an out-of-scope question (e.g., 'what is the fastest bird'), the agent has TWO acceptable responses:",

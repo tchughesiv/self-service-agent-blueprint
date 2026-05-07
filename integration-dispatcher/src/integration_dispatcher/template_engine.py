@@ -100,7 +100,7 @@ class TemplateEngine:
             formatted_body = f"🧪 TEST DELIVERY\n\n{content}"
 
         elif integration_type == IntegrationType.ZAMMAD:
-            # Zammad: No-op handler uses this; agent delivers via MCP
+            # Customer-visible replies use ZammadIntegrationHandler (POST /ticket_articles); MCP tools are for ticket actions only.
             formatted_subject = subject or "Agent Response"
             formatted_body = content
 

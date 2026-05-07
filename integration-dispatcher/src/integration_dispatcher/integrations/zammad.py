@@ -226,6 +226,7 @@ class ZammadIntegrationHandler(BaseIntegrationHandler):
             response = await client.post(
                 "/ticket_articles", json=payload, headers=headers
             )
+            # If Zammad rejects the From/on-behalf identity (403), optionally retry without From so the article posts as the API token user (same identity as ZAMMAD_HTTP_TOKEN).
             if (
                 response.status_code == 403
                 and on_behalf_of

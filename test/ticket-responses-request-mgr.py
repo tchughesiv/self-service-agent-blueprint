@@ -69,7 +69,7 @@ _ZAMMAD_STATE_MAP = {
 
 
 def _customer_password_effective(cli_password: str | None) -> str | None:
-    """Return password for customer-scoped Zammad calls, or None for legacy agent-token mode."""
+    """Return HTTP Basic password for posting customer ticket articles, or None to post as the REST token user only."""
     if cli_password is not None:
         stripped = cli_password.strip()
         return stripped if stripped else None
