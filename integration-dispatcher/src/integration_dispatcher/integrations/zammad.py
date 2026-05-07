@@ -21,6 +21,17 @@ def _env_truthy(key: str) -> bool:
     return os.environ.get(key, "").strip().lower() in ("1", "true", "yes", "on")
 
 
+def _ticket_article_fallback_on_forbidden() -> bool:
+    """Retry POST /ticket_articles without ``From`` after 403 (defaults on). Set to false/0/off to disable."""
+    v = os.environ.get("ZAMMAD_TICKET_ARTICLE_FALLBACK_ON_FORBIDDEN")
+    if v is None:
+        return True
+    s = v.strip().lower()
+    if s == "":
+        return True
+    return s in ("1", "true", "yes", "on")
+
+
 class ZammadIntegrationHandler(BaseIntegrationHandler):
     """Posts pipeline reply body to Zammad, optionally on behalf of assigned owner."""
 
@@ -230,7 +241,7 @@ class ZammadIntegrationHandler(BaseIntegrationHandler):
             if (
                 response.status_code == 403
                 and on_behalf_of
-                and _env_truthy("ZAMMAD_TICKET_ARTICLE_FALLBACK_ON_FORBIDDEN")
+                and _ticket_article_fallback_on_forbidden()
             ):
                 logger.warning(
                     "Zammad rejected on-behalf article; retrying as token user "

@@ -282,7 +282,6 @@ async def test_retries_without_on_behalf_when_forbidden(
         {
             "ZAMMAD_URL": "http://zammad.example.com",
             "ZAMMAD_HTTP_TOKEN": "secret-token",
-            "ZAMMAD_TICKET_ARTICLE_FALLBACK_ON_FORBIDDEN": "true",
         },
         clear=False,
     ):

@@ -543,6 +543,8 @@ Generate all environment variables for Integration Dispatcher
 {{/* Zammad REST posting for customer-visible ticket replies (same secret as Request Manager / MCP) */}}
 {{- if .Values.ticketingZammad.enabled }}
 {{- $tz := .Values.ticketingZammad | default dict }}
+- name: ZAMMAD_TICKET_ARTICLE_FALLBACK_ON_FORBIDDEN
+  value: "true"
 - name: ZAMMAD_URL
   valueFrom:
     secretKeyRef:
