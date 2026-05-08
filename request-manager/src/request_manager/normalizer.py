@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional
 
 from shared_models import get_enum_value
 from shared_models.models import NormalizedRequest
@@ -11,9 +11,11 @@ from .schemas import (
     BaseRequest,
     CLIRequest,
     EmailRequest,
+    InboundRequest,
     SlackRequest,
     ToolRequest,
     WebRequest,
+    ZammadRequest,
 )
 
 
@@ -22,9 +24,7 @@ class RequestNormalizer:
 
     def normalize_request(
         self,
-        request: Union[
-            BaseRequest, SlackRequest, WebRequest, CLIRequest, EmailRequest, ToolRequest
-        ],
+        request: InboundRequest,
         session_id: str,
         current_agent_id: Optional[str] = None,
     ) -> NormalizedRequest:
@@ -61,6 +61,8 @@ class RequestNormalizer:
             return self._normalize_email_request(request, base_data)
         elif isinstance(request, ToolRequest):
             return self._normalize_tool_request(request, base_data)
+        elif isinstance(request, ZammadRequest):
+            return self._normalize_zammad_request(request, base_data)
         else:
             return self._normalize_base_request(request, base_data)
 
@@ -144,6 +146,46 @@ class RequestNormalizer:
             **base_data,
             integration_context=integration_context,
             user_context=user_context,
+            requires_routing=True,
+        )
+
+    def _normalize_zammad_request(
+        self, request: ZammadRequest, base_data: Dict[str, Any]
+    ) -> NormalizedRequest:
+        """Normalize Zammad ticketing request.
+
+        Does not pin ``target_agent_id``: first agent comes from ``ZAMMAD_DEFAULT_AGENT_ID``
+        on the session row (Helm: ``agent.zammadDefaultAgentId``, typically
+        ``ticket-review-agent``), which classifies laptop vs general before specialists.
+        New tickets and follow-ups both reach the request manager; webhook may add
+        ticket-type filters / metadata later.
+        """
+        tt = getattr(request, "ticket_title", None)
+        ticket_title = (str(tt).strip() if tt else "") or None
+        integration_context = {
+            "ticket_id": request.ticket_id,
+            "article_id": request.article_id,
+            "group_id": request.group_id,
+            "zammad_delivery_id": request.zammad_delivery_id,
+            "platform": "zammad",
+        }
+        if request.owner_id is not None:
+            integration_context["owner_id"] = request.owner_id
+        owner_email = (request.owner_email or "").strip().lower()
+        if owner_email:
+            integration_context["owner_email"] = owner_email
+        if ticket_title:
+            integration_context["ticket_title"] = ticket_title
+
+        # Keep base_data["target_agent_id"] None and requires_routing True so agent-service
+        # uses RequestSession.current_agent_id (ticket-review-agent) for first hop.
+        # Keep base_data["session_id"] from create_or_get_session — it must match the
+        # RequestSession row (RequestLog FK). Ticket/thread identity is in integration_context.
+
+        return NormalizedRequest(
+            **base_data,
+            integration_context=integration_context,
+            user_context={"platform_user_id": str(request.created_by_id)},
             requires_routing=True,
         )
 

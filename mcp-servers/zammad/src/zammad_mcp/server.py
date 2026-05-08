@@ -16,7 +16,6 @@ from zammad_mcp import settings as zammad_mcp_settings
 from zammad_mcp.basher_client import (
     assert_ticket_customer_matches_basher,
     call_basher_tool,
-    get_user_id_by_email,
 )
 from zammad_mcp.zammad_auth_id import parse_email_and_ticket_id
 from zammad_mcp.zammad_rest_client import fetch_zammad_customer_user_rest
@@ -24,6 +23,11 @@ from zammad_mcp.zammad_rest_client import fetch_zammad_customer_user_rest
 SERVICE_NAME = "zammad-mcp-server"
 logger = configure_logging(SERVICE_NAME)
 auto_tracing_run(SERVICE_NAME, logger)
+
+# Specialist assign flows always transition to Zammad's default "open" state first (separate from owner).
+STATE_AFTER_SPECIALIST_TAG = "open"
+# Basher ``owner`` value that clears assignee on pooled-queue routing (Zammad UI placeholder).
+POOL_QUEUE_UNASSIGNED_OWNER = "-"
 
 
 def _calculate_laptop_age(purchase_date_str: str) -> str:
@@ -48,6 +52,19 @@ def _calculate_laptop_age(purchase_date_str: str) -> str:
             return f"{years} year{'s' if years != 1 else ''} and {months} month{'s' if months != 1 else ''}"
     except (ValueError, TypeError):
         return "Unable to calculate age (invalid date format)"
+
+
+def _basher_pool_queue_ticket_update(
+    ticket_id: int, *, group_name_stripped: str
+) -> None:
+    """Single Basher ``zammad_update_ticket`` with optional ``group`` and assignee cleared."""
+    payload: dict[str, Any] = {
+        "ticket_id": ticket_id,
+        "owner": POOL_QUEUE_UNASSIGNED_OWNER,
+    }
+    if group_name_stripped:
+        payload["group"] = group_name_stripped
+    call_basher_tool("zammad_update_ticket", payload)
 
 
 def _tool_error_text(exc: BaseException) -> str:
@@ -136,14 +153,22 @@ def mark_as_agent_managed_laptop_refresh(
     tag = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS.agent_managed_tag
     call_basher_tool("zammad_add_ticket_tag", {"ticket_id": ticket_id, "tag": tag})
 
+    call_basher_tool(
+        "zammad_update_ticket",
+        {"ticket_id": ticket_id, "state": STATE_AFTER_SPECIALIST_TAG},
+    )
+
     owner = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS.laptop_specialist_owner
-    if owner:
-        get_user_id_by_email(owner)
+    if owner and owner.strip():
         call_basher_tool(
             "zammad_update_ticket",
-            {"ticket_id": ticket_id, "owner": owner},
+            {"ticket_id": ticket_id, "owner": owner.strip()},
         )
-    parts = [f"Ticket {ticket_id} tagged as {tag!r}"]
+
+    parts = [
+        f"Ticket {ticket_id} tagged as {tag!r}",
+        f"state set to {STATE_AFTER_SPECIALIST_TAG!r}",
+    ]
     if owner:
         parts.append(f"owner set to {owner!r}")
     return ", ".join(parts) + "."
@@ -160,14 +185,22 @@ def mark_as_general_agent_managed(
     tag = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS.general_agent_managed_tag
     call_basher_tool("zammad_add_ticket_tag", {"ticket_id": ticket_id, "tag": tag})
 
+    call_basher_tool(
+        "zammad_update_ticket",
+        {"ticket_id": ticket_id, "state": STATE_AFTER_SPECIALIST_TAG},
+    )
+
     owner = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS.general_specialist_owner
-    if owner:
-        get_user_id_by_email(owner)
+    if owner and owner.strip():
         call_basher_tool(
             "zammad_update_ticket",
-            {"ticket_id": ticket_id, "owner": owner},
+            {"ticket_id": ticket_id, "owner": owner.strip()},
         )
-    parts = [f"Ticket {ticket_id} tagged as {tag!r}"]
+
+    parts = [
+        f"Ticket {ticket_id} tagged as {tag!r}",
+        f"state set to {STATE_AFTER_SPECIALIST_TAG!r}",
+    ]
     if owner:
         parts.append(f"owner set to {owner!r}")
     return ", ".join(parts) + "."
@@ -180,7 +213,10 @@ def close(ctx: Context[Any, Any], dummy_parameter: str = "") -> str:
     """Close the ticket."""
     _, ticket_id, _ = _authorize_ticket(ctx)
     state = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS.state_closed
-    call_basher_tool("zammad_update_ticket", {"ticket_id": ticket_id, "state": state})
+    call_basher_tool(
+        "zammad_update_ticket",
+        {"ticket_id": ticket_id, "state": state.strip()},
+    )
     return f"Ticket {ticket_id} moved to state {state!r}."
 
 
@@ -195,14 +231,10 @@ def escalate_for_human_review(ctx: Context[Any, Any], dummy_parameter: str = "")
 
     gname = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS.group_escalated_laptop
     gstrip = gname.strip()
-    update: dict[str, Any] = {}
-    if gstrip:
-        update["group"] = gstrip
-    if update:
-        call_basher_tool("zammad_update_ticket", {"ticket_id": ticket_id, **update})
+    _basher_pool_queue_ticket_update(ticket_id, group_name_stripped=gstrip)
 
     gmsg = f", group {gname!r}" if gstrip else ""
-    return f"Ticket {ticket_id} tagged {tag!r}{gmsg}."
+    return f"Ticket {ticket_id} tagged {tag!r}{gmsg}, owner cleared."
 
 
 @mcp.tool()
@@ -225,10 +257,9 @@ def send_to_manager_review(ctx: Context[Any, Any], dummy_parameter: str = "") ->
     tag = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS.tag_manager_review
     call_basher_tool("zammad_add_ticket_tag", {"ticket_id": ticket_id, "tag": tag})
 
-    get_user_id_by_email(manager)
     call_basher_tool(
         "zammad_update_ticket",
-        {"ticket_id": ticket_id, "owner": manager},
+        {"ticket_id": ticket_id, "owner": manager.strip()},
     )
     return f"Ticket {ticket_id} assigned to {manager!r}, tag {tag!r}."
 
@@ -241,15 +272,15 @@ def route_to_human_managed_queue(
 ) -> str:
     """Route this ticket to the human-managed queue."""
     _, ticket_id, _ = _authorize_ticket(ctx)
+    tag = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS.tag_escalate_human
+    call_basher_tool("zammad_add_ticket_tag", {"ticket_id": ticket_id, "tag": tag})
+
     gname = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS.group_human_managed
     gstrip = gname.strip()
-    if gstrip:
-        call_basher_tool(
-            "zammad_update_ticket",
-            {"ticket_id": ticket_id, "group": gstrip},
-        )
-    gmsg = f"group {gname!r}" if gstrip else "no group change"
-    return f"Ticket {ticket_id} routed to {gmsg}."
+    _basher_pool_queue_ticket_update(ticket_id, group_name_stripped=gstrip)
+
+    gmsg = f", group {gname!r}" if gstrip else ""
+    return f"Ticket {ticket_id} tagged {tag!r}{gmsg}, owner cleared."
 
 
 @mcp.tool()
@@ -288,6 +319,8 @@ def get_employee_laptop_info(
     )
 
     current_laptop_raw = user.get("current_laptop")
+    if isinstance(current_laptop_raw, str):
+        current_laptop_raw = current_laptop_raw.strip() or None
     if not current_laptop_raw:
         raise ValueError(
             f"No laptop data found for user {email}. "

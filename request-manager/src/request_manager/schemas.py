@@ -1,7 +1,7 @@
 """Pydantic schemas for request/response validation."""
 
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, TypeAlias, Union
 
 from pydantic import BaseModel, Field, field_validator
 from shared_models.models import IntegrationType
@@ -71,6 +71,34 @@ class ToolRequest(BaseRequest):
     tool_instance_id: Optional[str] = Field(None, max_length=255)
     trigger_event: str = Field(..., min_length=1, max_length=255)
     tool_context: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ZammadRequest(BaseRequest):
+    """Zammad ticketing request schema."""
+
+    integration_type: IntegrationType = IntegrationType.ZAMMAD
+    ticket_id: int = Field(..., ge=1)
+    article_id: int = Field(..., ge=1)
+    group_id: int = Field(..., ge=0)
+    group_name: Optional[str] = Field(None, max_length=255)
+    owner_id: Optional[int] = Field(None, ge=0)
+    owner_email: Optional[str] = Field(None, max_length=255)
+    created_by_id: int = Field(..., ge=0)
+    zammad_delivery_id: str = Field(..., min_length=1, max_length=255)
+    ticket_title: Optional[str] = Field(None, max_length=500)
+
+
+InboundRequest: TypeAlias = Union[
+    BaseRequest,
+    SlackRequest,
+    WebRequest,
+    CLIRequest,
+    EmailRequest,
+    ToolRequest,
+    ZammadRequest,
+]
+
+BrokerInboundRequest: TypeAlias = Union[SlackRequest, EmailRequest, ZammadRequest]
 
 
 # NormalizedRequest is now imported from shared_models.models

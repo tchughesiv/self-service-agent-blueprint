@@ -44,3 +44,17 @@ oc exec -it deploy/self-service-agent-request-manager -n NAMESPACE -- \
 
 # More: --user-id, --session-id, --start-date, --end-date, --integration-type, --agent-id, --limit, --offset, --no-messages, --random
 ```
+
+## ticket-responses-request-mgr.py
+
+Zammad ticket harness: creates a ticket via REST, adds customer articles (integration trigger → dispatcher → RM), and polls **`GET /api/v1/conversations`** for agent replies. Requires **`ZAMMAD_URL`**, **`ZAMMAD_HTTP_TOKEN`**, **`REQUEST_MANAGER_URL`**, and **`USER_ID`** (customer email). For generic CLI RM without Zammad, use **`chat-responses-request-mgr.py`**.
+
+Stdin/stdout matches **`run_conversations`** / **`OpenShiftChatClient`**: `agent:` lines and **`AGENT_MESSAGE_TERMINATOR`** (e.g. `:DONE`) in non-TTY test mode.
+
+```bash
+REQUEST_MANAGER_URL=http://localhost:8080 \
+ZAMMAD_URL=https://zammad.example \
+ZAMMAD_HTTP_TOKEN=… \
+USER_ID=user@example.com \
+python test/ticket-responses-request-mgr.py
+```

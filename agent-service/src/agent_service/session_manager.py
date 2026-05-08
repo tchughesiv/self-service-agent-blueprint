@@ -4,9 +4,9 @@ import logging
 import os
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Optional, cast
+from typing import Any, Dict, Optional, cast
 
-from shared_models import BaseSessionManager, configure_logging
+from shared_models import BaseSessionManager, configure_logging, get_enum_value
 from shared_models.models import RequestSession, SessionStatus
 from shared_models.user_utils import is_uuid
 from sqlalchemy import select, update
@@ -18,6 +18,24 @@ logger = configure_logging("agent-service")
 # Configure logging to suppress verbose output
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("langgraph").setLevel(logging.WARNING)
+
+
+def _default_agent_id_resolved() -> str:
+    """``DEFAULT_AGENT_ID`` — non-Zammad session bootstrap; LangGraph router identity (see ``ROUTING_AGENT_NAME``)."""
+    return os.getenv("DEFAULT_AGENT_ID", "routing-agent").strip() or "routing-agent"
+
+
+def _zammad_default_agent_id_resolved() -> str:
+    """Align with ``shared_models.session_manager.initial_current_agent_id_for_integration`` for ZAMMAD."""
+    z = os.getenv("ZAMMAD_DEFAULT_AGENT_ID", "").strip()
+    return z if z else "ticket-review-agent"
+
+
+def _entry_tier_agent_ids() -> frozenset[str]:
+    """Agent ids that may hand off to specialists (``DEFAULT_AGENT_ID`` ∪ ``ZAMMAD_DEFAULT_AGENT_ID``)."""
+    return frozenset(
+        {_default_agent_id_resolved(), _zammad_default_agent_id_resolved()}
+    )
 
 
 def get_session_token_context(session_id: str | None) -> str:
@@ -46,7 +64,8 @@ class ResponsesSessionManager(BaseSessionManager):
     Used by Responses API for full conversation state management.
     """
 
-    ROUTING_AGENT_NAME = os.environ.get("DEFAULT_AGENT_ID", "routing-agent")
+    # LangGraph id for the *router*; specialist lock compares proposed handoffs to this value.
+    ROUTING_AGENT_NAME = _default_agent_id_resolved()
 
     def __init__(
         self,
@@ -66,8 +85,14 @@ class ResponsesSessionManager(BaseSessionManager):
         self.agent_manager: Any | None = None
         self.agents: list[Any] = []
         self.request_manager_session_id: str | None = None
+        self._integration_context: dict[str, Any] = {}
+        # NormalizedRequest.integration_type for this turn (title is ZAMMAD-only)
+        self._integration_type_str: Optional[str] = None
 
         self._initialize_conversation_state()
+
+    def _is_zammad_integration(self) -> bool:
+        return (self._integration_type_str or "").upper() == "ZAMMAD"
 
     def _initialize_conversation_state(self) -> None:
         """Initialize conversation state for responses mode."""
@@ -102,6 +127,10 @@ class ResponsesSessionManager(BaseSessionManager):
         text: str,
         request_manager_session_id: Optional[str] = None,
         session_name: Optional[str] = None,
+        target_agent_id: Optional[str] = None,
+        requires_routing: bool = True,
+        integration_context: Optional[dict[str, Any]] = None,
+        integration_type: Any = None,
     ) -> str:
         """Handle a message in responses mode with full conversation management."""
         if not self.user_id:
@@ -112,9 +141,16 @@ class ResponsesSessionManager(BaseSessionManager):
             logger.error("Agent manager not initialized")
             return "Error: Agent manager not initialized"
 
+        self._integration_context = dict(integration_context or {})
+        if integration_type is not None:
+            self._integration_type_str = get_enum_value(integration_type)
+
         # Store the request manager session ID for database updates
         if request_manager_session_id:
             self.request_manager_session_id = request_manager_session_id
+
+        if self.request_manager_session_id and self._is_zammad_integration():
+            await self._persist_ticket_title_merge()
 
         logger.debug(
             "Handling responses message",
@@ -122,6 +158,8 @@ class ResponsesSessionManager(BaseSessionManager):
             message_preview=text[:100],
             request_manager_session_id=request_manager_session_id,
             session_name=session_name,
+            target_agent_id=target_agent_id,
+            requires_routing=requires_routing,
             has_current_session=bool(self.current_session),
             current_agent=self.current_agent_name,
         )
@@ -163,8 +201,14 @@ class ResponsesSessionManager(BaseSessionManager):
                         "Creating initial session for responses mode",
                         user_id=self.user_id,
                         session_name=session_name,
+                        target_agent_id=target_agent_id,
+                        requires_routing=requires_routing,
                     )
-                    success = await self._create_initial_session(session_name)
+                    success = await self._create_initial_session(
+                        session_name,
+                        target_agent_id=target_agent_id,
+                        requires_routing=requires_routing,
+                    )
                     if not success:
                         logger.error(
                             "Failed to create initial session",
@@ -199,16 +243,30 @@ class ResponsesSessionManager(BaseSessionManager):
                     )
 
             if should_reset:
-                logger.info(
-                    "Specialist task complete, returning to routing agent",
-                    user_id=self.user_id,
-                    current_agent=self.current_agent_name,
-                )
-                await self._reset_conversation_state()
-                # Recursively call with the actual user message to create new routing session
-                return await self.handle_responses_message(
-                    text, request_manager_session_id, session_name
-                )
+                if self._is_zammad_integration() and self._is_specialist_session():
+                    logger.info(
+                        "Zammad: ignoring _should_return_to_routing — staying on specialist",
+                        user_id=self.user_id,
+                        current_agent=self.current_agent_name,
+                    )
+                else:
+                    logger.info(
+                        "Specialist task complete, returning to routing agent",
+                        user_id=self.user_id,
+                        current_agent=self.current_agent_name,
+                    )
+                    await self._reset_conversation_state()
+                    # Recursively call with the actual user message to create new routing session
+                    # Return to routing agent - pass None/True to create routing session
+                    return await self.handle_responses_message(
+                        text,
+                        request_manager_session_id,
+                        session_name,
+                        target_agent_id=None,
+                        requires_routing=True,
+                        integration_context=self._integration_context,
+                        integration_type=self._integration_type_str,
+                    )
 
             # Intercept special commands before passing to conversation
             if text.strip().lower() == "**tokens**":
@@ -252,9 +310,11 @@ class ResponsesSessionManager(BaseSessionManager):
                             or "I apologize, but I cannot process that request due to safety concerns."
                         )
 
+            state_patch = await self._build_langgraph_state_patch()
             response = await self.conversation_session.send_message(
                 text,
                 token_context=token_context,
+                state_patch=state_patch if state_patch else None,
             )
             processed_response = self._process_agent_response(response)
 
@@ -307,28 +367,49 @@ class ResponsesSessionManager(BaseSessionManager):
             )
             return f"Error: {str(e)}"
 
-    async def _create_initial_session(self, session_name: Optional[str] = None) -> bool:
+    async def _create_initial_session(
+        self,
+        session_name: Optional[str] = None,
+        target_agent_id: Optional[str] = None,
+        requires_routing: bool = True,
+    ) -> bool:
         """Create an initial session for responses mode."""
         try:
             logger.debug(
                 "Creating initial session for responses mode",
                 user_id=self.user_id,
                 session_name=session_name,
+                target_agent_id=target_agent_id,
+                requires_routing=requires_routing,
             )
 
-            # Get routing agent
+            # Get agent: specialist when target_agent_id set and requires_routing=False
             if self.agent_manager is None:
                 logger.error(
                     "Agent manager not initialized. Cannot create initial session."
                 )
                 return False
 
-            routing_agent = self.agent_manager.get_agent(self.ROUTING_AGENT_NAME)
-            if not routing_agent:
+            use_specialist = target_agent_id is not None and not requires_routing
+            default_first = os.getenv("DEFAULT_AGENT_ID", "routing-agent")
+            agent_name: str = (
+                target_agent_id
+                if (use_specialist and target_agent_id)
+                else default_first
+            )
+            if not use_specialist and self.request_manager_session_id:
+                db_row = await self.get_session(self.request_manager_session_id)
+                if db_row and db_row.current_agent_id:
+                    cand = str(db_row.current_agent_id).strip()
+                    if cand and self.agent_manager.get_agent(cand):
+                        agent_name = cand
+
+            agent = self.agent_manager.get_agent(agent_name)
+            if not agent:
                 logger.error(
-                    "Core routing agent not available",
+                    "Agent not available",
                     user_id=self.user_id,
-                    routing_agent_name=self.ROUTING_AGENT_NAME,
+                    agent_name=agent_name,
                     available_agents=(
                         list(self.agent_manager.agents_dict.keys())
                         if self.agent_manager
@@ -337,11 +418,12 @@ class ResponsesSessionManager(BaseSessionManager):
                 )
                 return False
 
-            # Debug: Check routing agent configuration
-            lg_config = routing_agent.config.get("lg_state_machine_config")
+            # Debug: Check agent configuration
+            lg_config = agent.config.get("lg_state_machine_config")
             logger.info(
-                "Routing agent configuration",
+                "Agent configuration",
                 lg_state_machine_config=lg_config,
+                agent_name=agent_name,
             )
 
             # Generate session name and create session
@@ -350,12 +432,12 @@ class ResponsesSessionManager(BaseSessionManager):
                 "Creating LangGraph session",
                 user_id=self.user_id,
                 session_name=session_name,
-                routing_agent=self.ROUTING_AGENT_NAME,
+                agent_name=agent_name,
             )
 
             session = await self._create_session_for_agent(
-                routing_agent,
-                self.ROUTING_AGENT_NAME,
+                agent,
+                agent_name,
                 session_name=session_name,
             )
 
@@ -370,9 +452,9 @@ class ResponsesSessionManager(BaseSessionManager):
 
             # Set up the new session
             self.conversation_session = session
-            self.current_agent_name = self.ROUTING_AGENT_NAME
+            self.current_agent_name = agent_name
             self.current_session = self._build_session_data(
-                routing_agent, self.ROUTING_AGENT_NAME, session, session_name
+                agent, agent_name, session, session_name
             )
 
             logger.debug(
@@ -387,12 +469,12 @@ class ResponsesSessionManager(BaseSessionManager):
             logger.debug(
                 "Updating database session state",
                 user_id=self.user_id,
-                agent_name=self.ROUTING_AGENT_NAME,
+                agent_name=agent_name,
                 thread_id=session.thread_id,
             )
 
             await self._update_database_session_state(
-                self.ROUTING_AGENT_NAME,
+                agent_name,
                 session.thread_id,
                 self.request_manager_session_id,
             )
@@ -497,19 +579,27 @@ class ResponsesSessionManager(BaseSessionManager):
                 if hasattr(state, "values"):
                     current_state = state.values.get("current_state")
                     if (
-                        current_agent_id != self.ROUTING_AGENT_NAME
+                        self._is_specialist_session()
                         and session.state_machine.is_terminal_state(current_state)
                     ):
-                        logger.info(
-                            "Resumed specialist session is in terminal state - resetting to routing agent",
-                            request_manager_session_id=request_manager_session_id,
-                            current_agent_id=current_agent_id,
-                            current_state=current_state,
-                        )
-                        # Reset the conversation state
-                        await self._reset_conversation_state()
-                        # Return False so a new routing session gets created
-                        return False
+                        if self._is_zammad_integration():
+                            logger.info(
+                                "Resumed specialist session is terminal (Zammad) — not resetting to router",
+                                request_manager_session_id=request_manager_session_id,
+                                current_agent_id=current_agent_id,
+                                current_state=current_state,
+                            )
+                        else:
+                            logger.info(
+                                "Resumed specialist session is in terminal state - resetting to routing agent",
+                                request_manager_session_id=request_manager_session_id,
+                                current_agent_id=current_agent_id,
+                                current_state=current_state,
+                            )
+                            # Reset the conversation state
+                            await self._reset_conversation_state()
+                            # Return False so a new routing session gets created
+                            return False
             except Exception as e:
                 logger.debug(
                     "Could not check conversation state when resuming session",
@@ -537,6 +627,72 @@ class ResponsesSessionManager(BaseSessionManager):
                 exc_info=e,
             )
             return False
+
+    async def _merge_conversation_context_keys(self, updates: dict[str, Any]) -> None:
+        """Merge keys into RequestSession.conversation_context."""
+        if not self.request_manager_session_id or not updates:
+            return
+        try:
+            stmt = select(RequestSession).where(
+                RequestSession.session_id == self.request_manager_session_id
+            )
+            result = await self.db_session.execute(stmt)
+            row = result.scalar_one_or_none()
+            if not row:
+                return
+            merged: dict[str, Any] = {
+                **cast(Dict[str, Any], row.conversation_context or {}),
+                **updates,
+            }
+            await self.db_session.execute(
+                update(RequestSession)
+                .where(RequestSession.session_id == self.request_manager_session_id)
+                .values(
+                    conversation_context=merged,
+                    updated_at=datetime.now(timezone.utc),
+                )
+            )
+            await self.db_session.commit()
+        except Exception as e:
+            logger.warning(
+                "Failed to merge conversation_context keys",
+                error=str(e),
+                user_id=self.user_id,
+            )
+
+    async def _persist_ticket_title_merge(self) -> None:
+        """Store latest Zammad ticket title on the session for prompts and history."""
+        title = (self._integration_context.get("ticket_title") or "").strip()
+        if not title:
+            return
+        await self._merge_conversation_context_keys({"last_ticket_title": title})
+
+    async def _build_langgraph_state_patch(self) -> dict[str, Any]:
+        """Fields merged into LangGraph state for ticket prompts (e.g. ticket title)."""
+        if not self._is_zammad_integration():
+            return {}
+        patch: dict[str, Any] = {}
+        tt = (self._integration_context.get("ticket_title") or "").strip()
+        if not tt and self.request_manager_session_id:
+            try:
+                stmt = select(RequestSession).where(
+                    RequestSession.session_id == self.request_manager_session_id
+                )
+                result = await self.db_session.execute(stmt)
+                row = result.scalar_one_or_none()
+                if row:
+                    lt = (
+                        cast(Dict[str, Any], row.conversation_context or {}).get(
+                            "last_ticket_title"
+                        )
+                        or ""
+                    )
+                    tt = str(lt).strip()
+            except Exception:
+                tt = ""
+        if tt:
+            patch["ticket_title"] = tt
+        return patch
 
     async def _handle_tokens_query(self) -> str:
         """Handle **tokens** command by querying database for session token counts."""
@@ -658,13 +814,15 @@ class ResponsesSessionManager(BaseSessionManager):
         else:
             return f"session-{self.user_id}-{unique_id}"
 
-    def _is_specialist_session(self) -> bool:
-        """Check if current session is with a specialist agent."""
-        return self.current_agent_name != self.ROUTING_AGENT_NAME
+    def _is_entry_tier_session(self) -> bool:
+        """True when the current agent may dispatch to specialists (router or ticket intake)."""
+        if not self.current_agent_name:
+            return False
+        return self.current_agent_name in _entry_tier_agent_ids()
 
-    def _is_routing_session(self) -> bool:
-        """Check if current session is with the routing agent."""
-        return self.current_agent_name == self.ROUTING_AGENT_NAME
+    def _is_specialist_session(self) -> bool:
+        """Check if current session is with a leaf specialist (not entry-tier)."""
+        return not self._is_entry_tier_session()
 
     def _process_agent_response(
         self, response: str, fallback_message: str = "No response received from agent"
@@ -683,7 +841,7 @@ class ResponsesSessionManager(BaseSessionManager):
             response_preview=processed_response[:100],
             available_agents=self.agents,
             current_agent=self.current_agent_name,
-            is_routing_session=self._is_routing_session(),
+            is_entry_tier_session=self._is_entry_tier_session(),
         )
 
         if self.conversation_session:
@@ -778,6 +936,34 @@ class ResponsesSessionManager(BaseSessionManager):
 
         logger.debug("Routing detection result", routed_agent=routed_agent)
 
+        # Specialist lock: on a leaf specialist, ignore routing_decision that would leave the
+        # current specialist — except non-Zammad may still return to routing-agent when the graph
+        # says so. Zammad ticket sessions never auto-return to router (new ticket for a new track).
+        if (
+            routed_agent
+            and self._is_specialist_session()
+            and self.current_agent_name
+            and routed_agent != self.current_agent_name
+        ):
+            allow_return_to_router = (
+                routed_agent == self.ROUTING_AGENT_NAME
+                and not self._is_zammad_integration()
+            )
+            if not allow_return_to_router:
+                logger.info(
+                    "Specialist lock: ignoring routing_decision"
+                    + (
+                        " (Zammad: no auto return-to-router)"
+                        if self._is_zammad_integration()
+                        and routed_agent == self.ROUTING_AGENT_NAME
+                        else "; open a new ticket/session to change specialist track"
+                    ),
+                    user_id=self.user_id,
+                    ignored_target=routed_agent,
+                    current_agent=self.current_agent_name,
+                )
+                routed_agent = None
+
         if routed_agent:
             logger.info(
                 "Responses mode routing detected",
@@ -787,10 +973,11 @@ class ResponsesSessionManager(BaseSessionManager):
                 current_agent=self.current_agent_name,
             )
 
-            # Handle task completion - return to router
+            # Handle task completion - return to router (not for Zammad ticket specialists)
             if (
                 routed_agent == self.ROUTING_AGENT_NAME
                 and self._is_specialist_session()
+                and not self._is_zammad_integration()
             ):
                 logger.info(
                     "Specialist task complete, returning to routing agent",
@@ -798,10 +985,17 @@ class ResponsesSessionManager(BaseSessionManager):
                     current_agent=self.current_agent_name,
                 )
                 await self._reset_conversation_state()
-                return await self.handle_responses_message("hi")
+                return await self.handle_responses_message(
+                    "hi",
+                    integration_context=self._integration_context,
+                    integration_type=self._integration_type_str,
+                )
 
             # Handle routing to specialist agents
-            if routed_agent != self.ROUTING_AGENT_NAME and self._is_routing_session():
+            if (
+                routed_agent != self.ROUTING_AGENT_NAME
+                and self._is_entry_tier_session()
+            ):
                 logger.info(
                     "Routing to specialist agent",
                     user_id=self.user_id,
@@ -854,7 +1048,14 @@ class ResponsesSessionManager(BaseSessionManager):
                     )
                     return cleaned_response
                 else:
-                    # Response was only termination markers - reset immediately and return to router
+                    # Response was only termination markers — normally reset to router; Zammad stays on specialist.
+                    if self._is_zammad_integration():
+                        logger.info(
+                            "Zammad: response was only termination markers — not resetting to router",
+                            user_id=self.user_id,
+                            current_agent=self.current_agent_name,
+                        )
+                        return ""
                     logger.info(
                         "Response contains only termination markers - resetting and routing to router",
                         user_id=self.user_id,
@@ -864,7 +1065,11 @@ class ResponsesSessionManager(BaseSessionManager):
                     # Send placeholder message - ConversationSession will override with routing agent's
                     # configured initial_user_message from YAML (routing.yaml: settings.initial_user_message)
                     return await self.handle_responses_message(
-                        "hi", self.request_manager_session_id, None
+                        "hi",
+                        self.request_manager_session_id,
+                        None,
+                        integration_context=self._integration_context,
+                        integration_type=self._integration_type_str,
                     )
 
         return processed_response
@@ -953,9 +1158,11 @@ class ResponsesSessionManager(BaseSessionManager):
             )
 
             token_context = get_session_token_context(self.request_manager_session_id)
+            state_patch = await self._build_langgraph_state_patch()
             response = await session.send_message(
                 text,
                 token_context=token_context,
+                state_patch=state_patch if state_patch else None,
             )
 
             logger.info(
@@ -1018,12 +1225,23 @@ class ResponsesSessionManager(BaseSessionManager):
                     current_agent_id=session.current_agent_id,
                 )
 
-                # Update the session with current agent and thread
-                conversation_context = {
-                    "agent_name": agent_name,
-                    "session_type": "responses_api",
-                    "last_updated": datetime.now(timezone.utc).isoformat(),
-                }
+                # Merge conversation_context so ticket metadata persists
+                merged_ctx: dict[str, Any] = dict(
+                    cast(Dict[str, Any], session.conversation_context or {})
+                )
+                merged_ctx.update(
+                    {
+                        "agent_name": agent_name,
+                        "session_type": "responses_api",
+                        "last_updated": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
+                if self._is_zammad_integration():
+                    tt_merge = (
+                        self._integration_context.get("ticket_title") or ""
+                    ).strip()
+                    if tt_merge:
+                        merged_ctx["last_ticket_title"] = tt_merge
 
                 update_stmt = (
                     update(RequestSession)
@@ -1031,7 +1249,7 @@ class ResponsesSessionManager(BaseSessionManager):
                     .values(
                         current_agent_id=agent_name,
                         conversation_thread_id=thread_id,
-                        conversation_context=conversation_context,
+                        conversation_context=merged_ctx,
                         updated_at=datetime.now(timezone.utc),
                     )
                 )

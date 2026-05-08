@@ -82,7 +82,11 @@ from .session_lock import (
 )
 
 # Export session management
-from .session_manager import BaseSessionManager
+from .session_manager import (
+    BaseSessionManager,
+    get_or_create_zammad_ticket_session,
+    initial_current_agent_id_for_integration,
+)
 from .session_schemas import SessionCreate, SessionResponse, SessionUpdate
 
 # Export user utilities
@@ -93,7 +97,13 @@ from .user_utils import (
 )
 
 # Export utilities
-from .utils import generate_fallback_user_id, get_enum_value
+from .utils import (
+    generate_fallback_user_id,
+    get_enum_value,
+    normalize_zammad_rest_api_base,
+    zammad_rest_authorization_headers,
+    zammad_rest_json_headers,
+)
 
 __all__ = [
     "verify_slack_signature",
@@ -105,6 +115,9 @@ __all__ = [
     "create_cloudevent_response",
     "get_enum_value",
     "generate_fallback_user_id",
+    "normalize_zammad_rest_api_base",
+    "zammad_rest_authorization_headers",
+    "zammad_rest_json_headers",
     "get_or_create_canonical_user",
     "is_uuid",
     "resolve_canonical_user_id",
@@ -142,6 +155,8 @@ __all__ = [
     "EventTypes",
     "agent_response_event_id",
     "BaseSessionManager",
+    "get_or_create_zammad_ticket_session",
+    "initial_current_agent_id_for_integration",
     "SessionCreate",
     "SessionResponse",
     "SessionUpdate",

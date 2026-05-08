@@ -58,7 +58,7 @@ def call_basher_tool(name: str, params: dict[str, Any]) -> str:
             return asyncio.run(_call_tool_async(url, name, arguments))
         except BaseException as e:
             detail = f"tool={name!r} url={url!r}: {type(e).__name__}: {e}"
-            logger.exception("Basher MCP call failed: %s", detail)
+            logger.exception(f"Basher MCP call failed: {detail}")
             raise RuntimeError(f"Basher MCP failed: {detail}") from e
 
     return _executor.submit(_run).result(

@@ -58,7 +58,6 @@ mypy_path = "../../tracing-config/src:../../shared-models/src:../mcp-common/src"
 module = [
     "mcp_common.*",
     "opentelemetry.*",
-    "shared_models.*",
 ]
 follow_imports = "skip"
 

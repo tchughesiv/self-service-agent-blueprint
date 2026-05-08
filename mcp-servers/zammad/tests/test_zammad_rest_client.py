@@ -4,6 +4,7 @@ from dataclasses import replace
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
+from shared_models.utils import normalize_zammad_rest_api_base
 from zammad_mcp.settings import ZAMMAD_MCP_SETTINGS
 from zammad_mcp.zammad_rest_client import (
     ZammadRestClient,
@@ -12,9 +13,14 @@ from zammad_mcp.zammad_rest_client import (
 )
 
 
-def test_zammad_rest_client_init_trims_whitespace_and_slash() -> None:
+def test_zammad_rest_client_init_normalizes_api_base() -> None:
     c = ZammadRestClient("  http://host:8080/  ", "tok")
-    assert c._base == "http://host:8080"
+    assert c._base == normalize_zammad_rest_api_base("http://host:8080")
+
+
+def test_zammad_rest_client_does_not_duplicate_api_v1_when_url_includes_it() -> None:
+    c = ZammadRestClient("https://z.example/api/v1", "tok")
+    assert c._base == "https://z.example/api/v1"
 
 
 @patch("zammad_mcp.zammad_rest_client.ZammadRestClient")

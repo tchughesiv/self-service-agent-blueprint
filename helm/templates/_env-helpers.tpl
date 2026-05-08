@@ -115,7 +115,7 @@ Generate common environment variables for all services
 - name: SQL_DEBUG
   value: "false"
 - name: EXPECTED_MIGRATION_VERSION
-  value: {{ .Values.database.expectedMigrationVersion | default "001" | quote }}
+  value: {{ .Values.database.expectedMigrationVersion | default "002" | quote }}
 {{/* Eventing Configuration - Always enabled (mock or full Knative) */}}
 - name: BROKER_URL
   value: {{ if .Values.requestManagement.knative.eventing.enabled }}{{ printf "%s/%s/%s" .Values.requestManagement.knative.broker.url .Release.Namespace .Values.requestManagement.knative.broker.name | quote }}{{ else }}{{ printf "http://%s-mock-eventing.%s.svc.cluster.local:8080/%s/%s" (include "self-service-agent.fullname" .) .Release.Namespace .Release.Namespace .Values.requestManagement.knative.broker.name | quote }}{{ end }}
@@ -209,6 +209,29 @@ Generate Request Manager specific environment variables
 - name: RECLAIM_ACTION
   value: {{ if and (hasKey .Values.requestManagement "requestManager") (hasKey .Values.requestManagement.requestManager "sessionSerialization") (hasKey .Values.requestManagement.requestManager.sessionSerialization "reclaimAction") }}{{ .Values.requestManagement.requestManager.sessionSerialization.reclaimAction | quote }}{{ else }}"requeue"{{ end }}
 {{/* DB pool overrides are applied in dbEnvVarsNoStatementTimeout (single source to avoid duplicate env vars) */}}
+{{- include "self-service-agent.sessionAgentRoutingEnvVars" . }}
+{{/* Zammad REST: same credentials secret as integration-dispatcher/MCP (oc exec ticket harness, optional future RM features) */}}
+{{- if .Values.ticketingZammad.enabled }}
+- name: ZAMMAD_URL
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "self-service-agent.fullname" . }}-zammad-credentials
+      key: zammad-url
+- name: ZAMMAD_HTTP_TOKEN
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "self-service-agent.fullname" . }}-zammad-credentials
+      key: zammad-http-token
+{{- end }}
+{{- end }}
+
+{{/* DEFAULT_AGENT_ID / ZAMMAD_DEFAULT_AGENT_ID — session first-agent routing */}}
+{{- define "self-service-agent.sessionAgentRoutingEnvVars" -}}
+{{- $agent := .Values.agent | default dict }}
+- name: DEFAULT_AGENT_ID
+  value: {{ $agent.defaultAgentId | default "routing-agent" | quote }}
+- name: ZAMMAD_DEFAULT_AGENT_ID
+  value: {{ $agent.zammadDefaultAgentId | default "ticket-review-agent" | quote }}
 {{- end }}
 
 {{/*
@@ -258,8 +281,7 @@ Generate Agent Service specific environment variables
 {{- end }}
 {{- end }}
 {{/* Agent Configuration */}}
-- name: DEFAULT_AGENT_ID
-  value: {{ if hasKey .Values "agent" }}{{ .Values.agent.defaultAgentId | default "routing-agent" | quote }}{{ else }}"routing-agent"{{ end }}
+{{- include "self-service-agent.sessionAgentRoutingEnvVars" . }}
 - name: AGENT_TIMEOUT
   value: {{ if hasKey .Values "agent" }}{{ .Values.agent.timeout | default "120" | quote }}{{ else }}"120"{{ end }}
 - name: ALWAYS_REFRESH_AGENT_MAPPING
@@ -341,6 +363,20 @@ Generate Integration Dispatcher specific environment variables
       name: {{ include "self-service-agent.fullname" . }}-integration-secrets
       key: slack-signing-secret
       optional: true
+{{/* Zammad trigger webhook — dispatcher requires non-empty secret for HMAC (401 if unset/empty) */}}
+- name: ZAMMAD_WEBHOOK_SECRET
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "self-service-agent.fullname" . }}-integration-secrets
+      key: zammad-webhook-secret
+      optional: true
+{{- $tz := .Values.ticketingZammad | default dict }}
+{{- $lz := .Values.zammad | default dict }}
+{{- $aiAgent := $tz.aiAgentUserId | default $lz.aiAgentUserId | default "" }}
+{{- if $aiAgent }}
+- name: ZAMMAD_AI_AGENT_USER_ID
+  value: {{ $aiAgent | quote }}
+{{- end }}
 {{/* SMTP Configuration */}}
 - name: SMTP_HOST
   valueFrom:
@@ -478,19 +514,6 @@ Generate all environment variables for Request Manager
 {{- include "self-service-agent.dbEnvVarsNoStatementTimeout" . }}
 {{- include "self-service-agent.commonEnvVars" . }}
 {{- include "self-service-agent.requestManagerEnvVars" . }}
-{{/* Zammad credentials for ticket tracking (only when ticketing channel is enabled) */}}
-{{- if .Values.ticketingZammad.enabled }}
-- name: ZAMMAD_URL
-  valueFrom:
-    secretKeyRef:
-      name: {{ include "self-service-agent.fullname" . }}-zammad-credentials
-      key: zammad-url
-- name: ZAMMAD_HTTP_TOKEN
-  valueFrom:
-    secretKeyRef:
-      name: {{ include "self-service-agent.fullname" . }}-zammad-credentials
-      key: zammad-http-token
-{{- end }}
 {{- end }}
 
 {{/*
@@ -517,4 +540,20 @@ Generate all environment variables for Integration Dispatcher
 {{- include "self-service-agent.dbEnvVars" . }}
 {{- include "self-service-agent.commonEnvVars" . }}
 {{- include "self-service-agent.integrationDispatcherEnvVars" . }}
+{{/* Zammad REST posting for customer-visible ticket replies (same secret as Request Manager / MCP) */}}
+{{- if .Values.ticketingZammad.enabled }}
+{{- $tz := .Values.ticketingZammad | default dict }}
+- name: ZAMMAD_TICKET_ARTICLE_FALLBACK_ON_FORBIDDEN
+  value: "true"
+- name: ZAMMAD_URL
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "self-service-agent.fullname" . }}-zammad-credentials
+      key: zammad-url
+- name: ZAMMAD_HTTP_TOKEN
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "self-service-agent.fullname" . }}-zammad-credentials
+      key: zammad-http-token
+{{- end }}
 {{- end }}

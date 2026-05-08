@@ -1,4 +1,4 @@
-{{- if .Values.bootstrap.createToken }}
+{{- $createToken := .Values.bootstrap.createToken }}
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -28,12 +28,17 @@ metadata:
     "helm.sh/hook-weight": "5"
     "helm.sh/hook-delete-policy": before-hook-creation
 rules:
+{{- if $createToken }}
 - apiGroups: [""]
   resources: ["secrets"]
   verbs: ["get", "patch", "update"]
 - apiGroups: ["apps"]
   resources: ["deployments"]
   verbs: ["get", "patch", "update"]
+{{- end }}
+- apiGroups: ["batch"]
+  resources: ["jobs"]
+  verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -56,4 +61,3 @@ subjects:
 - kind: ServiceAccount
   name: {{ .Release.Name }}-zammad-bootstrap
   namespace: {{ .Release.Namespace }}
-{{- end }}

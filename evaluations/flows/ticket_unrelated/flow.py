@@ -6,8 +6,9 @@ FLOW_NAME: str = "ticket_unrelated"
 DEFAULT_TEST_SCRIPT: str = "ticket-responses-request-mgr.py"
 DEFAULT_RESET_CONVERSATION: bool = False
 DEFAULT_SKIP_INITIAL_MESSAGE: bool = True
-DEFAULT_INITIAL_MESSAGE: str = "requesting a laptop refresh"
-DEFAULT_TICKET_TITLE: str = "non laptop refresh request"
+# Neutral wording — avoid "refresh" in the title or routing may classify LAPTOP_REFRESH from the title alone.
+DEFAULT_INITIAL_MESSAGE: str = "General IT assistance"
+DEFAULT_TICKET_TITLE: str = "General workplace IT issue"
 DEFAULT_MAX_TURNS: int = 10
 KNOWLEDGE_BASE_DIRS: List[str] = []
 INCLUDE_SNOW_DATA: bool = False

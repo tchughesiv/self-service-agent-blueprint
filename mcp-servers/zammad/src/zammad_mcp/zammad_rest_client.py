@@ -7,6 +7,10 @@ import json
 from typing import Any, Dict
 
 import httpx
+from shared_models.utils import (
+    normalize_zammad_rest_api_base,
+    zammad_rest_authorization_headers,
+)
 from zammad_mcp.settings import ZAMMAD_MCP_SETTINGS
 
 
@@ -27,10 +31,11 @@ class ZammadRestClient:
     """Zammad REST: GET /users/{id} only (custom fields not in Basher models)."""
 
     def __init__(self, base_url: str, http_token: str) -> None:
-        self._base = base_url.strip().rstrip("/")
+        # ``ZAMMAD_URL`` may be web origin or already ``.../api/v1`` (shared_models convention).
+        self._base = normalize_zammad_rest_api_base(base_url.strip())
         self._timeout = ZAMMAD_MCP_SETTINGS.mcp_timeout_seconds
         self._headers = {
-            "Authorization": f"Token token={http_token}",
+            **zammad_rest_authorization_headers(http_token),
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
@@ -43,7 +48,7 @@ class ZammadRestClient:
     def get_user(self, user_id: int, timeout: float | None = None) -> Dict[str, Any]:
         with self._http_client(timeout=timeout) as client:
             r = client.get(
-                f"{self._base}/api/v1/users/{user_id}",
+                f"{self._base}/users/{user_id}",
                 headers=self._headers,
             )
             _raise_for_zammad_response(r)

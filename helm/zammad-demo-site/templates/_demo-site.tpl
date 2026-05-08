@@ -417,7 +417,7 @@
     </div>
 
     <p class="footer-links">
-      <a href="chat-embed.html">Chat widget snippet page</a>
+      <a href="chat-snippet.html">Chat widget snippet page</a>
       ·
       <a href="{{ $u }}/" target="_blank" rel="noopener">Zammad home</a>
     </p>

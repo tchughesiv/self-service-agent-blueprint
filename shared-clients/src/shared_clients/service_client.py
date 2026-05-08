@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional
 
 import httpx
 import structlog
+from shared_models.utils import normalize_zammad_rest_api_base
 
 logger = structlog.get_logger()
 
@@ -178,3 +179,43 @@ async def cleanup_service_clients() -> None:
         _integration_dispatcher_client = None
 
     logger.info("Cleaned up service clients")
+
+
+_zammad_rest_client: Optional[ServiceClient] = None
+_zammad_rest_client_canon: Optional[str] = None
+
+
+async def get_zammad_rest_service_client() -> Optional[ServiceClient]:
+    """Singleton pooled ``httpx`` client for Zammad REST (``ZAMMAD_URL``).
+
+    Reuses keep-alive connections to ``ticket_articles`` and other endpoints.
+    Recreates the client when ``ZAMMAD_URL`` changes (e.g. tests).
+    """
+    global _zammad_rest_client, _zammad_rest_client_canon
+
+    raw = (os.getenv("ZAMMAD_URL") or "").strip()
+    if not raw:
+        return None
+
+    canon = normalize_zammad_rest_api_base(raw)
+    if _zammad_rest_client is not None and _zammad_rest_client_canon == canon:
+        return _zammad_rest_client
+
+    if _zammad_rest_client is not None:
+        await _zammad_rest_client.close()
+        _zammad_rest_client = None
+        _zammad_rest_client_canon = None
+
+    _zammad_rest_client = ServiceClient(canon, timeout=30.0)
+    _zammad_rest_client_canon = canon
+    return _zammad_rest_client
+
+
+async def close_zammad_rest_service_client() -> None:
+    """Close the pooled Zammad REST client (call from FastAPI shutdown)."""
+    global _zammad_rest_client, _zammad_rest_client_canon
+
+    if _zammad_rest_client:
+        await _zammad_rest_client.close()
+        _zammad_rest_client = None
+        _zammad_rest_client_canon = None

@@ -30,7 +30,7 @@ testIntegrationEnabled: false
 # Database Configuration
 database:
   # Expected migration version that services should wait for
-  expectedMigrationVersion: "001"
+  expectedMigrationVersion: "002"
   
   # Database connection URL - leave empty to use default pgvector service
   # Format: postgresql://username:password@host:port/database
@@ -275,7 +275,7 @@ mcp-servers:
     oracle-sqlcl:
       enabled: false
 
-    # Zammad MCP server for ticketing integration
+    # Key must differ from "zammad" — that label collides with ticketingZammad subchart pods (same Service selector → MCP connects to random Zammad component → connection refused).
     zammad-mcp:
       enabled: false
       replicas: 1
@@ -328,8 +328,21 @@ mcp-servers:
 
 # Zammad ticketing channel (optional). Deploys Zammad as a subchart and injects credentials into pods.
 # Configured by values-ticketing.yaml.
+# Webhook HMAC: set webhookSecret here (also accepts legacy top-level zammad.*). Group/state/tag routing is configured in Zammad triggers only, not in the dispatcher.
+# webhookSecret: When ticketingZammad.enabled is true and this is empty, the chart uses default *ssa-zammad-webhook-default*
+# (see secrets.yaml). Override in production. When ticketing is disabled, zammad-webhook-secret is omitted.
 ticketingZammad:
   enabled: false
+  url: "https://zammad.example.com"
+  webhookSecret: ""
+  # Optional: Zammad users.id for the API user that posts dispatcher replies — webhook ignores articles they author (feedback loop).
+  aiAgentUserId: ""
+  # Specialist owner emails apply to Zammad MCP tools only — set on mcp-servers.mcp-servers.zammad-mcp.env
+  # (ZAMMAD_LAPTOP_SPECIALIST_OWNER / ZAMMAD_SPECIALIST_OWNER). Customer-visible replies are POSTed by
+  # integration-dispatcher via REST ticket_articles (not MCP tools); From is the assignee when Zammad allows it.
+  mcp:
+    enabled: false
+    uri: "http://mcp-zammad-mcp:8000/mcp"
 
 # Enable/disable the llm-service dependency
 llm-service:
@@ -540,8 +553,10 @@ requestManagement:
   
   # Agent Configuration
   agent:
-    # Default agent ID for routing (can be overridden)
+    # First agent for most channels (Slack, web, email, …); see zammadDefaultAgentId for Zammad.
     defaultAgentId: "routing-agent"
+    # First agent for IntegrationType.ZAMMAD sessions (never falls back to defaultAgentId).
+    zammadDefaultAgentId: "ticket-review-agent"
     # Agent response timeout in seconds
     timeout: 180
     # Always refresh agent mapping from LlamaStack on each request

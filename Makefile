@@ -259,6 +259,7 @@ helm_ticketing_args = \
 	--set mcp-servers.mcp-servers.zammad-mcp.envSecrets.ZAMMAD_URL.key=zammad-url \
 	--set mcp-servers.mcp-servers.zammad-mcp.envSecrets.ZAMMAD_HTTP_TOKEN.name=$(ZAMMAD_CREDENTIALS_SECRET) \
 	--set mcp-servers.mcp-servers.zammad-mcp.envSecrets.ZAMMAD_HTTP_TOKEN.key=zammad-http-token \
+	$(if $(TEST_USERS),--set-string ticketingZammad.bootstrap.testUsers="$(subst $(COMMA),\$(COMMA),$(TEST_USERS))",) \
 	$(if $(OTEL_EXPORTER_OTLP_ENDPOINT),--set mcp-servers.mcp-servers.zammad-mcp.env.OTEL_EXPORTER_OTLP_ENDPOINT="$(OTEL_EXPORTER_OTLP_ENDPOINT)")
 
 # Version target
@@ -289,6 +290,7 @@ help:
 	@echo "  helm-install-prod                   - Install with full Knative eventing (production)"
 	@echo "  helm-install-demo                  - Install demo config (mock eventing, Greenmail, resource constraints)"
 	@echo "  helm-install-ticketing             - Install with ticketing channel (Zammad + MCP; one-shot deploy)"
+	@echo "                                        Optional: TEST_USERS=a@b.com,... seeds extra Zammad customers (bootstrap Job)"
 	@echo "  helm-export-demo                    - Export demo manifests to ansible/helm-export/ (from NAMESPACE, VERSION, REGISTRY, SERVICENOW_*, etc.)"
 	@echo "  helm-export-validate-demo           - Export then validate with kubeconform (no cluster; CI)"
 	@echo "  ansible-apply-demo                  - Export then apply demo via Ansible (requires ansible-playbook)"
@@ -493,7 +495,8 @@ help:
 	@echo "    LG_PROMPT_<AGENT_NAME>            - Override prompt config for any agent (generic pattern)"
 	@echo "                                        Replace <AGENT_NAME> with uppercase agent name (use _ for -)"
 	@echo "    Examples:"
-	@echo "      LG_PROMPT_LAPTOP_REFRESH        - Override laptop-refresh agent"
+	@echo "      LG_PROMPT_LAPTOP_REFRESH        - Override laptop-refresh agent (non-ticket / general flow)"
+	@echo "      LG_PROMPT_TICKET_LAPTOP_REFRESH - Override ticket-laptop-refresh (Zammad / ticket channel)"
 	@echo "      LG_PROMPT_ROUTING               - Override routing agent"
 	@echo "      LG_PROMPT_EMAIL_UPDATE          - Override email-update agent"
 	@echo "    Usage: make helm-install-test LG_PROMPT_LAPTOP_REFRESH=config/lg-prompts/custom.yaml"
@@ -1562,8 +1565,7 @@ define helm_install_common
 		-n $(NAMESPACE) --dry-run=client -o yaml | kubectl apply -f -
 
 	@echo "Cleaning up any existing jobs..."
-	@kubectl delete job -l app.kubernetes.io/component=init -n $(NAMESPACE) --ignore-not-found || true
-	@kubectl delete job -l app.kubernetes.io/name=self-service-agent -n $(NAMESPACE) --ignore-not-found || true
+	@kubectl delete job -l app.kubernetes.io/instance=$(MAIN_CHART_NAME) -n $(NAMESPACE) --ignore-not-found || true
 	@echo "Installing $(MAIN_CHART_NAME) helm chart $(1)"
 	@if [ -n "$(GIT_BRANCH)" ] && [ "$(origin VERSION)" = "undefined" ]; then \
 		echo "Using image version: $(VERSION) (auto-detected from branch: $(GIT_BRANCH))"; \
@@ -1717,6 +1719,8 @@ helm-install-ticketing: namespace helm-depend
 		printf '    imageRegistry: "%s"\n' '$(REGISTRY)'; \
 		printf '    imageRepository: "%s"\n' 'self-service-agent-zammad-bootstrap'; \
 		printf '    imageTag: "%s"\n' '$(VERSION)'; \
+		printf '    integrationWebhook:\n'; \
+		printf '      mainChartReleaseName: "%s"\n' '$(MAIN_CHART_NAME)'; \
 		if [ -n "$$ZAMMAD_UID" ] || [ -n "$$ZAMMAD_FQDN" ]; then \
 			printf '  zammad:\n'; \
 			if [ -n "$$ZAMMAD_UID" ]; then \
@@ -1759,11 +1763,9 @@ helm-install-ticketing: namespace helm-depend
 		DEMO_SITE_HELM_ARGS="--set enabled=true"; \
 		[ -n "$$ZAMMAD_FQDN" ] && DEMO_SITE_HELM_ARGS="$$DEMO_SITE_HELM_ARGS --set publicUrl=https://$$ZAMMAD_FQDN"; \
 		DEMO_SITE_HELM_ARGS="$$DEMO_SITE_HELM_ARGS --set pathPrefix=/$(ZAMMAD_DEMO_SITE_PATH)"; \
-		helm uninstall zammad-embed -n $(NAMESPACE) --ignore-not-found 2>/dev/null || true; \
 		helm upgrade --install zammad-demo-site helm/zammad-demo-site/ -n $(NAMESPACE) $$DEMO_SITE_HELM_ARGS; \
 	else \
 		helm uninstall zammad-demo-site -n $(NAMESPACE) --ignore-not-found 2>/dev/null || true; \
-		helm uninstall zammad-embed -n $(NAMESPACE) --ignore-not-found 2>/dev/null || true; \
 	fi
 	@$(MAKE) print-urls
 	@echo "Step 2/2: Printing checklist..."
@@ -1779,13 +1781,12 @@ _helm-install-ticketing-print-checklist:
 	@echo "  1. Zammad URLs:"
 	@ZAMMAD_ROUTE=$$(oc get route ssa-zammad -n $(NAMESPACE) -o jsonpath='{.spec.host}' 2>/dev/null); \
 	ZAMMAD_DEMO_SITE_INSTALLED=$$(oc get route ssa-zammad-demo-site -n $(NAMESPACE) -o name 2>/dev/null); \
-	if [ -z "$$ZAMMAD_DEMO_SITE_INSTALLED" ]; then ZAMMAD_DEMO_SITE_INSTALLED=$$(oc get route ssa-zammad-embed -n $(NAMESPACE) -o name 2>/dev/null); fi; \
 	if [ -z "$$ZAMMAD_ROUTE" ]; then ZAMMAD_ROUTE=$$(oc get route -n $(NAMESPACE) -l app.kubernetes.io/instance=zammad -o jsonpath='{.items[0].spec.host}' 2>/dev/null); fi; \
 	if [ -n "$$ZAMMAD_ROUTE" ]; then \
 		echo "     Web UI: https://$$ZAMMAD_ROUTE"; \
 		echo "     API:    https://$$ZAMMAD_ROUTE/api/v1"; \
 		if [ -n "$$ZAMMAD_DEMO_SITE_INSTALLED" ]; then \
-			echo "     Demo site (same host): https://$$ZAMMAD_ROUTE/$(ZAMMAD_DEMO_SITE_PATH)/ — chat-embed: /$(ZAMMAD_DEMO_SITE_PATH)/chat-embed.html (widget needs agents online for chat; Admin → Channels → Chat)."; \
+			echo "     Demo site (same host): https://$$ZAMMAD_ROUTE/$(ZAMMAD_DEMO_SITE_PATH)/ — chat snippet page: /$(ZAMMAD_DEMO_SITE_PATH)/chat-snippet.html (widget needs agents online for chat; Admin → Channels → Chat)."; \
 		else \
 			echo "     Demo site: not installed — ZAMMAD_DEMO_SITE_ENABLED was not true. Re-run with ZAMMAD_DEMO_SITE_ENABLED=true (default) or omit it."; \
 		fi; \
@@ -1793,9 +1794,24 @@ _helm-install-ticketing-print-checklist:
 		echo "     Port-forward: kubectl port-forward -n $(NAMESPACE) svc/zammad-nginx 8080:8080"; \
 		echo "     Web UI: http://localhost:8080"; \
 		echo "     API:    http://localhost:8080/api/v1"; \
+	fi; \
+	echo ""; \
+	if [ -n "$$ZAMMAD_DEMO_SITE_INSTALLED" ]; then \
+		echo "  2. Demo site: login at /$(ZAMMAD_DEMO_SITE_PATH)/; chat widget snippet + preview at /$(ZAMMAD_DEMO_SITE_PATH)/chat-snippet.html on the Web UI host. Admin → Channels → Chat (agents must be available for the widget)."; \
+		echo "     Full chat → agent reply loop needs integration-dispatcher + webhook/MCP when enabled."; \
+		echo ""; \
 	fi
+	@echo "  3. Zammad FQDN: pre-computed / Makefile overlay when needed so the Route and HTTPS behave correctly."
+	@echo ""
+	@echo "  4. If the MCP token was not written by the bootstrap Job:"
+	@echo "     - kubectl logs -n $(NAMESPACE) job/$(MAIN_CHART_NAME)-bootstrap"
+	@echo "       (or: kubectl logs -n $(NAMESPACE) -l app.kubernetes.io/component=zammad-bootstrap)"
+	@echo "     - Ensure ticketingZammad.bootstrap.createToken and credentialsSecret match your cluster."
+	@echo ""
+	@echo "  5. Webhook: ticketing defaults enable ticketingZammad.bootstrap.integrationWebhook; the post-install bootstrap Job creates the Webhook + Trigger → integration-dispatcher (README.md § Integration with Zammad ticketing). Set ticketingZammad.webhookSecret so $(MAIN_CHART_NAME)-integration-secrets includes zammad-webhook-secret for HMAC verification."
 	@echo ""
 	@echo "  Admin login defaults: ZAMMAD_ADMIN_EMAIL / ZAMMAD_ADMIN_PASSWORD (see Makefile; must match autoWizard in helm/values-ticketing.yaml)."
+	@echo "  Optional: TEST_USERS (comma-separated emails) on helm-install-ticketing → bootstrap Job provisions mock-employee-data customers in Zammad."
 	@echo "  More: README.md, docs/HELM_EXPORT_ANSIBLE.md"
 	@echo ""
 
@@ -1990,7 +2006,6 @@ helm-uninstall:
 	@$(MAKE) helm-cleanup-jobs
 	@$(MAKE) undeploy-email-server
 	@helm uninstall zammad-demo-site -n $(NAMESPACE) --ignore-not-found 2>/dev/null || true
-	@helm uninstall zammad-embed -n $(NAMESPACE) --ignore-not-found 2>/dev/null || true
 	@kubectl delete jobs -n $(NAMESPACE) -l app.kubernetes.io/component=zammad-bootstrap --ignore-not-found --wait=false 2>/dev/null || true
 	@sleep 5
 	@for pvc in $$(kubectl get pvc -n $(NAMESPACE) -o jsonpath='{.items[*].metadata.name}' 2>/dev/null | tr ' ' '\n' | grep -E '^data-(zammad|$(MAIN_CHART_NAME))-(elasticsearch|postgresql|redis|memcached)' || true); do kubectl delete pvc $$pvc -n $(NAMESPACE) --ignore-not-found; done

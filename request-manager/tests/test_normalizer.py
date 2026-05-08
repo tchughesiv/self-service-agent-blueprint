@@ -1,7 +1,13 @@
 """Tests for request normalizer."""
 
 from request_manager.normalizer import RequestNormalizer
-from request_manager.schemas import CLIRequest, SlackRequest, ToolRequest, WebRequest
+from request_manager.schemas import (
+    CLIRequest,
+    SlackRequest,
+    ToolRequest,
+    WebRequest,
+    ZammadRequest,
+)
 from shared_models.models import IntegrationType
 
 
@@ -124,6 +130,58 @@ class TestRequestNormalizer:
         assert normalized.integration_context["platform"] == "cli"
         assert normalized.integration_context["cli_session_id"] == "cli-session-456"
         assert normalized.user_context["command_context"]["command"] == "agent"
+
+    def test_normalize_zammad_request(self) -> None:
+        """Test Zammad request normalization."""
+        zammad_request = ZammadRequest(
+            user_id="zammad-8",
+            content="Where is the printer?",
+            ticket_id=81,
+            article_id=104,
+            group_id=3,
+            group_name="Support",
+            owner_id=42,
+            owner_email="specialist@example.com",
+            created_by_id=8,
+            zammad_delivery_id="delivery-abc123",
+            ticket_title=None,
+        )
+
+        normalized = self.normalizer.normalize_request(zammad_request, self.session_id)
+
+        assert normalized.integration_type == IntegrationType.ZAMMAD
+        assert normalized.target_agent_id is None
+        assert normalized.requires_routing is True
+        assert normalized.session_id == self.session_id
+        assert normalized.integration_context["platform"] == "zammad"
+        assert normalized.integration_context["ticket_id"] == 81
+        assert normalized.integration_context["article_id"] == 104
+        assert normalized.integration_context["group_id"] == 3
+        assert normalized.integration_context["zammad_delivery_id"] == "delivery-abc123"
+        assert normalized.integration_context["owner_id"] == 42
+        assert normalized.integration_context["owner_email"] == "specialist@example.com"
+
+    def test_normalize_zammad_request_includes_ticket_title(self) -> None:
+        """Ticket title from Zammad is copied into integration_context for LangGraph."""
+        zammad_request = ZammadRequest(
+            user_id="zammad-8",
+            content="Body text",
+            ticket_id=81,
+            article_id=104,
+            group_id=3,
+            group_name="Support",
+            owner_id=None,
+            owner_email=None,
+            created_by_id=8,
+            zammad_delivery_id="delivery-abc123",
+            ticket_title="Need laptop refresh",
+        )
+
+        normalized = self.normalizer.normalize_request(zammad_request, self.session_id)
+
+        assert (
+            normalized.integration_context.get("ticket_title") == "Need laptop refresh"
+        )
 
     def test_normalize_tool_request(self) -> None:
         """Test tool request normalization."""

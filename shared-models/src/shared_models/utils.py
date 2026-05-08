@@ -65,3 +65,27 @@ def generate_fallback_user_id(request_id: str | None) -> str:
 
         return f"unknown-{str(uuid.uuid4())[:8]}"
     return f"unknown-{request_id[:8]}"
+
+
+def normalize_zammad_rest_api_base(zammad_url: str) -> str:
+    """Return Zammad REST base URL ending with ``/api/v1`` (no trailing slash).
+
+    ``ZAMMAD_URL`` may be the web origin or already include ``/api/v1``.
+    """
+    stripped = zammad_url.rstrip("/")
+    if stripped.endswith("/api/v1"):
+        return stripped
+    return f"{stripped}/api/v1"
+
+
+def zammad_rest_authorization_headers(token: str) -> dict[str, str]:
+    """Headers for Zammad REST calls that only need HTTP token auth (e.g. GET)."""
+    return {"Authorization": f"Token token={token}"}
+
+
+def zammad_rest_json_headers(token: str) -> dict[str, str]:
+    """Headers for Zammad REST JSON bodies (POST/PATCH/PUT with ``application/json``)."""
+    return {
+        **zammad_rest_authorization_headers(token),
+        "Content-Type": "application/json",
+    }

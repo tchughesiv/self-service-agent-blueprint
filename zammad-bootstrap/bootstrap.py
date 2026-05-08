@@ -8,6 +8,45 @@ Required env vars:
   ZAMMAD_BASE_URL       e.g. http://zammad-nginx:8080
   ZAMMAD_ADMIN_EMAIL    admin user created by autoWizard
   ZAMMAD_ADMIN_PASSWORD matching password
+
+Optional (integration webhook — same secret as integration-dispatcher ZAMMAD_WEBHOOK_SECRET):
+  ZAMMAD_INTEGRATION_WEBHOOK_URL   Full URL e.g. http://RELEASE-integration-dispatcher.NS.svc.cluster.local/zammad/webhook
+  ZAMMAD_WEBHOOK_SECRET            HMAC token stored on Zammad Webhook + verified by dispatcher (must match integration-dispatcher; omit → dispatcher returns 401 on webhook POST)
+  ZAMMAD_CUSTOMER_SENDER_ID       Optional override (digits only). Default trigger article.sender_id is 2 (Customer per Zammad db/seeds/ticket_article_senders.rb).
+
+Optional trigger narrowing (Zammad trigger conditions — preferred over dispatcher env allowlists):
+  ZAMMAD_TRIGGER_GROUP_IDS   Comma-separated internal group IDs (e.g. "3" or "3,5"). Adds ticket.group_id (is / is any of). Overrides GROUP_NAMES if both set.
+  ZAMMAD_TRIGGER_GROUP_NAMES  Comma-separated Zammad group names (e.g. "Users" or "Users,human_managed_tickets"). Resolved to ids via GET /api/v1/groups at trigger update time. Helm: bootstrap.integrationWebhook.triggerGroupNames.
+  ZAMMAD_TRIGGER_SKIP_GROUP_FILTER  If true/1/yes: do not add ticket.group_id (fire for customer articles in any group).
+  ZAMMAD_TRIGGER_TAGS_ANY    Comma-separated tag names; ticket must contain at least one ("contains one"). Mutually exclusive with TAGS_ALL and TAGS_EXCLUDE.
+  ZAMMAD_TRIGGER_TAGS_ALL    Comma-separated tag names; ticket must contain all ("contains all"). Mutually exclusive with TAGS_ANY and TAGS_EXCLUDE.
+  ZAMMAD_TRIGGER_TAGS_EXCLUDE  Comma-separated tag names; ticket must contain none of them. Uses "contains all not". Values are sent as one comma-separated string (Zammad Selector splits strings; JSON arrays make validation fail with 422). Do not use commas inside a tag name. Mutually exclusive with TAGS_ANY / TAGS_ALL.
+
+  Integration trigger always adds ticket.state_id "is any of" the **new** and **open** states (ids resolved from GET /api/v1/ticket_states at bootstrap time).
+
+Optional customer web UI (Zammad setting customer_ticket_create_group_ids — Admin describes "no selection means all groups"):
+  ZAMMAD_SKIP_CUSTOMER_CREATE_GROUP_LIMIT  If true/1/yes: do not set this setting (customers may choose any group for new tickets — avoid with internal queues).
+  ZAMMAD_CUSTOMER_TICKET_CREATE_GROUP_NAMES  Comma-separated group names allowed in the customer "new ticket" group picker. Default when unset: only the **Users** group (resolved via id from bootstrap).
+
+Optional employee seeding (same semantics as mock ServiceNow / mock-employee-data ``get_employee_data()``):
+  TEST_USERS   Comma-separated emails to provision as Customer-role Zammad users with generated laptop rows. Helm (ticketing): ``ticketingZammad.bootstrap.testUsers``; Makefile: ``TEST_USERS`` passed to ``helm-install-ticketing``.
+
+API resilience (nginx/Rails restarts, cold workers — avoids bootstrap failing on a single 502):
+  ZAMMAD_API_RETRY_ATTEMPTS     Max attempts per request (default 10).
+  ZAMMAD_API_RETRY_INTERVAL_SEC Base delay before retry; scales linearly with attempt (default 2).
+
+Helm zammad-init Job (DB migrations / seeds — always awaited before HTTP bootstrap when in-cluster):
+  ZAMMAD_HELM_INSTANCE_NAME        Helm release/instance label on the zammad-init Job (app.kubernetes.io/instance).
+  ZAMMAD_INIT_JOB_WAIT_TIMEOUT_SEC Overall timeout in seconds (default 3600).
+  Without in-cluster Kubernetes or this name, the wait is skipped with a warning (local runs).
+
+Object manager migrations (POST …/object_manager_attributes_execute_migrations can run long; nginx may 502 if upstream is slow):
+  ZAMMAD_OM_POST_COOLDOWN_SEC             Seconds to wait after creating custom field(s) before execute_migrations (default 20; set 0 to skip).
+  ZAMMAD_OM_MIGRATION_TIMEOUT_SEC        HTTP read timeout for execute_migrations only (default 300). Raise if nginx proxy_read_timeout allows it.
+  ZAMMAD_OM_POST_MIGRATION_SETTLE_SEC    Seconds to wait after execute_migrations succeeds (default 8; nginx/Rails may briefly 502 — gives upstream time before next API call).
+  ZAMMAD_POST_USER_CREATE_SETTLE_SEC     Seconds to sleep after each POST /users create (default 3; reduces 502 on the next GET /users used for idempotent lookups).
+
+Bootstrap does not restart zammad-railsserver (only MCP + integration-dispatcher + optional request-manager when ZAMMAD_CREATE_TOKEN runs).
 """
 
 import base64
@@ -20,7 +59,7 @@ import time
 import requests
 from kubernetes import client as k8s_client
 from kubernetes import config as k8s_config
-from mock_employee_data.data import MOCK_EMPLOYEE_DATA
+from mock_employee_data.data import get_employee_data
 
 BASE_URL = os.environ["ZAMMAD_BASE_URL"].rstrip("/")
 API_URL = f"{BASE_URL}/api/v1"
@@ -28,9 +67,20 @@ ADMIN_EMAIL = os.environ["ZAMMAD_ADMIN_EMAIL"]
 ADMIN_PASSWORD = os.environ["ZAMMAD_ADMIN_PASSWORD"]
 AUTOWIZARD_TOKEN = os.environ["ZAMMAD_AUTOWIZARD_TOKEN"]
 
+# Webhook + trigger (Manage → Webhooks + Triggers); see README.md § Integration with Zammad ticketing
+WEBHOOK_RECORD_NAME = "Self-Service Agent — Integration Webhook"
+TRIGGER_RECORD_NAME = "Self-Service Agent — Customer article → blueprint"
+
 MANAGER1_EMAIL = "manager1@example.com"
 MANAGER2_EMAIL = "manager2@example.com"
 DEFAULT_PASSWORD = "ChangeMe123!"
+
+# Stock Zammad db/seeds — fixed ids (create_if_not_exists):
+# roles.rb: Admin=1, Agent=2, Customer=3
+DEFAULT_AGENT_ROLE_ID = 2
+DEFAULT_CUSTOMER_ROLE_ID = 3
+# ticket_article_senders.rb (Ticket::Article::Sender): Agent=1, Customer=2, System=3
+DEFAULT_CUSTOMER_ARTICLE_SENDER_ID = 2
 
 SESSION = requests.Session()
 SESSION.headers.update({"Content-Type": "application/json"})
@@ -39,6 +89,100 @@ SESSION.headers.update({"Content-Type": "application/json"})
 # ---------------------------------------------------------------------------
 # Startup: wait for Zammad, then self-issue an API token
 # ---------------------------------------------------------------------------
+
+
+def wait_for_zammad_init_job(timeout_sec=None, interval=5):
+    """Wait for the chart-owned ``zammad-init`` Job to complete (same labels as zammad-helm)."""
+    instance = os.environ.get("ZAMMAD_HELM_INSTANCE_NAME", "").strip()
+    if not instance:
+        print(
+            "WARNING: ZAMMAD_HELM_INSTANCE_NAME unset; skip zammad-init Job wait.",
+            file=sys.stderr,
+        )
+        return
+    if timeout_sec is None:
+        raw_to = os.environ.get("ZAMMAD_INIT_JOB_WAIT_TIMEOUT_SEC", "").strip()
+        try:
+            timeout_sec = int(raw_to) if raw_to else 3600
+        except ValueError:
+            timeout_sec = 3600
+    try:
+        from kubernetes import client  # type: ignore[import-untyped]
+        from kubernetes import config as k8s_config  # type: ignore[import-untyped]
+
+        k8s_config.load_incluster_config()
+    except Exception as e:
+        print(
+            f"WARNING: cannot load Kubernetes in-cluster config ({e}); "
+            "skip zammad-init Job wait.",
+            file=sys.stderr,
+        )
+        return
+
+    ns_path = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
+    try:
+        with open(ns_path) as f:
+            namespace = f.read().strip()
+    except OSError:
+        print(
+            "WARNING: namespace secret not found; skip zammad-init Job wait.",
+            file=sys.stderr,
+        )
+        return
+
+    batch = client.BatchV1Api()
+    sel = (
+        "app.kubernetes.io/component=zammad-init,"
+        f"app.kubernetes.io/instance={instance}"
+    )
+    deadline = time.time() + timeout_sec
+    print(f"Waiting for zammad-init Job to finish (label selector {sel!r})...")
+    while time.time() < deadline:
+        try:
+            resp = batch.list_namespaced_job(namespace=namespace, label_selector=sel)
+            items = resp.items or []
+            if not items:
+                print("  No zammad-init Job found yet; retrying...")
+                time.sleep(interval)
+                continue
+            j = items[0]
+            name = j.metadata.name
+            st = j.status
+            if st.succeeded:
+                print(f"  zammad-init Job {name!r} completed successfully.")
+                return
+            for cond in st.conditions or []:
+                if cond.type == "Failed" and cond.status == "True":
+                    print(
+                        f"ERROR: zammad-init Job {name!r} failed: {cond.message or cond.reason}. "
+                        "Check logs: kubectl logs -n <ns> -l app.kubernetes.io/component=zammad-init --all-containers",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
+            active = getattr(st, "active", None) or 0
+            print(
+                f"  zammad-init Job {name!r} still running (active={active}); "
+                f"retrying in {interval}s..."
+            )
+        except Exception as e:
+            err = str(e)
+            if "403" in err or "Forbidden" in err:
+                print(
+                    "WARNING: RBAC denied listing Jobs; grant batch/jobs get,list,watch to the "
+                    "bootstrap ServiceAccount.",
+                    file=sys.stderr,
+                )
+                return
+            print(
+                f"  Error listing Jobs ({e}); retrying in {interval}s...",
+                file=sys.stderr,
+            )
+        time.sleep(interval)
+    print(
+        "ERROR: Timeout waiting for zammad-init Job to complete.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
 
 
 def wait_for_zammad(timeout=600, interval=10):
@@ -87,7 +231,11 @@ def acquire_token(timeout=120, interval=10):
             r = requests.post(
                 url,
                 auth=(ADMIN_EMAIL, ADMIN_PASSWORD),
-                json={"name": "zammad-bootstrap", "permission": ["admin"]},
+                json={
+                    "name": "zammad-bootstrap",
+                    # customer_ticket_create_group_ids requires admin.channel_web for PUT (SettingPolicy).
+                    "permission": ["admin", "admin.channel_web"],
+                },
                 timeout=10,
             )
             if r.ok:
@@ -110,17 +258,137 @@ def acquire_token(timeout=120, interval=10):
 # Helpers
 # ---------------------------------------------------------------------------
 
+# Gateway overload / upstream not ready — safe to retry (GET or POST may still need idempotency elsewhere).
+_TRANSIENT_HTTP = frozenset({502, 503, 504, 429})
+
+
+def _float_env(key: str, default: float) -> float:
+    raw = os.environ.get(key, "").strip()
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
+def execute_object_manager_migrations(*, after_create: bool = False) -> None:
+    """Run ObjectManager migrations (single POST). Long timeout; optional cooldown after attribute create."""
+    if after_create:
+        cooldown = _float_env("ZAMMAD_OM_POST_COOLDOWN_SEC", 20.0)
+        if cooldown > 0:
+            print(
+                f"  Waiting {cooldown:.0f}s before execute_migrations "
+                "(Zammad/Rails often reloads after creating field(s))..."
+            )
+            time.sleep(cooldown)
+    mig_timeout = _float_env("ZAMMAD_OM_MIGRATION_TIMEOUT_SEC", 300.0)
+    api(
+        "POST",
+        "object_manager_attributes_execute_migrations",
+        timeout=max(30.0, mig_timeout),
+    )
+    settle = _float_env("ZAMMAD_OM_POST_MIGRATION_SETTLE_SEC", 8.0)
+    if settle > 0:
+        print(
+            f"  Waiting {settle:.0f}s after migrations for Rails/nginx to stabilize "
+            "(avoids follow-up HTTP 502 from upstream reload)..."
+        )
+        time.sleep(settle)
+
 
 def api(method, path, **kwargs):
+    """HTTP JSON helper with retries on transient errors (502/503/504/429) and connection failures."""
     url = f"{API_URL}/{path.lstrip('/')}"
-    resp = SESSION.request(method, url, **kwargs)
-    if not resp.ok:
+    req = dict(kwargs)
+    if "timeout" not in req:
+        req["timeout"] = 60
+
+    raw_attempts = os.environ.get("ZAMMAD_API_RETRY_ATTEMPTS", "10").strip()
+    try:
+        max_attempts = max(1, int(raw_attempts))
+    except ValueError:
+        max_attempts = 10
+
+    raw_interval = os.environ.get("ZAMMAD_API_RETRY_INTERVAL_SEC", "2").strip()
+    try:
+        base_interval = float(raw_interval)
+    except ValueError:
+        base_interval = 2.0
+
+    last_resp = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            resp = SESSION.request(method, url, **req)
+        except requests.exceptions.RequestException as e:
+            if attempt >= max_attempts:
+                print(
+                    f"  ERROR {method} {path}: request failed after {max_attempts} attempts: {e}",
+                    file=sys.stderr,
+                )
+                raise
+            wait = min(90.0, base_interval * attempt)
+            print(
+                f"  WARNING {method} {path}: connection error ({e!s}); "
+                f"retry {attempt}/{max_attempts} in {wait:.0f}s...",
+                file=sys.stderr,
+            )
+            time.sleep(wait)
+            continue
+
+        last_resp = resp
+        if resp.ok:
+            if resp.status_code == 204 or not (resp.content or b"").strip():
+                return {}
+            try:
+                return resp.json()
+            except ValueError as e:
+                if attempt >= max_attempts:
+                    print(
+                        f"  ERROR {method} {path}: invalid JSON in response: {e}",
+                        file=sys.stderr,
+                    )
+                    raise
+                wait = min(90.0, base_interval * attempt)
+                print(
+                    f"  WARNING {method} {path}: JSON decode error; "
+                    f"retry {attempt}/{max_attempts} in {wait:.0f}s...",
+                    file=sys.stderr,
+                )
+                time.sleep(wait)
+                continue
+
+        if resp.status_code in _TRANSIENT_HTTP and attempt < max_attempts:
+            wait = min(90.0, base_interval * attempt)
+            ra = resp.headers.get("Retry-After")
+            if ra:
+                try:
+                    wait = min(90.0, float(ra))
+                except ValueError:
+                    pass
+            snippet = (resp.text or "")[:200].replace("\n", " ")
+            print(
+                f"  WARNING {method} {path}: HTTP {resp.status_code} {snippet!s}… "
+                f"retry {attempt}/{max_attempts} in {wait:.0f}s...",
+                file=sys.stderr,
+            )
+            time.sleep(wait)
+            continue
+
         print(
             f"  ERROR {method} {path}: {resp.status_code} {resp.text[:300]}",
             file=sys.stderr,
         )
         resp.raise_for_status()
-    return resp.json()
+
+    # loop exits only if all attempts exhausted on transient path without raise — defensive
+    if last_resp is not None:
+        print(
+            f"  ERROR {method} {path}: {last_resp.status_code} {last_resp.text[:300]}",
+            file=sys.stderr,
+        )
+        last_resp.raise_for_status()
+    raise RuntimeError(f"{method} {path}: exhausted retries without response")
 
 
 # ---------------------------------------------------------------------------
@@ -136,6 +404,111 @@ def get_or_create_group(name):
     g = api("POST", "groups", json={"name": name, "active": True})
     print(f"  Created group '{name}' (id={g['id']})")
     return g["id"]
+
+
+def lookup_group_id_by_name(name: str) -> int | None:
+    """Return Zammad internal group id for an exact group name, or None."""
+    for g in api("GET", "groups"):
+        if g.get("name") == name:
+            return int(g["id"])
+    return None
+
+
+def lookup_ticket_state_id_by_name(name: str) -> int | None:
+    """Return Zammad ticket_states.id for an exact state name, or None."""
+    for s in api("GET", "ticket_states"):
+        if s.get("name") == name:
+            return int(s["id"])
+    return None
+
+
+def ensure_customer_ticket_create_group_ids(users_group_id: int) -> None:
+    """Set Zammad ``customer_ticket_create_group_ids`` so the customer web UI does not offer internal queues.
+
+    When this setting is empty, Zammad allows customers to create tickets in **all** groups
+    (see ``Group.customer_create_groups_with_parent_ids``). After bootstrap adds
+    ``human_managed_tickets`` / ``escalated_laptop_refresh_tickets``, restrict the picker
+    unless skipped via env.
+    """
+    if _env_truthy("ZAMMAD_SKIP_CUSTOMER_CREATE_GROUP_LIMIT"):
+        print(
+            "  Skipping customer_ticket_create_group_ids "
+            "(ZAMMAD_SKIP_CUSTOMER_CREATE_GROUP_LIMIT — all groups may appear for customer new ticket)."
+        )
+        return
+
+    raw_names = os.environ.get("ZAMMAD_CUSTOMER_TICKET_CREATE_GROUP_NAMES", "").strip()
+    if raw_names:
+        target_ids: list[int] = []
+        for part in raw_names.split(","):
+            n = part.strip()
+            if not n:
+                continue
+            gid = lookup_group_id_by_name(n)
+            if gid is None:
+                print(
+                    f"ERROR: ZAMMAD_CUSTOMER_TICKET_CREATE_GROUP_NAMES: unknown group {n!r}.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            target_ids.append(gid)
+    else:
+        target_ids = [users_group_id]
+
+    settings_list = api("GET", "settings")
+    sid = None
+    for s in settings_list:
+        if s.get("name") == "customer_ticket_create_group_ids":
+            sid = s["id"]
+            break
+    if sid is None:
+        print(
+            "  WARNING: Setting customer_ticket_create_group_ids not found; skip.",
+            file=sys.stderr,
+        )
+        return
+
+    # Zammad persists settings in state_current.value (see Setting#state_check). Some API paths
+    # ignore bare `state` on PUT; send state_current explicitly.
+    body = {"state_current": {"value": target_ids}}
+    try:
+        api("PUT", f"settings/{sid}", json=body)
+    except requests.HTTPError:
+        try:
+            api("PUT", f"settings/{sid}", json={"state": target_ids})
+        except requests.HTTPError:
+            print(
+                "  WARNING: PUT settings/customer_ticket_create_group_ids failed "
+                "(permissions or payload). Customers may still see all groups.",
+                file=sys.stderr,
+            )
+            return
+
+    # Confirm persistence (helps debug UI still listing every group).
+    full = api("GET", f"settings/{sid}")
+    got = None
+    sc = full.get("state_current")
+    if isinstance(sc, dict):
+        got = sc.get("value")
+
+    def _norm_ids(v: object) -> set[str]:
+        if v is None:
+            return set()
+        if isinstance(v, (list, tuple)):
+            return {str(x) for x in v}
+        return {str(v)}
+
+    if _norm_ids(got) != _norm_ids(target_ids):
+        print(
+            f"  WARNING: customer_ticket_create_group_ids after PUT is {got!r}, "
+            f"expected {target_ids!r} — check Zammad version / API.",
+            file=sys.stderr,
+        )
+
+    print(
+        f"  Customer web: new-ticket group picker limited to id(s) {target_ids} "
+        "(customer_ticket_create_group_ids)."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -161,91 +534,93 @@ def build_current_laptop_json(emp: dict) -> str:
     )
 
 
-def ensure_manager_email_attribute():
-    for a in api("GET", "object_manager_attributes"):
-        if a.get("object") == "User" and a.get("name") == "manager_email":
-            print("  Custom attribute 'manager_email' already exists.")
-            return
+def ensure_custom_user_attributes():
+    """Create ``manager_email`` / ``current_laptop`` User fields if missing; run migrations **once** (fewer Rails reloads than two separate cycles)."""
+    attrs = api("GET", "object_manager_attributes")
+    by_name = {a.get("name"): a for a in attrs if a.get("object") == "User"}
 
-    print("  Creating custom attribute 'manager_email' on User...")
-    api(
-        "POST",
-        "object_manager_attributes",
-        json={
-            "object": "User",
-            "name": "manager_email",
-            "display": "Manager Email",
-            "data_type": "input",
-            "data_option": {
-                "type": "email",
-                "maxlength": 255,
-                "null": True,
-                "note": "",
-            },
-            "active": True,
-            "screens": {
-                "edit": {
-                    "Admin": {"shown": True, "required": False},
-                    "Agent": {"shown": True, "required": False},
+    created_any = False
+    pending_existing = False
+
+    me = by_name.get("manager_email")
+    if me:
+        print("  Custom attribute 'manager_email' already exists.")
+        if me.get("to_migrate") or me.get("to_create"):
+            pending_existing = True
+    else:
+        print("  Creating custom attribute 'manager_email' on User...")
+        api(
+            "POST",
+            "object_manager_attributes",
+            json={
+                "object": "User",
+                "name": "manager_email",
+                "display": "Manager Email",
+                "data_type": "input",
+                "data_option": {
+                    "type": "email",
+                    "maxlength": 255,
+                    "null": True,
+                    "note": "",
                 },
-                "view": {
-                    "Admin": {"shown": True, "required": False},
-                    "Agent": {"shown": True, "required": False},
-                },
-            },
-        },
-    )
-    print("  Executing attribute migrations...")
-    api("POST", "object_manager_attributes_execute_migrations")
-    print("  Attribute migration complete.")
-
-
-def ensure_current_laptop_attribute():
-    for a in api("GET", "object_manager_attributes"):
-        if a.get("object") == "User" and a.get("name") == "current_laptop":
-            print("  Custom attribute 'current_laptop' already exists.")
-            return
-
-    print("  Creating custom attribute 'current_laptop' on User...")
-    api(
-        "POST",
-        "object_manager_attributes",
-        json={
-            "object": "User",
-            "name": "current_laptop",
-            "display": "Current Laptop",
-            "data_type": "textarea",
-            "data_option": {
-                "maxlength": 5000,
-                "null": True,
-                "note": "",
-            },
-            "active": True,
-            "screens": {
-                "edit": {
-                    "Admin": {"shown": True, "required": False},
-                    "Agent": {"shown": True, "required": False},
-                },
-                "view": {
-                    "Admin": {"shown": True, "required": False},
-                    "Agent": {"shown": True, "required": False},
+                "active": True,
+                "screens": {
+                    "edit": {
+                        "Admin": {"shown": True, "required": False},
+                        "Agent": {"shown": True, "required": False},
+                    },
+                    "view": {
+                        "Admin": {"shown": True, "required": False},
+                        "Agent": {"shown": True, "required": False},
+                    },
                 },
             },
-        },
-    )
-    print("  Executing attribute migrations...")
-    api("POST", "object_manager_attributes_execute_migrations")
-    print("  Attribute migration complete.")
+        )
+        created_any = True
 
+    cl = by_name.get("current_laptop")
+    if cl:
+        print("  Custom attribute 'current_laptop' already exists.")
+        if cl.get("to_migrate") or cl.get("to_create"):
+            pending_existing = True
+    else:
+        print("  Creating custom attribute 'current_laptop' on User...")
+        api(
+            "POST",
+            "object_manager_attributes",
+            json={
+                "object": "User",
+                "name": "current_laptop",
+                "display": "Current Laptop",
+                "data_type": "textarea",
+                "data_option": {
+                    "maxlength": 5000,
+                    "null": True,
+                    "note": "",
+                },
+                "active": True,
+                "screens": {
+                    "edit": {
+                        "Admin": {"shown": True, "required": False},
+                        "Agent": {"shown": True, "required": False},
+                    },
+                    "view": {
+                        "Admin": {"shown": True, "required": False},
+                        "Agent": {"shown": True, "required": False},
+                    },
+                },
+            },
+        )
+        created_any = True
 
-# ---------------------------------------------------------------------------
-# Roles
-# ---------------------------------------------------------------------------
-
-
-def get_role_ids():
-    roles = api("GET", "roles")
-    return {r["name"]: r["id"] for r in roles}
+    if created_any:
+        print("  Executing attribute migrations...")
+        execute_object_manager_migrations(after_create=True)
+        print("  Attribute migration complete.")
+    elif pending_existing:
+        print("  Object manager migration still pending; executing...")
+        execute_object_manager_migrations()
+        print("  Attribute migration complete.")
 
 
 # ---------------------------------------------------------------------------
@@ -301,6 +676,9 @@ def get_or_create_user(
     else:
         user = api("POST", "users", json=payload)
         print(f"  Created user '{email}' (id={user['id']})")
+        settle = _float_env("ZAMMAD_POST_USER_CREATE_SETTLE_SEC", 3.0)
+        if settle > 0:
+            time.sleep(settle)
 
 
 # ---------------------------------------------------------------------------
@@ -311,9 +689,12 @@ _KUBE_NS = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
 
 
 def create_mcp_token_and_update_k8s():
-    """Create Zammad MCP agent API token, update k8s secret (read+replace), restart deployments."""
+    """Create Zammad MCP agent API token, update k8s secret (read+replace), restart MCP + dispatcher (+ RM if set) — never zammad-railsserver."""
     credentials_secret = os.environ["ZAMMAD_CREDENTIALS_SECRET"]
     mcp_deployment = os.environ.get("ZAMMAD_MCP_DEPLOYMENT", "")
+    integration_dispatcher_deployment = os.environ.get(
+        "ZAMMAD_INTEGRATION_DISPATCHER_DEPLOYMENT", ""
+    )
     request_manager_deployment = os.environ.get("ZAMMAD_REQUEST_MANAGER_DEPLOYMENT", "")
     zammad_url = os.environ["ZAMMAD_BASE_URL"]
 
@@ -378,7 +759,10 @@ def create_mcp_token_and_update_k8s():
             }
         }
     }
-    for dep in filter(None, [mcp_deployment, request_manager_deployment]):
+    for dep in filter(
+        None,
+        [mcp_deployment, integration_dispatcher_deployment, request_manager_deployment],
+    ):
         print(f"  Restarting deployment {dep}...")
         try:
             apps_v1.patch_namespaced_deployment(
@@ -396,31 +780,309 @@ def create_mcp_token_and_update_k8s():
 
 
 # ---------------------------------------------------------------------------
+# Integration webhook + trigger (Zammad → POST /zammad/webhook)
+# ---------------------------------------------------------------------------
+
+
+def _ssl_verify_for_endpoint(endpoint: str) -> bool:
+    return endpoint.strip().lower().startswith("https://")
+
+
+def _parse_zammad_index_list(data: object) -> list | None:
+    """Normalize GET index JSON: bare array, ``records``, model-specific keys, or ``assets`` bundles."""
+    if isinstance(data, list):
+        return data
+    if not isinstance(data, dict):
+        return None
+    block = data.get("records")
+    if isinstance(block, list):
+        return block
+    assets = data.get("assets")
+    if isinstance(assets, dict):
+        for ak in ("TicketArticleSender", "TicketArticle::Sender"):
+            bundle = assets.get(ak)
+            if isinstance(bundle, dict):
+                return list(bundle.values())
+    return None
+
+
+def _resolve_customer_sender_id() -> tuple[int, str]:
+    """Return (sender_id, provenance) for trigger condition ``article.sender_id``."""
+    raw = os.environ.get("ZAMMAD_CUSTOMER_SENDER_ID", "").strip()
+    if raw.isdigit():
+        return int(raw), "env ZAMMAD_CUSTOMER_SENDER_ID"
+    return (
+        DEFAULT_CUSTOMER_ARTICLE_SENDER_ID,
+        f"default id={DEFAULT_CUSTOMER_ARTICLE_SENDER_ID} (stock Customer sender seed)",
+    )
+
+
+def _get_record_list(path: str):
+    """GET /api/v1/{path}; return list of records."""
+    data = api("GET", path)
+    parsed = _parse_zammad_index_list(data)
+    return parsed if parsed is not None else []
+
+
+def _find_by_name(records, name: str):
+    for r in records:
+        if r.get("name") == name:
+            return r
+    return None
+
+
+def _split_csv_env(key: str) -> list[str]:
+    raw = os.environ.get(key, "").strip()
+    if not raw:
+        return []
+    return [x.strip() for x in raw.split(",") if x.strip()]
+
+
+def _zammad_ticket_tags_value(tags: list[str]) -> str:
+    """Format tag names for Zammad ``ticket.*tags`` conditions.
+
+    ``Selector::Sql`` always does ``value.split(',').map(&:strip)`` for ticket.tags;
+    sending a JSON array causes Ruby to call ``.split`` on an Array and validation fails (422).
+    Tag names must not contain commas (Zammad token limitation).
+    """
+    return ",".join(tags)
+
+
+def _env_truthy(key: str) -> bool:
+    return os.environ.get(key, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _integration_trigger_condition(sender_id: int) -> tuple[dict, list[str]]:
+    """Build trigger ``condition`` (article create + sender + customer + state + optional filters).
+
+    Returns (condition, log_notes).
+    """
+    condition = {
+        "article.action": {"operator": "is", "value": "create"},
+        "article.sender_id": {"operator": "is", "value": sender_id},
+        # UI equivalent: Customer is current user
+        "ticket.customer_id": {
+            "operator": "is",
+            "pre_condition": "current_user.id",
+            "value": "",
+            "value_completion": "",
+        },
+    }
+    notes: list[str] = []
+
+    skip_group = _env_truthy("ZAMMAD_TRIGGER_SKIP_GROUP_FILTER")
+    raw_groups = os.environ.get("ZAMMAD_TRIGGER_GROUP_IDS", "").strip()
+    raw_names = os.environ.get("ZAMMAD_TRIGGER_GROUP_NAMES", "").strip()
+
+    if skip_group:
+        notes.append("group filter off (ZAMMAD_TRIGGER_SKIP_GROUP_FILTER)")
+        if raw_groups or raw_names:
+            notes.append(
+                "(ZAMMAD_TRIGGER_SKIP_GROUP_FILTER ignores GROUP_IDS / GROUP_NAMES)"
+            )
+    elif raw_groups:
+        ids: list[int] = []
+        for part in raw_groups.split(","):
+            part = part.strip()
+            if part.isdigit():
+                ids.append(int(part))
+        if ids:
+            if len(ids) == 1:
+                condition["ticket.group_id"] = {"operator": "is", "value": ids[0]}
+            else:
+                condition["ticket.group_id"] = {"operator": "is any of", "value": ids}
+            notes.append(
+                f"ticket.group_id from ZAMMAD_TRIGGER_GROUP_IDS ({len(ids)} id(s))"
+            )
+    elif raw_names:
+        names = [x.strip() for x in raw_names.split(",") if x.strip()]
+        ids_from_names: list[int] = []
+        for n in names:
+            gid = lookup_group_id_by_name(n)
+            if gid is None:
+                print(
+                    f"ERROR: ZAMMAD_TRIGGER_GROUP_NAMES: no Zammad group named {n!r}. "
+                    "Create the group or fix the spelling.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            ids_from_names.append(gid)
+        if len(ids_from_names) == 1:
+            condition["ticket.group_id"] = {
+                "operator": "is",
+                "value": ids_from_names[0],
+            }
+        else:
+            condition["ticket.group_id"] = {
+                "operator": "is any of",
+                "value": ids_from_names,
+            }
+        notes.append(
+            f"ticket.group_id from ZAMMAD_TRIGGER_GROUP_NAMES {names} -> ids {ids_from_names}"
+        )
+
+    tags_any = _split_csv_env("ZAMMAD_TRIGGER_TAGS_ANY")
+    tags_all = _split_csv_env("ZAMMAD_TRIGGER_TAGS_ALL")
+    tags_exclude = _split_csv_env("ZAMMAD_TRIGGER_TAGS_EXCLUDE")
+    tag_modes = sum(bool(x) for x in (tags_any, tags_all, tags_exclude))
+    if tag_modes > 1:
+        print(
+            "ERROR: Use only one of ZAMMAD_TRIGGER_TAGS_ANY, ZAMMAD_TRIGGER_TAGS_ALL, "
+            "or ZAMMAD_TRIGGER_TAGS_EXCLUDE (single ticket.tags condition in bootstrap).",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if tags_exclude:
+        # Operator must be a Tags operator (not plain "contains not"). Value must be a comma-separated
+        # string — Zammad runs .split(',') on ticket.tags values; arrays break validation (422).
+        condition["ticket.tags"] = {
+            "operator": "contains all not",
+            "value": _zammad_ticket_tags_value(tags_exclude),
+        }
+        notes.append(
+            f"ticket.tags exclude {tags_exclude} (contains all not — comma-separated value for Zammad API)"
+        )
+    elif tags_any:
+        condition["ticket.tags"] = {
+            "operator": "contains one",
+            "value": _zammad_ticket_tags_value(tags_any),
+        }
+    elif tags_all:
+        condition["ticket.tags"] = {
+            "operator": "contains all",
+            "value": _zammad_ticket_tags_value(tags_all),
+        }
+
+    state_names = ("new", "open")
+    state_ids: list[int] = []
+    for sn in state_names:
+        sid = lookup_ticket_state_id_by_name(sn)
+        if sid is None:
+            print(
+                f"ERROR: integration trigger requires ticket states {list(state_names)!r}; "
+                f"no Zammad ticket_state named {sn!r} (GET /api/v1/ticket_states).",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        state_ids.append(sid)
+    condition["ticket.state_id"] = {
+        "operator": "is any of",
+        "value": state_ids,
+    }
+    notes.append("ticket.customer_id is current user")
+    notes.append(f"ticket.state_id is any of {list(state_names)} -> ids {state_ids}")
+
+    return condition, notes
+
+
+def ensure_integration_webhook_and_trigger():
+    """Create or update Zammad Webhook + Trigger for integration-dispatcher POST /zammad/webhook."""
+    endpoint = os.environ.get("ZAMMAD_INTEGRATION_WEBHOOK_URL", "").strip()
+    if not endpoint:
+        print(
+            "\n[6/6] Skipping Zammad→blueprint webhook bootstrap "
+            "(unset ZAMMAD_INTEGRATION_WEBHOOK_URL — configure manually per docs §5.2)."
+        )
+        return
+
+    secret = os.environ.get("ZAMMAD_WEBHOOK_SECRET", "").strip()
+    sender_id, sender_src = _resolve_customer_sender_id()
+
+    print(
+        "\n[6/6] Ensuring Zammad Webhook + Trigger (customer articles → integration-dispatcher)..."
+    )
+    print(f"  Trigger article.sender_id={sender_id} ({sender_src}).")
+    webhooks = _get_record_list("webhooks")
+    hook = _find_by_name(webhooks, WEBHOOK_RECORD_NAME)
+
+    webhook_body = {
+        "name": WEBHOOK_RECORD_NAME,
+        "endpoint": endpoint,
+        "http_method": "post",
+        "ssl_verify": _ssl_verify_for_endpoint(endpoint),
+        "active": True,
+    }
+    if secret:
+        webhook_body["signature_token"] = secret
+
+    if hook:
+        webhook_id = hook["id"]
+        print(f"  Updating webhook '{WEBHOOK_RECORD_NAME}' (id={webhook_id})...")
+        api("PUT", f"webhooks/{webhook_id}", json=webhook_body)
+    else:
+        print(f"  Creating webhook '{WEBHOOK_RECORD_NAME}'...")
+        created = api("POST", "webhooks", json=webhook_body)
+        webhook_id = created["id"]
+
+    triggers = _get_record_list("triggers")
+    trig = _find_by_name(triggers, TRIGGER_RECORD_NAME)
+
+    trigger_condition, cond_notes = _integration_trigger_condition(sender_id)
+    for line in cond_notes:
+        print(f"  {line}")
+    extra = []
+    if "ticket.group_id" in trigger_condition:
+        extra.append("ticket.group_id")
+    if "ticket.tags" in trigger_condition:
+        extra.append("ticket.tags")
+    if "ticket.customer_id" in trigger_condition:
+        extra.append("ticket.customer_id")
+    if "ticket.state_id" in trigger_condition:
+        extra.append("ticket.state_id")
+    if extra:
+        print(
+            f"  Trigger conditions include: article create + customer sender + {', '.join(extra)}"
+        )
+
+    trigger_body = {
+        "name": TRIGGER_RECORD_NAME,
+        "activator": "action",
+        "execution_condition_mode": "selective",
+        "condition": trigger_condition,
+        "perform": {"notification.webhook": {"webhook_id": webhook_id}},
+        "active": True,
+    }
+
+    if trig:
+        tid = trig["id"]
+        print(f"  Updating trigger '{TRIGGER_RECORD_NAME}' (id={tid})...")
+        api("PUT", f"triggers/{tid}", json=trigger_body)
+    else:
+        print(f"  Creating trigger '{TRIGGER_RECORD_NAME}'...")
+        api("POST", "triggers", json=trigger_body)
+
+    print("  Done — Zammad will POST customer articles to the configured URL.")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 
 def main():
+    wait_for_zammad_init_job()
     wait_for_zammad()
     trigger_autowizard()
     acquire_token()
 
-    print("\n[1/5] Ensuring custom attributes exist...")
-    ensure_manager_email_attribute()
-    ensure_current_laptop_attribute()
+    print("\n[1/6] Ensuring custom attributes exist...")
+    ensure_custom_user_attributes()
 
-    print("\n[2/5] Creating groups...")
+    print("\n[2/6] Creating groups...")
     users_group_id = get_or_create_group("Users")
     group_id = get_or_create_group("human_managed_tickets")
     escalated_group_id = get_or_create_group("escalated_laptop_refresh_tickets")
+    ensure_customer_ticket_create_group_ids(users_group_id)
 
-    print("\n[3/5] Looking up role IDs...")
-    role_map = get_role_ids()
-    agent_role_ids = [role_map["Agent"]]
-    customer_role_ids = [role_map["Customer"]]
-    print(f"  Agent role id={agent_role_ids}, Customer role id={customer_role_ids}")
+    print("\n[3/6] Role IDs (stock Zammad seeds)...")
+    agent_role_ids = [DEFAULT_AGENT_ROLE_ID]
+    customer_role_ids = [DEFAULT_CUSTOMER_ROLE_ID]
+    print(
+        f"  Agent role id={agent_role_ids}, Customer role id={customer_role_ids} "
+        f"(db/seeds: Agent={DEFAULT_AGENT_ROLE_ID}, Customer={DEFAULT_CUSTOMER_ROLE_ID})"
+    )
 
-    print("\n[3b/5] Adding admin user to all groups...")
+    print("\n[3b/6] Adding admin user to all groups...")
     admin = find_user_by_email("admin@zammad.local")
     if admin:
         api(
@@ -438,14 +1100,21 @@ def main():
     else:
         print("  WARNING: admin@zammad.local not found, skipping group assignment.")
 
-    print("\n[4/5] Creating ticket handlers, managers and specialists...")
+    print("\n[4/6] Creating ticket handlers, managers and specialists...")
+    # Laptop / general specialists need the same agent queues the ticket may move through;
+    # REST ``From`` impersonates them, so ``TicketPolicy`` requires group access on the ticket.
+    specialist_group_ids = {
+        str(users_group_id): ["full"],
+        str(group_id): ["full"],
+        str(escalated_group_id): ["full"],
+    }
     get_or_create_user(
         "agent.laptop-specialist",
         "Laptop",
         "Specialist",
         "agent.laptop-specialist@example.com",
         role_ids=agent_role_ids,
-        group_ids={str(users_group_id): ["full"]},
+        group_ids=specialist_group_ids,
     )
     get_or_create_user(
         "agent.general",
@@ -453,7 +1122,7 @@ def main():
         "Agent",
         "agent.general@example.com",
         role_ids=agent_role_ids,
-        group_ids={str(users_group_id): ["full"]},
+        group_ids=specialist_group_ids,
     )
     get_or_create_user(
         "ticket_handler1",
@@ -487,13 +1156,18 @@ def main():
         role_ids=agent_role_ids,
         group_ids={str(escalated_group_id): ["full"]},
     )
+    # Managers must belong to human_managed_tickets too — otherwise Zammad clears owner when
+    # send_to_manager_review moves the ticket there (owner must have rights on ticket group).
     get_or_create_user(
         "manager1",
         "Manager",
         "One",
         MANAGER1_EMAIL,
         role_ids=agent_role_ids + customer_role_ids,
-        group_ids={str(users_group_id): ["full"]},
+        group_ids={
+            str(users_group_id): ["full"],
+            str(group_id): ["full"],
+        },
     )
     get_or_create_user(
         "manager2",
@@ -501,11 +1175,14 @@ def main():
         "Two",
         MANAGER2_EMAIL,
         role_ids=agent_role_ids + customer_role_ids,
-        group_ids={str(users_group_id): ["full"]},
+        group_ids={
+            str(users_group_id): ["full"],
+            str(group_id): ["full"],
+        },
     )
 
-    print("\n[5/5] Creating employees from mock-employee-data...")
-    employees = list(MOCK_EMPLOYEE_DATA.values())
+    print("\n[5/6] Creating employees from mock-employee-data...")
+    employees = list(get_employee_data().values())
     for i, emp in enumerate(employees):
         manager_email = MANAGER1_EMAIL if i < 5 else MANAGER2_EMAIL
         name_parts = emp["name"].split(maxsplit=1)
@@ -518,6 +1195,8 @@ def main():
             manager_email=manager_email,
             current_laptop=build_current_laptop_json(emp),
         )
+
+    ensure_integration_webhook_and_trigger()
 
     print("\nZammad bootstrap complete.")
 

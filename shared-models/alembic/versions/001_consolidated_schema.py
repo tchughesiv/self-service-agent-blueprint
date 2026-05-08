@@ -1,7 +1,6 @@
 """Consolidated database schema for self-service agent system.
 
 Single migration creating the full schema. Use when starting fresh (pre-production).
-Replaces migrations 001-004.
 
 Note: request_id, cloudevent_id, and last_request_id use VARCHAR(255) to accommodate
 email Message-IDs (e.g. <CAPbJ+...@mail.gmail.com>) which exceed UUID length (36).
