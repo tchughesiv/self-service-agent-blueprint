@@ -204,8 +204,9 @@ def test_escalate_for_human_review(
     upd = mock_basher.call_args_list[1][0][1]
     assert "state" not in upd
     assert upd["group"] == "escalated_laptop_refresh_tickets"
-    assert "owner" not in upd
+    assert upd["owner"] == "-"
     assert "100" in result
+    assert "owner cleared" in result.lower()
 
 
 @patch("zammad_mcp.server.call_basher_tool")
@@ -313,8 +314,13 @@ def test_route_to_human_managed_queue(
         "tag": "escalated-human-review",
     }
     upd = mock_basher.call_args_list[1][0][1]
-    assert upd == {"ticket_id": 100, "group": "human_managed_tickets"}
+    assert upd == {
+        "ticket_id": 100,
+        "group": "human_managed_tickets",
+        "owner": "-",
+    }
     assert "100" in result
+    assert "owner cleared" in result.lower()
 
 
 @patch("zammad_mcp.server.fetch_zammad_customer_user_rest")

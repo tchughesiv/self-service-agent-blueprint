@@ -33,7 +33,13 @@ def _ticket_article_fallback_on_forbidden() -> bool:
 
 
 class ZammadIntegrationHandler(BaseIntegrationHandler):
-    """Posts pipeline reply body to Zammad, optionally on behalf of assigned owner."""
+    """Posts pipeline reply body to Zammad, optionally on behalf of assigned owner.
+
+    ``From`` identity prefers the assignee snapshot from the inbound webhook
+    (``integration_context`` / normalized request). If the ticket was unassigned
+    at intake, the current ticket owner is fetched live so replies match whoever
+    claimed the ticket before the agent answered.
+    """
 
     @staticmethod
     def _is_valid_on_behalf_identity(value: str) -> bool:
@@ -106,7 +112,7 @@ class ZammadIntegrationHandler(BaseIntegrationHandler):
             )
         return ""
 
-    async def _resolve_on_behalf_of_email(
+    async def _integration_context_owner_email(
         self,
         *,
         client: Any,
@@ -114,12 +120,7 @@ class ZammadIntegrationHandler(BaseIntegrationHandler):
         integration_context: Dict[str, Any],
         ticket_id: int,
     ) -> str:
-        live = await self._live_ticket_owner_email(
-            client=client, token=token, ticket_id=ticket_id
-        )
-        if live:
-            return live
-
+        """Assignee from the normalized request (webhook snapshot), not live ticket state."""
         owner_email = str(integration_context.get("owner_email") or "").strip().lower()
         if self._is_valid_on_behalf_identity(owner_email):
             return owner_email
@@ -147,11 +148,37 @@ class ZammadIntegrationHandler(BaseIntegrationHandler):
                     return candidate.lower()
         except Exception as e:
             logger.warning(
-                "Zammad owner lookup failed; falling back to token identity",
+                "Zammad owner lookup from integration_context failed; "
+                "will try live ticket owner",
                 ticket_id=ticket_id,
                 owner_id=owner_id,
                 error=str(e),
             )
+        return ""
+
+    async def _resolve_on_behalf_of_email(
+        self,
+        *,
+        client: Any,
+        token: str,
+        integration_context: Dict[str, Any],
+        ticket_id: int,
+    ) -> str:
+        snapshot = await self._integration_context_owner_email(
+            client=client,
+            token=token,
+            integration_context=integration_context,
+            ticket_id=ticket_id,
+        )
+        if snapshot:
+            return snapshot
+
+        live = await self._live_ticket_owner_email(
+            client=client, token=token, ticket_id=ticket_id
+        )
+        if live:
+            return live
+
         return ""
 
     async def deliver(

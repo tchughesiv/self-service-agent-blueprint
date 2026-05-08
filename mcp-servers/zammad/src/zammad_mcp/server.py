@@ -26,6 +26,8 @@ auto_tracing_run(SERVICE_NAME, logger)
 
 # Specialist assign flows always transition to Zammad's default "open" state first (separate from owner).
 STATE_AFTER_SPECIALIST_TAG = "open"
+# Basher ``owner`` value that clears assignee on pooled-queue routing (Zammad UI placeholder).
+POOL_QUEUE_UNASSIGNED_OWNER = "-"
 
 
 def _calculate_laptop_age(purchase_date_str: str) -> str:
@@ -50,6 +52,19 @@ def _calculate_laptop_age(purchase_date_str: str) -> str:
             return f"{years} year{'s' if years != 1 else ''} and {months} month{'s' if months != 1 else ''}"
     except (ValueError, TypeError):
         return "Unable to calculate age (invalid date format)"
+
+
+def _basher_pool_queue_ticket_update(
+    ticket_id: int, *, group_name_stripped: str
+) -> None:
+    """Single Basher ``zammad_update_ticket`` with optional ``group`` and assignee cleared."""
+    payload: dict[str, Any] = {
+        "ticket_id": ticket_id,
+        "owner": POOL_QUEUE_UNASSIGNED_OWNER,
+    }
+    if group_name_stripped:
+        payload["group"] = group_name_stripped
+    call_basher_tool("zammad_update_ticket", payload)
 
 
 def _tool_error_text(exc: BaseException) -> str:
@@ -216,14 +231,10 @@ def escalate_for_human_review(ctx: Context[Any, Any], dummy_parameter: str = "")
 
     gname = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS.group_escalated_laptop
     gstrip = gname.strip()
-    if gstrip:
-        call_basher_tool(
-            "zammad_update_ticket",
-            {"ticket_id": ticket_id, "group": gstrip},
-        )
+    _basher_pool_queue_ticket_update(ticket_id, group_name_stripped=gstrip)
 
     gmsg = f", group {gname!r}" if gstrip else ""
-    return f"Ticket {ticket_id} tagged {tag!r}{gmsg}."
+    return f"Ticket {ticket_id} tagged {tag!r}{gmsg}, owner cleared."
 
 
 @mcp.tool()
@@ -266,14 +277,10 @@ def route_to_human_managed_queue(
 
     gname = zammad_mcp_settings.ZAMMAD_MCP_SETTINGS.group_human_managed
     gstrip = gname.strip()
-    if gstrip:
-        call_basher_tool(
-            "zammad_update_ticket",
-            {"ticket_id": ticket_id, "group": gstrip},
-        )
+    _basher_pool_queue_ticket_update(ticket_id, group_name_stripped=gstrip)
 
     gmsg = f", group {gname!r}" if gstrip else ""
-    return f"Ticket {ticket_id} tagged {tag!r}{gmsg}."
+    return f"Ticket {ticket_id} tagged {tag!r}{gmsg}, owner cleared."
 
 
 @mcp.tool()

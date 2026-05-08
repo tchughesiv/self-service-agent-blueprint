@@ -1101,13 +1101,20 @@ def main():
         print("  WARNING: admin@zammad.local not found, skipping group assignment.")
 
     print("\n[4/6] Creating ticket handlers, managers and specialists...")
+    # Laptop / general specialists need the same agent queues the ticket may move through;
+    # REST ``From`` impersonates them, so ``TicketPolicy`` requires group access on the ticket.
+    specialist_group_ids = {
+        str(users_group_id): ["full"],
+        str(group_id): ["full"],
+        str(escalated_group_id): ["full"],
+    }
     get_or_create_user(
         "agent.laptop-specialist",
         "Laptop",
         "Specialist",
         "agent.laptop-specialist@example.com",
         role_ids=agent_role_ids,
-        group_ids={str(users_group_id): ["full"]},
+        group_ids=specialist_group_ids,
     )
     get_or_create_user(
         "agent.general",
@@ -1115,7 +1122,7 @@ def main():
         "Agent",
         "agent.general@example.com",
         role_ids=agent_role_ids,
-        group_ids={str(users_group_id): ["full"]},
+        group_ids=specialist_group_ids,
     )
     get_or_create_user(
         "ticket_handler1",

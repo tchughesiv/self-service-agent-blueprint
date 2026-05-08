@@ -146,14 +146,9 @@ async def test_posts_on_behalf_of_owner_email_from_integration_context(
     mock_resp.json.return_value = {"id": 1001}
     mock_resp.raise_for_status = MagicMock()
 
-    ticket_resp = MagicMock()
-    ticket_resp.status_code = 200
-    ticket_resp.raise_for_status = MagicMock()
-    ticket_resp.json.return_value = {"id": 81, "owner_id": 1, "owner": None}
-
     mock_http = MagicMock()
     mock_http.post = AsyncMock(return_value=mock_resp)
-    mock_http.get = AsyncMock(return_value=ticket_resp)
+    mock_http.get = AsyncMock()
 
     with patch.dict(
         os.environ,
@@ -172,8 +167,7 @@ async def test_posts_on_behalf_of_owner_email_from_integration_context(
 
     assert result.success is True
     assert result.metadata.get("on_behalf_of") == "specialist@example.com"
-    mock_http.get.assert_awaited_once()
-    assert mock_http.get.await_args[0][0] == "/tickets/81"
+    mock_http.get.assert_not_awaited()
     headers = mock_http.post.await_args[1]["headers"]
     assert headers["From"] == "specialist@example.com"
 
@@ -201,20 +195,16 @@ async def test_posts_on_behalf_of_owner_resolved_from_owner_id(
     mock_post_resp.json.return_value = {"id": 1002}
     mock_post_resp.raise_for_status = MagicMock()
 
-    ticket_resp = MagicMock()
-    ticket_resp.status_code = 200
-    ticket_resp.raise_for_status = MagicMock()
-    ticket_resp.json.return_value = {
-        "id": 81,
-        "owner_id": 23,
-        "owner": {
-            "id": 23,
-            "email": "assigned.specialist@example.com",
-        },
+    user_resp = MagicMock()
+    user_resp.status_code = 200
+    user_resp.raise_for_status = MagicMock()
+    user_resp.json.return_value = {
+        "id": 23,
+        "email": "assigned.specialist@example.com",
     }
 
     mock_http = MagicMock()
-    mock_http.get = AsyncMock(return_value=ticket_resp)
+    mock_http.get = AsyncMock(return_value=user_resp)
     mock_http.post = AsyncMock(return_value=mock_post_resp)
 
     with patch.dict(
@@ -236,9 +226,58 @@ async def test_posts_on_behalf_of_owner_resolved_from_owner_id(
     assert result.metadata.get("on_behalf_of") == "assigned.specialist@example.com"
     mock_http.get.assert_awaited_once()
     get_path = mock_http.get.await_args[0][0]
-    assert get_path == "/tickets/81"
+    assert get_path == "/users/23"
     headers = mock_http.post.await_args[1]["headers"]
     assert headers["From"] == "assigned.specialist@example.com"
+
+
+@pytest.mark.asyncio
+async def test_snapshot_owner_email_wins_over_live_ticket_owner(
+    handler: ZammadIntegrationHandler,
+    mock_config: UserIntegrationConfig,
+) -> None:
+    """Intake assignee in integration_context is used even if ticket was reassigned in Zammad."""
+    req = DeliveryRequest(
+        request_id="r1",
+        session_id="zammad-81",
+        user_id="user@test.com-81",
+        content="Visible reply",
+        agent_id="ticket-laptop-refresh",
+        integration_context={
+            "platform": "zammad",
+            "ticket_id": 81,
+            "owner_email": "original@example.com",
+        },
+    )
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 201
+    mock_resp.json.return_value = {"id": 2001}
+    mock_resp.raise_for_status = MagicMock()
+
+    mock_http = MagicMock()
+    mock_http.post = AsyncMock(return_value=mock_resp)
+    mock_http.get = AsyncMock()
+
+    with patch.dict(
+        os.environ,
+        {
+            "ZAMMAD_URL": "http://zammad.example.com",
+            "ZAMMAD_HTTP_TOKEN": "secret-token",
+        },
+        clear=False,
+    ):
+        with patch(
+            "integration_dispatcher.integrations.zammad.get_zammad_rest_service_client",
+            new_callable=AsyncMock,
+        ) as mock_get_client:
+            mock_get_client.return_value = mock_http
+            result = await handler.deliver(req, mock_config, {"body": "Visible reply"})
+
+    assert result.success is True
+    assert result.metadata.get("on_behalf_of") == "original@example.com"
+    mock_http.get.assert_not_awaited()
+    assert mock_http.post.await_args[1]["headers"]["From"] == "original@example.com"
 
 
 @pytest.mark.asyncio
@@ -268,13 +307,8 @@ async def test_retries_without_on_behalf_when_forbidden(
     ok_resp.raise_for_status = MagicMock()
     ok_resp.json.return_value = {"id": 1003}
 
-    ticket_resp = MagicMock()
-    ticket_resp.status_code = 200
-    ticket_resp.raise_for_status = MagicMock()
-    ticket_resp.json.return_value = {"id": 81, "owner_id": 1, "owner": None}
-
     mock_http = MagicMock()
-    mock_http.get = AsyncMock(return_value=ticket_resp)
+    mock_http.get = AsyncMock()
     mock_http.post = AsyncMock(side_effect=[forbidden_resp, ok_resp])
 
     with patch.dict(
@@ -295,6 +329,7 @@ async def test_retries_without_on_behalf_when_forbidden(
     assert result.success is True
     assert result.metadata.get("on_behalf_of") is None
     assert mock_http.post.await_count == 2
+    mock_http.get.assert_not_awaited()
     first_headers = mock_http.post.await_args_list[0].kwargs["headers"]
     second_headers = mock_http.post.await_args_list[1].kwargs["headers"]
     assert first_headers["From"] == "specialist@example.com"

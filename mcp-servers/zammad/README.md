@@ -41,9 +41,9 @@ Ticket **writes** use **`zammad_update_ticket`**. Basher’s Pydantic **`TicketU
 | `ZAMMAD_SPECIALIST_OWNER` | Optional owner email for `mark_as_general_agent_managed` (default `agent.general@example.com`; empty skips **`owner`**). Second update after **`open`**. |
 | `ZAMMAD_STATE_CLOSED` | State name for `close` (default `closed`; must exist in your Zammad). |
 | `ZAMMAD_TAG_ESCALATE_HUMAN` | Tag for `escalate_for_human_review` and `route_to_human_managed_queue` (default `escalated-human-review`). |
-| `ZAMMAD_GROUP_ESCALATED_LAPTOP` | Optional group for `escalate_for_human_review` (default `escalated_laptop_refresh_tickets`; empty skips group change). **`owner` is never set** — pooled queue. |
+| `ZAMMAD_GROUP_ESCALATED_LAPTOP` | Optional group for `escalate_for_human_review` (default `escalated_laptop_refresh_tickets`; empty skips group change). |
 | `ZAMMAD_TAG_MANAGER_REVIEW` | Tag for `send_to_manager_review` (default `pending-manager-review`). |
-| `ZAMMAD_GROUP_HUMAN_MANAGED` | Group for `route_to_human_managed_queue` (default `human_managed_tickets`). **`owner` is never set** — pooled queue. |
+| `ZAMMAD_GROUP_HUMAN_MANAGED` | Group for `route_to_human_managed_queue` (default `human_managed_tickets`). |
 | `ZAMMAD_USER_MANAGER_FIELD` | Customer user field for manager (default `manager_email`). |
 | `ZAMMAD_MANAGER_EMAIL` | Fallback manager when that field is empty (default in Helm matches bootstrap). |
 
@@ -56,9 +56,9 @@ Used by the ticket laptop refresh flow (`allowed_tools` in agent config).
 | `mark_as_agent_managed_laptop_refresh` | Tag; update with **`state`** = `open` and optional **`owner`** from env. |
 | `mark_as_general_agent_managed` | Tag; update with **`state`** = `open` and optional **`owner`** from env. |
 | `close` | Basher `zammad_update_ticket` with **`state`** = `ZAMMAD_STATE_CLOSED` name. |
-| `escalate_for_human_review` | Tag; optional **`group`** only (no **`owner`**). |
+| `escalate_for_human_review` | Tag; **`zammad_update_ticket`** with **`group`** + **`owner`** `-` (clear assignee). |
 | `send_to_manager_review` | Tag; **`owner`** from customer field or `ZAMMAD_MANAGER_EMAIL` (no **`group`** change). |
-| `route_to_human_managed_queue` | Escalation tag + optional **`group`** from `ZAMMAD_GROUP_HUMAN_MANAGED` (no **`owner`**). |
+| `route_to_human_managed_queue` | Escalation tag + **`group`** + **`owner`** `-` (clear assignee). |
 | `get_employee_laptop_info` | Reads `current_laptop` JSON via Zammad REST; returns a fixed multi-line block (see below). |
 
 **`get_employee_laptop_info` output lines:** Employee Name, Employee Location, Laptop Model, Laptop Serial Number, Laptop Purchase Date, Laptop Age (derived), Laptop Warranty Expiry Date, Laptop Warranty (Active/Expired/Unknown).
