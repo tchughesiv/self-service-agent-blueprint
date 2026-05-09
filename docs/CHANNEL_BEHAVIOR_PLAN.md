@@ -117,6 +117,22 @@ Alternative: new table `channel_behavior_configs` with `integration_type` unique
 
 **User overrides:** Defer. `user_integration_configs` is user-specific delivery; channel **behavior** is usually tenant-wide. If needed later, merge tenant defaults → user overrides with explicit precedence rules.
 
+### 5.1 What stays outside `channel_behavior` (scope boundary)
+
+This policy blob is **conversation + delivery-binding semantics** only. Do **not** grow it into a mega-schema for every channel knob.
+
+| Keep here (`channel_behavior`) | Keep elsewhere |
+|-------------------------------|----------------|
+| Session scope, entry/router ids, return-to-router, `delivery_binding` snapshot | **Delivery UX** — existing `integration_default_configs.config` fields (Slack threading, email format, Zammad-oriented defaults). Same DB row: add **`channel_behavior` as a sibling key** to delivery JSON (namespaced); use a **separate table** only if §5 “Alternative” applies. |
+| | **Secrets** — `SLACK_SIGNING_SECRET`, webhook tokens, Helm (`guides/AUTHENTICATION_GUIDE.md`). |
+| | **`NormalizedRequest.integration_context`** — ingress/normalizer contract per channel (document in **`guides/ADDING_A_CHANNEL.md`** when it exists). |
+| | **Agents / MCP** — `config/agents/*.yaml`; routing selects tools, not this table. |
+| | **Identity** — `resolve_canonical_user_id(..., integration_type=…)` behavior differs per channel; note in the adding-a-channel guide, not in policy JSON. |
+
+**Global env today (`SESSION_TIMEOUT_HOURS`, etc.):** unchanged unless you later add explicit overrides inside **`channel_behavior`** for product reasons.
+
+**Possible later extensions** (only if needed): `session_timeout_hours_override`, `max_message_bytes`, `shields_policy`, `canonical_identity_strategy` — follow-ons, not v1.
+
 ---
 
 ## 6. Resolution and snapshotting
@@ -272,7 +288,7 @@ Earlier gap analysis; **most items are folded into §3–§7, §9.1, and §10** 
 | Agent-service authoritative row | §7.2, §10 item 4 |
 | `requires_routing` v1 | TL;DR, §7.2 |
 | Ticket UX deferral | §3.4 |
-| Storage wording | §5 |
+| Scope boundary (delivery vs behavior vs secrets) | §5.1 |
 | SESSION_PER_INTEGRATION rollout choice | §4 |
 | Delivery uses RequestLog, not session row | §7.1 bullet “Response → dispatcher”, §7.3.1, §12 |
 
@@ -291,3 +307,29 @@ Earlier gap analysis; **most items are folded into §3–§7, §9.1, and §10** 
 - **Admin/API:** Add CRUD for `integration_default_configs.channel_behavior` with validation when operators need self-service changes without raw SQL.
 - **Failure modes:** User-visible message when policy validation fails at session create (vs opaque 500).
 - **Cross-service contract:** Publish the JSON schema of `_channel_behavior` (or OpenAPI component) in-repo when Pydantic model stabilizes.
+
+### 14.1 Documentation after implementation (recommended)
+
+**Yes—a focused guide helps.** `CHANNEL_BEHAVIOR_PLAN.md` stays the **architecture / rationale** doc; operators and future you need a **checklist**.
+
+| Piece | Purpose |
+|-------|---------|
+| **`guides/ADDING_A_CHANNEL.md`** (or **`guides/CHANNEL_PLUGIN_CHECKLIST.md`**) | **Procedural** steps for a developer adding a new `IntegrationType`: enum + Alembic if needed, inbound route/webhook, request schema + **normalizer branch** (`integration_context` contract), RM session path + **`channel_behavior` seed**, agent-service assumptions (if any), **`integration_default_configs`** delivery JSON, dispatcher handler / **`delivery_binding`**, **`_forward_response_to_integration_dispatcher` enrichment**, Helm/env secrets, tests to run. |
+| **Short “Concepts” section at top** | Three-way split: **ingress + normalizer** (shape of `NormalizedRequest`), **`channel_behavior`** (conversation + binding), **delivery defaults** (how replies are rendered and sent). Stops people from stuffing Slack emoji settings into session policy. |
+| **Link from `guides/INTEGRATION_GUIDE.md`** | Pointer: full-stack channel work spans integration defaults **and** behavior policy **and** ingress—single entry index. |
+| **Schema appendix** | Link or embed generated JSON Schema / Pydantic export for `_channel_behavior` once stable (ties to §14 cross-service contract). |
+
+**Angle:** Name it for **developers extending the blueprint** (“Adding a channel”), not “plugins” unless you ship a binary SDK—the workflow is **fork/edit services + DB rows + Helm**, not a drop-in `.so`. If you later extract a true plugin API, the same guide becomes the compatibility layer description.
+
+### 14.2 When this plan file goes away
+
+`CHANNEL_BEHAVIOR_PLAN.md` is an **implementation plan** (checklist, historical audit, decisions). After the work lands, **do not rely on it** as the long-term description of the system—move or replace it with **durable** artifacts:
+
+| Artifact | Purpose |
+|----------|---------|
+| **`docs/CHANNEL_BEHAVIOR.md`** (or **`docs/architecture/channel-behavior.md`**) | **Permanent reference:** what `channel_behavior` / `_channel_behavior` contains, resolver order, snapshot rules, delivery binding, RM forwarder merge, links to key modules; include a **scope boundary** section (carry forward §**5.1** from this plan). No checklist noise—**current truth** only. |
+| **`guides/ADDING_A_CHANNEL.md`** | Developer checklist (described in §14.1 above). |
+| **Optional:** move this file to **`docs/archive/CHANNEL_BEHAVIOR_PLAN_<year>.md`** or delete after extracting any still-useful rationale into `CHANNEL_BEHAVIOR.md` “Design notes” section. |
+| **`docs/ARCHITECTURE_DIAGRAMS.md` or `README`** | One-line pointer to channel behavior doc so discovery does not depend on this plan. |
+
+**Rule of thumb:** If someone joins the project in six months, they should open **`CHANNEL_BEHAVIOR.md` + `ADDING_A_CHANNEL.md`**, not a finished implementation plan.
